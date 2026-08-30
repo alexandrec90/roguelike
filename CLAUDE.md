@@ -6,9 +6,11 @@
 
 | Layer | Choice |
 | --- | --- |
-| Language | Python 3.12 |
-| Tests | pytest |
-| Lint | ruff |
+| Game | Phaser 4.2 on a 320×180 WebGL canvas |
+| Language | TypeScript 7; Python 3.12 for repository tooling |
+| Dev server | Vite 8 |
+| Tests | Vitest and pytest |
+| Checks | TypeScript compiler and ruff |
 
 ## Environment Variables
 

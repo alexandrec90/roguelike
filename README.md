@@ -1,33 +1,52 @@
 # Roguelike
 
-2D, pixel art, turn based roguelike rpg
+2D, pixel-art, turn-based roguelike RPG. The current proof of concept is a small
+animated dungeon scene built with Phaser: a bouncy adventurer, an idle slime, and a
+flickering torch with pooled sparks.
 
 Generated from [devkit](https://github.com/alexandrec90/devkit)'s project
 template. The agent harness in `scripts/hooks/` is vendored from there — see
 `CLAUDE.md`, "Vendored agent harness".
 
-## Quick start
+## Scene preview
 
-```bash
-cp .env.example .env          # then fill in the placeholders
-uv sync --all-extras          # creates .venv from the committed uv.lock
-# no uv? pip install -e ".[dev]" works, but resolves fresh instead of from the lock
-pytest
+```powershell
+npm ci
+npm run dev
 ```
 
-In VS Code, `Ctrl+Shift+B` runs the default build task and the task quick-pick
-(`Ctrl+Shift+P` → "Run Task") lists everything else, each with a one-line `detail`
-explaining what it costs and what it touches.
+Open the local URL Vite prints. Development files are served directly with hot module
+replacement; `npm run check` runs the sprite-source tests, TypeScript compiler, and
+production build.
+
+The game renders at 320×180 and scales with nearest-neighbor filtering. Sprite source
+lives as palette-indexed text in `src/game/sprites.ts`, so agents can edit meaningful
+Git diffs instead of opaque PNG binaries. `src/game/pixel-art.ts` validates and
+rasterizes those sources at runtime. Animation combines authored slime and flame frames
+with grid-quantized motion and a fixed spark pool.
+
+## Repository tooling
+
+```powershell
+Copy-Item .env.example .env
+uv sync --all-extras
+uv run pytest
+```
+
+The Python environment supports the vendored agent harness; it is not part of the game
+runtime. In VS Code, the shared workspace task quick-pick lists repository actions and
+the worktree they target.
 
 
 ## Layout
 
 ```text
-roguelike/                  application code
-tests/                tests
-scripts/                 project scripts (Python, each with tests)
-scripts/hooks/           vendored agent harness — edit upstream in devkit
-.devkit.toml      the per-project harness seam (NOT vendored)
+src/                       Phaser scene, text sprite sources, and Vitest tests
+roguelike/                 Python tooling package
+tests/                     Python tooling tests
+scripts/                   project scripts (Python, each with tests)
+scripts/hooks/             vendored agent harness — edit upstream in devkit
+.devkit.toml               per-project harness seam (not vendored)
 ```
 
 ## CI

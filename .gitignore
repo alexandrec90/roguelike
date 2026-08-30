@@ -17,6 +17,8 @@ venv/
 .coverage.*
 htmlcov/
 .benchmarks/
+node_modules/
+dist/
 
 # Secrets and local environment. `.env.example` IS committed; `.env` never is —
 # it carries this checkout's ports and credentials.
