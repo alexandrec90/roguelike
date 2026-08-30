@@ -1,0 +1,150 @@
+:root {
+  color: #d8c8a2;
+  background: #08090c;
+  font-family: "Courier New", Courier, monospace;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 45%, #1b1518 0%, #0c0d12 38%, #06070a 78%),
+    #06070a;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.23;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+.shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  place-items: center;
+  width: 100vw;
+  height: 100vh;
+  padding: clamp(18px, 4vh, 42px) clamp(14px, 3vw, 38px) clamp(14px, 3vh, 28px);
+}
+
+.masthead {
+  z-index: 1;
+  align-self: end;
+  margin-bottom: clamp(10px, 2vh, 20px);
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: #b76b38;
+  font-size: clamp(8px, 1.2vw, 11px);
+  font-weight: 700;
+  letter-spacing: 0.34em;
+}
+
+h1 {
+  margin: 0;
+  color: #ead8a8;
+  font-size: clamp(19px, 3vw, 32px);
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-shadow: 0 2px 0 #553026, 0 0 22px rgb(242 145 62 / 20%);
+}
+
+#game {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(100%, calc((100vh - 150px) * 16 / 9));
+  max-width: 1120px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 2px solid #5c3c2f;
+  outline: 1px solid #17141a;
+  background: #090a0d;
+  box-shadow:
+    0 0 0 4px #0c0b0f,
+    0 0 0 5px #30201d,
+    0 18px 60px rgb(0 0 0 / 72%),
+    0 0 50px rgb(167 75 30 / 9%);
+}
+
+#game::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(rgb(255 255 255 / 1.5%) 50%, rgb(0 0 0 / 2.5%) 50%);
+  background-size: 100% 4px;
+  mix-blend-mode: overlay;
+}
+
+canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+footer {
+  z-index: 1;
+  display: flex;
+  align-self: start;
+  align-items: center;
+  gap: 10px;
+  margin-top: clamp(10px, 2vh, 18px);
+  color: #74685d;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+footer i {
+  width: 3px;
+  height: 3px;
+  background: #b35a30;
+  box-shadow: 0 0 6px #db7638;
+}
+
+@media (max-height: 520px) {
+  .shell {
+    padding-block: 10px;
+  }
+
+  .masthead {
+    margin-bottom: 8px;
+  }
+
+  .eyebrow,
+  footer {
+    display: none;
+  }
+
+  #game {
+    width: min(100%, calc((100vh - 58px) * 16 / 9));
+  }
+}
