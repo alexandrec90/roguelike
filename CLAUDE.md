@@ -12,6 +12,35 @@
 | Tests | Vitest and pytest |
 | Checks | TypeScript compiler and ruff |
 
+## Visual and Asset Architecture
+
+These are product constraints, not suggestions tied to the proof of concept.
+
+| Area | Contract |
+| --- | --- |
+| Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by an integer factor and letterbox the remainder. |
+| Grid | Use 16×16 world tiles. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
+| Identity art | Characters, monsters, items, and tiles are authored palette-indexed raster sprites. Keep their source text-defined and diffable; generated PNG atlases are build output. SVG is not a primary game-art format. |
+| Procedural art | Use math for motion, light, particles, and other effects—not for complete character silhouettes. Image-generated art may guide mood and composition but must be redrawn and validated on the game grid before becoming production art. |
+| Animation | Combine a small number of authored silhouette-changing frames with discrete, grid-quantized translation and squash/stretch. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. |
+| Effects | Build particles from 1–4 logical-pixel primitives or tiny raster sprites. Pool them, cap their count, and use seeded randomness when reproducibility matters. |
+| Separation | Keep turn simulation deterministic and independent of the real-time presentation layer. Rendering may exaggerate an event but must not determine its outcome. |
+
+### Visual verification
+
+Every asset or animation change is inspected in the running browser at logical 1× and
+an enlarged integer scale. Maintain an asset-lab scene that can show every frame,
+animation, palette swap, and effect on light and dark backgrounds. The agent captures
+and compares rendered output; a valid source file and green unit tests do not prove the
+art looks correct.
+
+### Branch previews
+
+Do not switch branches inside a checkout whose Vite server is running. Give each agent
+branch its own Git worktree and dev-server port, and compare branches by switching
+browser tabs. Vite hot replacement is for edits within one worktree, not for mixing two
+branches in one running module graph.
+
 ## Environment Variables
 
 See `.env.example` for every variable. `.env` is gitignored and holds this
