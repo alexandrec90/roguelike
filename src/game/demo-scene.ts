@@ -91,7 +91,6 @@ export class DemoScene extends Phaser.Scene {
     this.drawRocks();
     this.createActors();
     this.createTorch();
-    this.createCaption();
   }
 
   update(_time: number, delta: number): void {
@@ -251,36 +250,6 @@ export class DemoScene extends Phaser.Scene {
         .setBlendMode(Phaser.BlendModes.ADD)
         .setDepth(depth + 1),
     );
-  }
-
-  /**
-   * The split, on screen.
-   *
-   * The 95/5 is meant to be retuned by eye, and eyeballing it is much easier
-   * when the number you are judging is in the frame next to the result.
-   */
-  private createCaption(): void {
-    const { skyFraction, skyHeight, rollHeight, groundHeight } = this.layout;
-    const percent = (skyFraction * 100).toFixed(skyFraction * 100 < 10 ? 1 : 0);
-    // On its own the caption sat at whatever colour the grass happened to be
-    // under it, which is unreadable over half the field; it is a chip so the
-    // numbers stay legible wherever the scene puts them.
-    this.add
-      .text(
-        3,
-        HEIGHT - 12,
-        `horizon ${percent}%  sky ${skyHeight}px  roll ${rollHeight}px  flat ${groundHeight}px`,
-        {
-          color: "#e4ead8",
-          backgroundColor: "#0d1116",
-          fontFamily: "monospace",
-          fontSize: "5px",
-          padding: { x: 2, y: 1 },
-        },
-      )
-      .setResolution(1)
-      .setAlpha(0.85)
-      .setDepth(9000);
   }
 
   private animateHero(): void {

@@ -42,8 +42,10 @@ Four modules, and no fifth place where any of this is decided:
 | `src/game/field.ts` | The sample scene's map, as text. `demo-scene.ts` reads all four and only draws. |
 
 **The 95/5 split is a knob, not a constant to inline.** `DEFAULT_SKY_FRACTION` in
-`horizon.ts` is the default; `?horizon=8%` (or `?horizon=0.08`) overrides it per load;
-the on-screen caption prints the resulting pixel counts so it can be judged by eye. Read
+`horizon.ts` is the default; `?horizon=8%` (or `?horizon=0.08`) overrides it per load.
+There is no on-screen caption printing the resulting pixel counts — **the page is the game
+world and nothing else**, so judge a split against the frame itself and read the numbers
+from `horizonLayout()` in the console or from `horizon.test.ts`. Read
 `horizonLayout()` for `groundTop` — never hard-code a y for the horizon, and never
 assume the flat field starts at 9px, because that number moves the moment the knob does.
 
