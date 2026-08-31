@@ -1,4 +1,5 @@
 {
+  "devkit_tag": "v0.11.11",
   "files": {
     ".claude/engineering-evidence.md": "ad74a58fc924e04c9106a1e0c39eeb7967c7256f2cbad2647ff2295a5b7f2810",
     ".claude/hooks/session-start.sh": "de052fbeca615c448055f76c85e50db0896229c7724021a9916752dd44671dda",
