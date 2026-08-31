@@ -107,5 +107,27 @@ head_bytes = 2000
 [db]
 enabled = false
 
+# The vitest/tsc tier. This project IS its frontend -- a Phaser game served by Vite,
+# with `package.json`, `vite.config.ts` and `src/` at the repo root rather than under a
+# `frontend/` subdirectory -- so every path below overrides a default that assumes the
+# subdirectory layout. `dir = "."` is what makes the root the npm project.
+#
+# Leaving this tier off was not a neutral default here, it was three failures at once:
+# `worktree.py provision` planned no `npm ci`, so an ephemeral box had no node_modules
+# and could not run the suite that holds nearly all of this project's logic; `stop.py`
+# ran pytest over `tests/` (three harness stubs) and called that a verified change; and
+# `preview-task.ui_projects` left the checkout out of the `Preview: Open a UI Branch`
+# dropdown, because that menu asks for `[frontend] dir` and got "".
+#
+# `src` gates the vitest tier: a change under it makes the Stop hook run the tests.
+# `skin` gates the pre-verification typecheck; it is the same tree here because there
+# are no skins to scope it to, and tsc catches the class of error vitest cannot see.
+# Both commands name scripts in `package.json`, so keep the two files in step --
+# `tests/test_harness_frontend_tier.py` fails if they drift.
 [frontend]
-enabled = false
+enabled = true
+dir = "."
+src = "src/"
+skin = "src/"
+test_cmd = ["run", "test"]
+typecheck_cmd = ["run", "typecheck"]
