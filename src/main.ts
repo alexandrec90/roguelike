@@ -2,19 +2,27 @@ import Phaser from "phaser";
 
 import "./style.css";
 import { DemoScene, GAME_SIZE } from "./game/demo-scene";
+import { parseSkyFraction } from "./game/horizon";
 import { integerScale, letterbox } from "./game/integer-scale";
+
+// The 95/5 horizon split is a framing decision, so it is retunable without a
+// rebuild: `?horizon=0.08` or `?horizon=8%`. An unreadable value falls back to
+// the default rather than blanking the game.
+const skyFraction = parseSkyFraction(
+  new URLSearchParams(window.location.search).get("horizon"),
+);
 
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
   parent: "game",
   width: GAME_SIZE.width,
   height: GAME_SIZE.height,
-  backgroundColor: "#08090c",
+  backgroundColor: "#1b2440",
   pixelArt: true,
   roundPixels: true,
   antialias: false,
   antialiasGL: false,
-  scene: DemoScene,
+  scene: new DemoScene(skyFraction),
   fps: {
     target: 60,
     smoothStep: true,
