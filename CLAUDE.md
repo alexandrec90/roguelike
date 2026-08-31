@@ -20,13 +20,14 @@ These are product constraints, not suggestions tied to the proof of concept.
 | --- | --- |
 | Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by an integer factor and letterbox the remainder. |
 | Setting | **Outdoors.** The game is an overworld — fields, paths, rock, sky — not a dungeon interior. |
+| Color | **1-bit neon on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. |
 | Camera | A **pitched-back overhead** view, not a 45°-yaw diamond isometric: rows and columns stay axis-aligned and only the vertical axis is foreshortened. A 16×16 world square lands on 16×12 of screen, and height rises straight up the screen by `WALL_RISE`, which is what makes walls stand. `src/game/projection.ts` owns that math; nothing else re-derives it. |
 | Grid | 16×16 world tiles. Author ground art **already foreshortened** — 16×`TILE_DEPTH` for anything lying on the ground, 16×`WALL_RISE` for anything standing up — so every tile blits 1:1 and nothing is scaled at draw time. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
 | Flatness | Below the horizon band the ground is **affine, not perspective**: every world row is exactly `TILE_DEPTH` scanlines tall, with no convergence and no per-row scaling. A tile's screen size never depends on how far up the screen it is. |
 | Horizon | The top of the screen **rolls over the horizon** — sky, then a short band where the ground curves away and a dozen world rows compress into a few scanlines, then the flat field. `src/game/horizon.ts` owns it, and one knob sets the split. |
-| Identity art | Characters, monsters, items, and tiles are authored palette-indexed raster sprites. Keep their source text-defined and diffable; generated PNG atlases are build output. SVG is not a primary game-art format. |
-| Procedural art | Use math for motion, light, particles, and other effects—not for complete character silhouettes. Image-generated art may guide mood and composition but must be redrawn and validated on the game grid before becoming production art. |
-| Animation | Combine a small number of authored silhouette-changing frames with discrete, grid-quantized translation and squash/stretch. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. |
+| Identity art | **Characters are skeleton rigs**, not frame-by-frame sprites: bones posed in rig-space 3D (`src/game/rig.ts`), dressed by the authored models in `src/game/models.ts`, rasterized to pixels at draw time. Props, tiles, and effect sources stay authored palette-indexed raster sprites. All sources are text-defined and diffable; generated PNG atlases are build output. SVG is not a primary game-art format. |
+| Procedural art | Use math for motion, light, particles, and other effects—not for complete character silhouettes. Status effects (melt, freeze, burn, reflect) are **generic transforms over pixel clouds** (`src/game/transforms.ts`), never per-model frames. Image-generated art may guide mood and composition but must be redrawn and validated on the game grid before becoming production art. |
+| Animation | Character actions are **clips**: sparse 3D keyframes over rig bones (`src/game/models.ts`), sampled per channel — a new attack is a handful of direction lines, not a redraw. Facing is front/back only (depth negated, front-only stamps dropped); left/right is a mirror flip. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. |
 | Effects | Build particles from 1–4 logical-pixel primitives or tiny raster sprites. Pool them, cap their count, and use seeded randomness when reproducibility matters. |
 | Separation | Keep turn simulation deterministic and independent of the real-time presentation layer. Rendering may exaggerate an event but must not determine its outcome. |
 
@@ -40,6 +41,21 @@ Four modules, and no fifth place where any of this is decided:
 | `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, the roll's easing, and `ridgeProfile()` for distant silhouettes. |
 | `src/game/tiles.ts` | The terrain art, in one shared palette with per-material tokens, so a whole field can be spliced into a single texture by `composeTiles`. |
 | `src/game/field.ts` | The sample scene's map, as text. `demo-scene.ts` reads all four and only draws. |
+
+### The 1-bit ink pipeline
+
+Everything renderable flattens to a **pixel cloud** — an ordered list of lit pixels,
+later wins — which is what lets one melt apply to any model. Six modules, and no
+seventh place where any of this is decided:
+
+| Module | Owns |
+| --- | --- |
+| `src/game/ink.ts` | The closed `InkId` palette (`INK_COLORS`, `INK_TOKENS`), `PixelCloud`, text masks, `strokeLine`, and `cloudToSprite` — the bridge back to the text-sprite pipeline. |
+| `src/game/rig.ts` | Skeletons, poses, clip sampling, `renderModel`. Rig space is x right, y toward the viewer, z up; a rig point projects `(x, y·DEPTH_RATIO − z)` — exactly the world's projection, re-used, never re-derived. |
+| `src/game/models.ts` | The authored humanoid: skeleton, base pose, gear (`SWORD` is a real bone clips can key; `HAT` a stamp; `ARMOR` a reink) and the clips (`IDLE`, `WALK`, `SWING`, `CAST`). The file an agent edits for a new move or item. |
+| `src/game/transforms.ts` | `meltCloud` / `freezeCloud` / `burnCloud` / `reflectCloud` — pure, seeded functions of (cloud, progress); identity at 0, deterministic always. |
+| `src/game/weather.ts` | Rain (the pooled spark emitter pointed downward) and lightning (seeded bolt polyline plus a pure-function-of-time storm schedule). |
+| `src/game/rig-frames.ts` | Sampling clips and transforms into fixed frame lists so the asset registry and the lab cannot tell rig art from hand-drawn art. |
 
 **The 95/5 split is a knob, not a constant to inline.** `DEFAULT_SKY_FRACTION` in
 `horizon.ts` is the default; `?horizon=8%` (or `?horizon=0.08`) overrides it per load.

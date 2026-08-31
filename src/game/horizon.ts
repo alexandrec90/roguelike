@@ -166,13 +166,13 @@ export function rollBands(rollHeight: number, rows: number = ROLL_ROWS): readonl
   return bands;
 }
 
-/** Zenith to horizon. Dusk, so the playfield's lighting has a reason. */
+/** Zenith to horizon: pitch black, with the faintest glow where ground meets sky. */
 export const SKY_RAMP: readonly string[] = [
-  "#1b2440",
-  "#2c4364",
-  "#4a6f8c",
-  "#8ba3a6",
-  "#d8b489",
+  "#000000",
+  "#000000",
+  "#000000",
+  "#02020c",
+  "#0a1024",
 ];
 
 export interface ScanBand {
@@ -194,9 +194,9 @@ export function skyBands(skyHeight: number, ramp: readonly string[] = SKY_RAMP):
   }));
 }
 
-/** Horizon haze: the far ground fading into the colour of the sky it meets. */
-export const ROLL_NEAR_COLOR = "#3d5340";
-export const ROLL_FAR_COLOR = "#8d9a86";
+/** Horizon haze: black ground fading into the glow at the horizon line. */
+export const ROLL_NEAR_COLOR = "#04120b";
+export const ROLL_FAR_COLOR = "#0d1830";
 
 /**
  * Colour the roll's scanlines, given the bands `rollBands` produced.
@@ -275,4 +275,34 @@ export function ridgeProfile(width: number, options: RidgeOptions = {}): readonl
     const raw = base + amplitude * (0.68 * coarse + 0.32 * fine);
     return Math.max(0, Math.min(Math.round(raw), maxHeight));
   });
+}
+
+export interface Star {
+  readonly x: number;
+  readonly y: number;
+  /** A few stars are bright white; the rest are dim. */
+  readonly bright: boolean;
+}
+
+/**
+ * Seeded stars for the black sky band. Deterministic per (size, seed), so a
+ * capture of the sky is comparable across runs; density is per pixel, so
+ * squeezing the band keeps the sky equally starry rather than equally counted.
+ */
+export function starField(
+  width: number,
+  skyHeight: number,
+  seed = 977,
+  density = 0.015,
+): readonly Star[] {
+  const stars: Star[] = [];
+  for (let y = 0; y < skyHeight; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const roll = hashUnit(x + y * width, seed);
+      if (roll < density) {
+        stars.push({ x, y, bright: hashUnit(x + y * width, seed ^ 0x51ed270b) < 0.25 });
+      }
+    }
+  }
+  return stars;
 }

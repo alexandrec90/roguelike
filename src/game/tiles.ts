@@ -26,24 +26,24 @@ import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "./projection";
 export { TILE_DEPTH, TILE_WIDTH, WALL_RISE };
 
 export const TERRAIN_PALETTE: Palette = {
-  // Grass.
-  g: "#2f4a33",
-  G: "#3d6140",
-  h: "#54804d",
-  s: "#25392a",
-  // Trodden dirt.
-  d: "#6b563e",
-  D: "#7e6848",
-  e: "#4e3f2d",
-  p: "#8d7a5c",
-  // Rock, seen from above.
-  r: "#5a5b52",
-  R: "#6c6d61",
-  k: "#3a3b36",
-  // Rock, seen from the front.
-  f: "#45463f",
-  F: "#54554c",
-  m: "#2c2d29",
+  // Grass: a pitch-black field, dim green undergrowth, sparse neon blades.
+  g: "#123a20",
+  G: "#000000",
+  h: "#2ee868",
+  s: "#000000",
+  // Trodden dirt: black with a hint of earth and lit amber pebbles.
+  d: "#000000",
+  D: "#1c1206",
+  e: "#000000",
+  p: "#e8a33d",
+  // Rock, seen from above: black mass, a lit back lip.
+  r: "#000000",
+  R: "#151b23",
+  k: "#5e7ea6",
+  // Rock, seen from the front: black blocks outlined in lit mortar.
+  f: "#000000",
+  F: "#10161e",
+  m: "#5e7ea6",
 };
 
 /**

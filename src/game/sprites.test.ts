@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { rasterizeSprite } from "./pixel-art";
-import { ALL_SPRITES, HERO, SLIME_FRAMES, TORCH_FRAMES } from "./sprites";
+import { ALL_SPRITES, RAIN_STREAK, SLIME_FRAMES, TORCH_FRAMES } from "./sprites";
 
 describe("pixel sprite catalog", () => {
   it("contains only valid, rasterizable sources", () => {
@@ -16,6 +16,10 @@ describe("pixel sprite catalog", () => {
 
     expect(new Set(dimensions(SLIME_FRAMES).map(String)).size).toBe(1);
     expect(new Set(dimensions(TORCH_FRAMES).map(String)).size).toBe(1);
-    expect(HERO.rows[0]?.length).toBe(16);
+  });
+
+  it("keeps the rain streak one logical pixel wide", () => {
+    expect(RAIN_STREAK.rows.every((row) => row.length === 1)).toBe(true);
+    expect(RAIN_STREAK.rows.length).toBeGreaterThan(1);
   });
 });
