@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { rasterizeSprite, type PixelSpriteSource } from "./pixel-art";
-import { contentBounds, EMPTY_BOUNDS, repeatSprite, swapPalette } from "./sprite-ops";
+import { composeTiles, contentBounds, EMPTY_BOUNDS, repeatSprite, swapPalette } from "./sprite-ops";
 
 const SOURCE: PixelSpriteSource = {
   palette: { ".": null, r: "#ff0000", b: "#0000ff" },
@@ -71,5 +71,45 @@ describe("repeatSprite", () => {
   it("rejects non-positive counts", () => {
     expect(() => repeatSprite(SOURCE, 0, 1)).toThrow(/positive integers/);
     expect(() => repeatSprite(SOURCE, 1, 1.5)).toThrow(/positive integers/);
+  });
+});
+
+describe("composeTiles", () => {
+  const SHARED = { ".": null, a: "#111111", b: "#222222" };
+  const A: PixelSpriteSource = { palette: SHARED, rows: ["aa", "aa"] };
+  const B: PixelSpriteSource = { palette: SHARED, rows: ["bb", "bb"] };
+
+  it("splices a grid of tiles into one sprite", () => {
+    const field = composeTiles(3, 2, (column, row) => ((column + row) % 2 === 0 ? A : B));
+
+    expect(field.rows).toEqual(["aabbaa", "aabbaa", "bbaabb", "bbaabb"]);
+  });
+
+  it("merges palettes so the composed sprite still rasterizes", () => {
+    const other: PixelSpriteSource = { palette: { c: "#333333" }, rows: ["cc", "cc"] };
+    const field = composeTiles(2, 1, (column) => (column === 0 ? A : other));
+    const raster = rasterizeSprite(field);
+
+    expect([raster.width, raster.height]).toEqual([4, 2]);
+  });
+
+  it("refuses a token that means two different colours", () => {
+    const clashing: PixelSpriteSource = { palette: { a: "#ff0000" }, rows: ["aa", "aa"] };
+
+    expect(() => composeTiles(2, 1, (column) => (column === 0 ? A : clashing))).toThrow(
+      /redefines palette token 'a'/,
+    );
+  });
+
+  it("refuses a tile that is not the field's cell size", () => {
+    const tall: PixelSpriteSource = { palette: SHARED, rows: ["aa", "aa", "aa"] };
+
+    expect(() => composeTiles(2, 1, (column) => (column === 0 ? A : tall))).toThrow(
+      /the field is composed of 2x2 cells/,
+    );
+  });
+
+  it("rejects a field with no cells", () => {
+    expect(() => composeTiles(0, 1, () => A)).toThrow(/positive integers/);
   });
 });

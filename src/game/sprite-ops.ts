@@ -91,6 +91,86 @@ export function repeatSprite(
   return { palette: source.palette, rows: repeated };
 }
 
+/**
+ * Splice a grid of same-sized tiles into one sprite.
+ *
+ * The playfield is twenty columns by fifteen rows; drawing it as three hundred
+ * images would cost three hundred quads a frame to render something that never
+ * changes. Composing it once into a single texture costs one.
+ *
+ * Palettes are merged rather than re-keyed, and a token that means two
+ * different colours across two tiles throws: silently letting the first
+ * definition win would repaint half the field a shade nobody chose, and it
+ * would do it only for the tiles that happened to be spliced second.
+ */
+export function composeTiles(
+  columns: number,
+  rows: number,
+  pick: (column: number, row: number) => PixelSpriteSource,
+): PixelSpriteSource {
+  if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1) {
+    throw new Error("Field size must be positive integers");
+  }
+
+  const palette: Record<string, string | null> = {};
+  const cells: PixelSpriteSource[][] = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    const line: PixelSpriteSource[] = [];
+    for (let column = 0; column < columns; column += 1) {
+      const tile = pick(column, row);
+      mergePalette(palette, tile.palette, column, row);
+      line.push(tile);
+    }
+    cells.push(line);
+  }
+
+  const first = cells[0]?.[0];
+  if (first === undefined) {
+    throw new Error("Field has no cells");
+  }
+  const cellHeight = first.rows.length;
+  const cellWidth = first.rows[0]?.length ?? 0;
+
+  const composed: string[] = [];
+  cells.forEach((line, row) => {
+    for (let y = 0; y < cellHeight; y += 1) {
+      let text = "";
+      line.forEach((tile, column) => {
+        const source = tile.rows[y];
+        if (source === undefined || tile.rows.length !== cellHeight || source.length !== cellWidth) {
+          throw new Error(
+            `Tile at ${column},${row} is ${tile.rows[0]?.length ?? 0}x${tile.rows.length}; ` +
+              `the field is composed of ${cellWidth}x${cellHeight} cells`,
+          );
+        }
+        text += source;
+      });
+      composed.push(text);
+    }
+  });
+
+  return { palette, rows: composed };
+}
+
+function mergePalette(
+  into: Record<string, string | null>,
+  from: Palette,
+  column: number,
+  row: number,
+): void {
+  for (const [token, color] of Object.entries(from)) {
+    const existing = into[token];
+    if (existing !== undefined && existing !== color) {
+      throw new Error(
+        `Tile at ${column},${row} redefines palette token '${token}' as ${String(color)}; ` +
+          `it is already ${String(existing)}`,
+      );
+    }
+    into[token] = color ?? null;
+  }
+}
+
 function isOpaqueToken(palette: Palette, token: string): boolean {
   const color = palette[token];
   if (color === undefined) {

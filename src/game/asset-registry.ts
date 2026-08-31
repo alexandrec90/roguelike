@@ -12,8 +12,8 @@
 import type { Palette, PixelSpriteSource } from "./pixel-art";
 import { rasterizeSprite } from "./pixel-art";
 import { swapPalette } from "./sprite-ops";
-import { HERO, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
-import { FLOOR_STONE, WALL_FACE, WALL_TOP } from "./tiles";
+import { FAR_PINE, FAR_TOWER, HERO, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
+import { DIRT_PATH, GRASS, WALL_FACE, WALL_TOP } from "./tiles";
 
 export type AssetCategory = "actor" | "prop" | "tile" | "effect";
 
@@ -147,42 +147,69 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     ],
   },
   {
-    id: "floor-stone",
-    label: "Floor — stone",
+    id: "grass",
+    label: "Ground — grass",
     category: "tile",
-    frames: [FLOOR_STONE],
+    frames: [GRASS],
     frameDurationMs: 200,
-    notes: "Seams sit on row 0 and column 0 only, so a tiled field keeps single mortar lines.",
+    notes:
+      "16x12: authored already foreshortened by the camera pitch, so it draws 1:1. " +
+      "Check it tiled — noise this low-contrast is the difference between a field and wallpaper.",
     variants: [
       AUTHORED,
       {
-        id: "moss",
-        label: "Mossy",
-        overrides: { a: "#26302a", b: "#31402f", c: "#1a2119", d: "#20291f" },
+        id: "autumn",
+        label: "Autumn",
+        overrides: { g: "#4a3a22", G: "#6b5228", h: "#8a6b31", s: "#33281a" },
+      },
+      {
+        id: "night",
+        label: "Night",
+        overrides: { g: "#1a2430", G: "#24303c", h: "#31404a", s: "#141c26" },
+      },
+    ],
+  },
+  {
+    id: "dirt-path",
+    label: "Ground — dirt path",
+    category: "tile",
+    frames: [DIRT_PATH],
+    frameDurationMs: 200,
+    notes: "The trodden route through the field. Same 16x12 footprint as grass.",
+    variants: [
+      AUTHORED,
+      {
+        id: "ashen",
+        label: "Ashen",
+        overrides: { d: "#4c4a48", D: "#5d5b58", e: "#363433", p: "#6e6b66" },
       },
     ],
   },
   {
     id: "wall-top",
-    label: "Wall — top cap",
+    label: "Rock — top cap",
     category: "tile",
     frames: [WALL_TOP],
     frameDurationMs: 200,
-    notes: "What the overhead camera sees of a wall block.",
+    notes: "What the pitched-back camera sees of the top of a rock block. 16x12, like the ground.",
     variants: [
       AUTHORED,
-      { id: "sandstone", label: "Sandstone", overrides: { t: "#6b5c46", T: "#7d6d53", e: "#463b2d" } },
+      {
+        id: "sandstone",
+        label: "Sandstone",
+        overrides: { r: "#6b5c46", R: "#7d6d53", k: "#463b2d" },
+      },
     ],
   },
   {
     id: "wall-face",
-    label: "Wall — face",
+    label: "Rock — face",
     category: "tile",
     frames: [WALL_FACE],
     frameDurationMs: 200,
     notes:
-      "The side that rises up the screen. Stacks upward, so it carries no band of " +
-      "its own — the shadow at the wall's foot is drawn by whatever it stands on.",
+      "The side that rises up the screen, 16x16 and never foreshortened. Stacks upward, " +
+      "so it carries no band of its own — the shadow at its foot is drawn by what it stands on.",
     variants: [
       AUTHORED,
       {
@@ -190,6 +217,30 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
         label: "Sandstone",
         overrides: { f: "#574a38", F: "#685941", m: "#3a3126" },
       },
+    ],
+  },
+  {
+    id: "far-pine",
+    label: "Distant — pine",
+    category: "prop",
+    frames: [FAR_PINE],
+    frameDurationMs: 200,
+    notes: "Stands on the horizon line inside the rolled-over band. Silhouette only, six pixels tall.",
+    variants: [
+      AUTHORED,
+      { id: "night", label: "Night", overrides: { P: "#1c2531" } },
+    ],
+  },
+  {
+    id: "far-tower",
+    label: "Distant — tower",
+    category: "prop",
+    frames: [FAR_TOWER],
+    frameDurationMs: 200,
+    notes: "The one landmark past the horizon. Its lit window is the only warm pixel up there.",
+    variants: [
+      AUTHORED,
+      { id: "dark", label: "Unlit", overrides: { q: "#2a3542" } },
     ],
   },
   {
