@@ -57,6 +57,14 @@ seventh place where any of this is decided:
 | `src/game/weather.ts` | Rain (the pooled spark emitter pointed downward) and lightning (seeded bolt polyline plus a pure-function-of-time storm schedule). |
 | `src/game/rig-frames.ts` | Sampling clips and transforms into fixed frame lists so the asset registry and the lab cannot tell rig art from hand-drawn art. |
 
+**How to actually draw and animate with it is `.claude/rules/art-pipeline.md`** — the
+cost ladder from palette swap to hand-drawn frames, the "I want X → open this one file"
+table, the API crib, and the recipes. The rule exists because the cheap mechanism and
+the expensive one produce the same picture, and only one of them also produces the next
+hundred: a status effect is a cloud transform, a spell is a seeded emitter, an attack is
+three keyframes. **Hand-authored frames are rung seven of seven, for props and tiles
+only, never for a character.**
+
 **The 95/5 split is a knob, not a constant to inline.** `DEFAULT_SKY_FRACTION` in
 `horizon.ts` is the default; `?horizon=8%` (or `?horizon=0.08`) overrides it per load.
 There is no on-screen caption printing the resulting pixel counts — **the page is the game
@@ -95,7 +103,7 @@ Everything it shows is in the URL, so a capture can be reopened exactly:
 
 | Key | Meaning |
 | --- | --- |
-| `asset` | registry id — `hero`, `slime`, `torch`, `grass`, `dirt-path`, `wall-top`, `wall-face`, `far-pine`, `far-tower`, `sparks` |
+| `asset` | registry id — read `ASSET_REGISTRY`, or call `window.assetLab.assets()`; the sidebar lists them all |
 | `variant` | palette swap id; `authored` is the art as drawn |
 | `frame` / `t` | frame index, and elapsed ms for effects |
 | `play` | `1` animates, `0` pins the view — captures use `0` |
@@ -182,3 +190,7 @@ Baseline guardrails — including the instruction-file feedback loop (**never si
 work around a bad instruction**) — are in `.claude/rules/engineering.md`. Rules for
 writing skills and rules themselves are in `.claude/rules/authoring.md`. Cross-reference
 this project's own scoped rules here, one line each.
+
+- **`.claude/rules/art-pipeline.md`** (`src/game/**/*.ts`) — how to draw and animate:
+  pick the cheapest mechanism that makes the picture, and never hand-draw a frame you
+  could derive.
