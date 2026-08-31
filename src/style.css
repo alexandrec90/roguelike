@@ -101,10 +101,14 @@ h1 {
   mix-blend-mode: overlay;
 }
 
-canvas {
+/*
+ * Size and position come from `integerScale`/`letterbox` in main.ts, never from
+ * CSS. Stretching this canvas to 100% of its box resamples a 320x180 grid onto
+ * a fractional one — which is exactly the blur pixel art is drawn to avoid.
+ */
+#game canvas {
+  position: absolute;
   display: block;
-  width: 100% !important;
-  height: 100% !important;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
@@ -121,6 +125,16 @@ footer {
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
+}
+
+footer a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid #4a3d33;
+}
+
+footer a:hover {
+  color: #db7638;
 }
 
 footer i {

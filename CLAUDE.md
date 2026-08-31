@@ -34,6 +34,38 @@ animation, palette swap, and effect on light and dark backgrounds. The agent cap
 and compares rendered output; a valid source file and green unit tests do not prove the
 art looks correct.
 
+#### The asset lab
+
+`lab.html` (`npm run dev`, then `/lab.html`) is that scene. It renders on its own
+320×180 canvas under the same integer-scale contract as the game, and shows the selected
+art on two grounds at once — dark beside light — because a sprite that reads on charcoal
+and disappears on bone is a fault you only see with both on screen at the same moment.
+
+Everything it shows is in the URL, so a capture can be reopened exactly:
+
+| Key | Meaning |
+| --- | --- |
+| `asset` | registry id — `hero`, `slime`, `torch`, `floor-stone`, `wall-top`, `wall-face`, `sparks` |
+| `variant` | palette swap id; `authored` is the art as drawn |
+| `frame` / `t` | frame index, and elapsed ms for effects |
+| `play` | `1` animates, `0` pins the view — captures use `0` |
+| `zoom` | requested whole factor, capped by what fits the pane |
+| `bg` | `duo` (dark/light), `checker` (alpha), `contrast` (pure black/white) |
+| `grid` / `bounds` / `tile` | frame grid, drawn-pixel bounds, 3×3 tiled seam preview |
+
+`window.assetLab` is the capture handle for a browser-driving agent:
+`state()`, `apply(patch)`, `seek(ms)`, `assets()`, `snapshot()` — the last returning a
+PNG data URL. `apply` and `seek` return the state they settled on rather than the one
+requested, so a normalized value (a zoom that did not fit, a tile flag on a non-tile)
+is visible instead of silently assumed. With `play=0` the same `seek(ms)` produces
+byte-identical pixels on every run: effects step from a seed in fixed 16 ms slices.
+
+**To add an asset, add an entry to `ASSET_REGISTRY` (`src/game/asset-registry.ts`).**
+The lab, its texture installation, and its filmstrip are all driven from that array —
+there is no scene to edit. `validateRegistry` is asserted in
+`asset-registry.test.ts`, so a palette-swap token that no longer exists in the sprite
+fails a test rather than silently rendering the authored colour.
+
 ### Branch previews
 
 Do not switch branches inside a checkout whose Vite server is running. Give each agent
