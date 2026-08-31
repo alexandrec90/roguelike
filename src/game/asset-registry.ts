@@ -9,10 +9,12 @@
  * failing test instead of a puzzling screenshot.
  */
 
+import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import type { Palette, PixelSpriteSource } from "./pixel-art";
 import { rasterizeSprite } from "./pixel-art";
+import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { swapPalette } from "./sprite-ops";
-import { FAR_PINE, FAR_TOWER, HERO, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
+import { FAR_PINE, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { DIRT_PATH, GRASS, WALL_FACE, WALL_TOP } from "./tiles";
 
 export type AssetCategory = "actor" | "prop" | "tile" | "effect";
@@ -48,47 +50,67 @@ const AUTHORED: PaletteVariant = {
   overrides: {},
 };
 
+/** One swap shared by every rig entry: the bone ink re-inked to ice. */
+const FROST: PaletteVariant = { id: "frost", label: "Frozen", overrides: { w: "#a8ecff" } };
+
 export const ASSET_REGISTRY: readonly AssetEntry[] = [
   {
     id: "hero",
-    label: "Hero",
+    label: "Hero — idle (rig)",
     category: "actor",
-    frames: [HERO],
-    frameDurationMs: 160,
-    notes: "Idle pose. Motion comes from grid-quantized bob and squash, not extra frames.",
-    variants: [
-      AUTHORED,
-      {
-        id: "hit",
-        label: "Hit flash",
-        overrides: {
-          h: "#ffffff",
-          H: "#ffffff",
-          f: "#ffffff",
-          n: "#ffffff",
-          c: "#ffffff",
-          C: "#ffffff",
-          w: "#ffffff",
-          b: "#ffffff",
-          B: "#e8e8f0",
-        },
-      },
-      {
-        id: "frost",
-        label: "Frozen",
-        overrides: {
-          h: "#1a2632",
-          H: "#3d5a70",
-          f: "#cfe6f2",
-          n: "#6f9ab0",
-          c: "#16222e",
-          C: "#3a6f86",
-          w: "#dff2ff",
-          b: "#22303f",
-          B: "#101a24",
-        },
-      },
-    ],
+    frames: sampleClipFrames(HERO_EQUIPPED, IDLE, 8),
+    frameDurationMs: 175,
+    notes:
+      "Not drawn: rendered from the humanoid rig in models.ts with sword and hat equipped. " +
+      "Edit the clip or the gear, and these frames follow.",
+    variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-walk",
+    label: "Hero — walk (rig)",
+    category: "actor",
+    frames: sampleClipFrames(HERO_EQUIPPED, WALK, 8),
+    frameDurationMs: 80,
+    notes: "The stride swings through the depth axis; back facing and x-flip come free.",
+    variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-walk-back",
+    label: "Hero — walk, back view (rig)",
+    category: "actor",
+    frames: sampleClipFrames(HERO_EQUIPPED, WALK, 8, { facing: "back" }),
+    frameDurationMs: 80,
+    notes: "Same clip, back facing: depth negated, front-only stamps (the eyes) dropped.",
+    variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-swing",
+    label: "Hero — sword swing (rig)",
+    category: "actor",
+    frames: sampleClipFrames(HERO_EQUIPPED, SWING, 8),
+    frameDurationMs: 65,
+    notes: "Anticipation behind the head, contact across the front, overshoot, settle — all keyed in 3D.",
+    variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-cast",
+    label: "Hero — cast (rig)",
+    category: "actor",
+    frames: sampleClipFrames(HERO_EQUIPPED, CAST, 8),
+    frameDurationMs: 88,
+    notes: "Gather and release toward the camera. The projectile is the scene's business.",
+    variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-melt",
+    label: "Hero — melt (transform)",
+    category: "actor",
+    frames: sampleMeltFrames(HERO_EQUIPPED, 8, 0xa11ce),
+    frameDurationMs: 110,
+    notes:
+      "No melting frames were drawn: this is meltCloud() applied to the rendered rig. " +
+      "The same transform melts anything that renders to a pixel cloud.",
+    variants: [AUTHORED, FROST],
   },
   {
     id: "slime",
@@ -103,23 +125,23 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
         id: "ember",
         label: "Ember",
         overrides: {
-          g: "#3a1410",
-          G: "#a3452a",
-          l: "#e08b4a",
+          g: "#ff5a2b",
+          G: "#170502",
+          l: "#3a0f05",
           w: "#ffe0a8",
-          d: "#4a1d16",
-          s: "#20120f",
+          d: "#000000",
+          s: "#1f0d08",
         },
       },
       {
         id: "void",
         label: "Void",
         overrides: {
-          g: "#1d1430",
-          G: "#4a3a7a",
-          l: "#8f7cd8",
+          g: "#a06bff",
+          G: "#0e0618",
+          l: "#241040",
           w: "#e0d8ff",
-          d: "#2a1f45",
+          d: "#000000",
           s: "#150f22",
         },
       },
@@ -160,12 +182,12 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
       {
         id: "autumn",
         label: "Autumn",
-        overrides: { g: "#4a3a22", G: "#6b5228", h: "#8a6b31", s: "#33281a" },
+        overrides: { g: "#3a2410", G: "#000000", h: "#e8a33d", s: "#000000" },
       },
       {
         id: "night",
         label: "Night",
-        overrides: { g: "#1a2430", G: "#24303c", h: "#31404a", s: "#141c26" },
+        overrides: { g: "#0d2430", G: "#000000", h: "#35e8ff", s: "#000000" },
       },
     ],
   },
@@ -181,7 +203,7 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
       {
         id: "ashen",
         label: "Ashen",
-        overrides: { d: "#4c4a48", D: "#5d5b58", e: "#363433", p: "#6e6b66" },
+        overrides: { d: "#000000", D: "#141a22", e: "#000000", p: "#9db4d8" },
       },
     ],
   },
@@ -197,7 +219,7 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
       {
         id: "sandstone",
         label: "Sandstone",
-        overrides: { r: "#6b5c46", R: "#7d6d53", k: "#463b2d" },
+        overrides: { r: "#000000", R: "#1c1710", k: "#e8c25a" },
       },
     ],
   },
@@ -215,7 +237,7 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
       {
         id: "sandstone",
         label: "Sandstone",
-        overrides: { f: "#574a38", F: "#685941", m: "#3a3126" },
+        overrides: { f: "#000000", F: "#1c1710", m: "#e8c25a" },
       },
     ],
   },

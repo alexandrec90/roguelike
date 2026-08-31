@@ -1,62 +1,31 @@
-import type { Palette, PixelSpriteSource } from "./pixel-art";
+/**
+ * Hand-drawn raster sprites, re-inked for the 1-bit direction: pitch black
+ * carries the scene, so a sprite is a neon outline with a near-black fill and
+ * at most one or two accent colours. The hero is no longer here — characters
+ * are rigs now (`models.ts`); what remains raster is what has no limbs to
+ * animate: props, effects sources, and distant silhouettes.
+ */
 
-const HERO_PALETTE: Palette = {
-  ".": null,
-  h: "#251c22",
-  H: "#684337",
-  f: "#f0ba7d",
-  n: "#b75c46",
-  c: "#1b2735",
-  C: "#416a71",
-  w: "#d6e1c7",
-  b: "#352a36",
-  B: "#15141c",
-};
+import type { Palette, PixelSpriteSource } from "./pixel-art";
 
 const SLIME_PALETTE: Palette = {
   ".": null,
-  g: "#172c2c",
-  G: "#4b9a72",
-  l: "#78c985",
-  w: "#e1efbd",
-  d: "#243a36",
-  s: "#182125",
+  g: "#2ee868",
+  G: "#03170b",
+  l: "#0c2f18",
+  w: "#eaffea",
+  d: "#000000",
+  s: "#0d1f14",
 };
 
 const TORCH_PALETTE: Palette = {
   ".": null,
-  y: "#ffe082",
-  Y: "#fff2b0",
-  o: "#ef7e36",
-  r: "#a9392d",
-  b: "#674533",
-  d: "#2b2427",
-};
-
-export const HERO: PixelSpriteSource = {
-  palette: HERO_PALETTE,
-  rows: [
-    "................",
-    "....hhhhh.......",
-    "...hHHHHHh......",
-    "...hHfHfHh......",
-    "...hHHnHHh......",
-    "....hHHHh.......",
-    ".....hHh........",
-    "....cccccc......",
-    "...ccCCCCcc.....",
-    "...cCCCCCCc.....",
-    "...cCwCCwCc.....",
-    "...cCCCCCCc.....",
-    "....CCCCCC......",
-    "....CC..CC......",
-    "...bb....bb.....",
-    "...bb....bb.....",
-    "...bb....bb.....",
-    "..BBB....BBB....",
-    "..BBB....BBB....",
-    "................",
-  ],
+  y: "#ffd23d",
+  Y: "#fff7c8",
+  o: "#ff7a1f",
+  r: "#c2320f",
+  b: "#4a5a74",
+  d: "#000000",
 };
 
 export const SLIME_FRAMES: readonly PixelSpriteSource[] = [
@@ -189,6 +158,12 @@ export const SPARK: PixelSpriteSource = {
   rows: ["x"],
 };
 
+/** A raindrop streak: one logical pixel wide, falling. */
+export const RAIN_STREAK: PixelSpriteSource = {
+  palette: { ".": null, r: "#2a7fa8", R: "#7fd4f0" },
+  rows: ["r", "r", "R"],
+};
+
 /**
  * Landmarks beyond the horizon.
  *
@@ -200,9 +175,9 @@ export const SPARK: PixelSpriteSource = {
  */
 const DISTANT_PALETTE: Palette = {
   ".": null,
-  P: "#2b3a4a",
-  Q: "#333f4d",
-  q: "#c9a05a",
+  P: "#0f2b1c",
+  Q: "#131a2b",
+  q: "#ffd23d",
 };
 
 export const FAR_PINE: PixelSpriteSource = {
@@ -216,10 +191,10 @@ export const FAR_TOWER: PixelSpriteSource = {
 };
 
 export const ALL_SPRITES: readonly PixelSpriteSource[] = [
-  HERO,
   ...SLIME_FRAMES,
   ...TORCH_FRAMES,
   SPARK,
+  RAIN_STREAK,
   FAR_PINE,
   FAR_TOWER,
 ];

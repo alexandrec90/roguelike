@@ -11,6 +11,7 @@ import {
   rollColors,
   skyBands,
   SKY_RAMP,
+  starField,
 } from "./horizon";
 
 describe("horizonLayout", () => {
@@ -175,5 +176,28 @@ describe("ridgeProfile", () => {
   it("rejects a wavelength that would divide by zero", () => {
     expect(() => ridgeProfile(10, { wavelength: 0 })).toThrow(/wavelength/);
     expect(() => ridgeProfile(-1)).toThrow(/negative/);
+  });
+});
+
+describe("starField", () => {
+  it("is seeded, so a capture of the sky is reproducible", () => {
+    expect(starField(320, 6)).toEqual(starField(320, 6));
+    expect(starField(320, 6, 1)).not.toEqual(starField(320, 6, 2));
+  });
+
+  it("stays inside the sky band and scales with its area", () => {
+    const stars = starField(320, 6);
+    expect(stars.every((star) => star.x >= 0 && star.x < 320 && star.y >= 0 && star.y < 6)).toBe(
+      true,
+    );
+    expect(stars.length).toBeGreaterThan(starField(320, 3).length);
+    expect(starField(320, 0)).toEqual([]);
+  });
+
+  it("marks a minority of stars bright", () => {
+    const stars = starField(320, 40);
+    const bright = stars.filter((star) => star.bright).length;
+    expect(bright).toBeGreaterThan(0);
+    expect(bright).toBeLessThan(stars.length / 2);
   });
 });
