@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Asset Lab · Roguelike</title>
+  </head>
+  <body>
+    <div class="lab">
+      <aside class="catalog">
+        <h1>Asset Lab</h1>
+        <nav id="catalog"></nav>
+        <footer>
+          <p><kbd>space</kbd> play · <kbd>←</kbd><kbd>→</kbd> frame · <kbd>↑</kbd><kbd>↓</kbd> asset</p>
+          <p><kbd>g</kbd> grid · <kbd>b</kbd> bounds · <kbd>t</kbd> tiled · <kbd>[</kbd><kbd>]</kbd> zoom</p>
+        </footer>
+      </aside>
+
+      <main class="stage">
+        <div class="toolbar">
+          <div class="group">
+            <button type="button" id="play">Pause</button>
+            <button type="button" id="prev" title="Previous frame">&#9664;</button>
+            <span id="frame-readout" class="readout">1 / 1</span>
+            <button type="button" id="next" title="Next frame">&#9654;</button>
+          </div>
+
+          <div class="group">
+            <label for="variant">Palette</label>
+            <select id="variant"></select>
+            <label for="zoom">Zoom</label>
+            <select id="zoom"></select>
+            <label for="bg">Ground</label>
+            <select id="bg"></select>
+          </div>
+
+          <div class="group">
+            <label class="check"><input type="checkbox" id="grid" /> Grid</label>
+            <label class="check"><input type="checkbox" id="bounds" /> Bounds</label>
+            <label class="check"><input type="checkbox" id="tile" /> Tiled</label>
+          </div>
+        </div>
+
+        <div class="viewport"><div id="lab-canvas"></div></div>
+
+        <div class="status">
+          <p id="status" class="metrics"></p>
+          <p id="notes" class="notes"></p>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="/src/lab/main.ts"></script>
+  </body>
+</html>

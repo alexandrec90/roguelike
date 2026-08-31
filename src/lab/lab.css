@@ -1,0 +1,226 @@
+/*
+ * Chrome for the asset lab. Deliberately neutral and dark: any colour in here
+ * competes with the art it frames, and a judgement about a sprite made against
+ * a tinted surround is a judgement about the surround.
+ */
+
+:root {
+  color-scheme: dark;
+  --ink: #e8e2d6;
+  --ink-dim: #8b8377;
+  --chrome: #0e1015;
+  --panel: #14171e;
+  --line: #242a35;
+  --accent: #e8c07a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--chrome);
+  color: var(--ink);
+  font: 13px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+
+.lab {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  height: 100%;
+}
+
+/* Catalog */
+
+.catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+.catalog h1 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.catalog h2 {
+  margin: 14px 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.catalog nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.catalog button {
+  padding: 5px 8px;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.catalog button:hover {
+  background: #1c212b;
+}
+
+.catalog button.active {
+  color: var(--chrome);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.catalog footer {
+  margin-top: auto;
+  padding-top: 16px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.catalog footer p {
+  margin: 0 0 4px;
+}
+
+kbd {
+  padding: 0 4px;
+  font: inherit;
+  background: #1c212b;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+/* Stage */
+
+.stage {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.toolbar label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.toolbar button,
+.toolbar select {
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.toolbar button:hover:not(:disabled),
+.toolbar select:hover {
+  border-color: #39424f;
+}
+
+.toolbar .check {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toolbar .check:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.readout {
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+.viewport {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 16px;
+}
+
+#lab-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * The canvas is 320x180 of real pixels. Its size and offset are set from
+ * `integerScale`/`letterbox` so both are whole numbers — a canvas centred onto
+ * a half pixel is resampled by the compositor, which is the one thing an
+ * inspector must never do to the art it is being used to judge.
+ */
+#lab-canvas canvas {
+  position: absolute;
+  display: block;
+  image-rendering: pixelated;
+  border: 1px solid var(--line);
+}
+
+.status {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--line);
+}
+
+/*
+ * The measurements live here rather than inside the canvas: 320x180 has room
+ * for a 5px font and nothing legible, and a lab whose readouts have to be
+ * squinted at gets read wrong.
+ */
+.metrics {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.notes {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-dim);
+  min-height: 18px;
+}

@@ -1,17 +1,9 @@
 import Phaser from "phaser";
 
-import { quantizedWave, rasterizeSprite, type PixelSpriteSource } from "./pixel-art";
+import { quantizedWave } from "./pixel-art";
+import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./spark-emitter";
 import { HERO, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
-
-interface SparkState {
-  image: Phaser.GameObjects.Image;
-  active: boolean;
-  ageMs: number;
-  lifeMs: number;
-  x: number;
-  y: number;
-  drift: number;
-}
+import { installPixelTexture } from "./textures";
 
 const WIDTH = 320;
 const HEIGHT = 180;
@@ -24,9 +16,9 @@ export class DemoScene extends Phaser.Scene {
   private torchGlow!: Phaser.GameObjects.Graphics;
   private heroShadow!: Phaser.GameObjects.Ellipse;
   private slimeShadow!: Phaser.GameObjects.Ellipse;
-  private sparks: SparkState[] = [];
+  private sparkImages: Phaser.GameObjects.Image[] = [];
+  private emitter: EmitterState = createEmitter();
   private elapsedMs = 0;
-  private nextSparkMs = 0;
 
   constructor() {
     super("ember-cellar");
@@ -49,26 +41,10 @@ export class DemoScene extends Phaser.Scene {
   }
 
   private createTextures(): void {
-    this.installTexture("hero", HERO);
-    SLIME_FRAMES.forEach((frame, index) => this.installTexture(`slime-${index}`, frame));
-    TORCH_FRAMES.forEach((frame, index) => this.installTexture(`torch-${index}`, frame));
-    this.installTexture("spark", SPARK);
-  }
-
-  private installTexture(key: string, source: PixelSpriteSource): void {
-    const sprite = rasterizeSprite(source);
-    const texture = this.textures.createCanvas(key, sprite.width, sprite.height);
-    if (texture === null) {
-      throw new Error(`Could not create texture '${key}'`);
-    }
-    const context = texture.getContext();
-    context.imageSmoothingEnabled = false;
-    context.putImageData(
-      new ImageData(new Uint8ClampedArray(sprite.rgba), sprite.width, sprite.height),
-      0,
-      0,
-    );
-    texture.refresh();
+    installPixelTexture(this.textures, "hero", HERO);
+    SLIME_FRAMES.forEach((frame, index) => installPixelTexture(this.textures, `slime-${index}`, frame));
+    TORCH_FRAMES.forEach((frame, index) => installPixelTexture(this.textures, `torch-${index}`, frame));
+    installPixelTexture(this.textures, "spark", SPARK);
   }
 
   private drawRoom(): void {
@@ -129,18 +105,10 @@ export class DemoScene extends Phaser.Scene {
 
     this.torch = this.add.image(160, 72, "torch-0").setOrigin(0.5, 1);
 
-    for (let index = 0; index < 14; index += 1) {
-      const image = this.add.image(-10, -10, "spark").setVisible(false);
-      image.setBlendMode(Phaser.BlendModes.ADD);
-      this.sparks.push({
-        image,
-        active: false,
-        ageMs: 0,
-        lifeMs: 0,
-        x: 0,
-        y: 0,
-        drift: 0,
-      });
+    for (let index = 0; index < this.emitter.particles.length; index += 1) {
+      this.sparkImages.push(
+        this.add.image(-10, -10, "spark").setVisible(false).setBlendMode(Phaser.BlendModes.ADD),
+      );
     }
   }
 
@@ -207,46 +175,30 @@ export class DemoScene extends Phaser.Scene {
       Math.sin(this.elapsedMs * 0.019) * 0.035 + Math.sin(this.elapsedMs * 0.047) * 0.018;
     this.torchGlow.setScale(1 + flicker, 1 + flicker * 0.72);
     this.torchGlow.alpha = 0.86 + flicker * 2.1;
-
-    if (this.elapsedMs >= this.nextSparkMs) {
-      this.spawnSpark();
-      this.nextSparkMs = this.elapsedMs + 120 + ((this.elapsedMs * 17) % 170);
-    }
   }
 
-  private spawnSpark(): void {
-    const spark = this.sparks.find((candidate) => !candidate.active);
-    if (!spark) {
-      return;
-    }
-
-    const seed = Math.floor(this.elapsedMs / 37);
-    spark.active = true;
-    spark.ageMs = 0;
-    spark.lifeMs = 420 + (seed % 5) * 55;
-    spark.x = 157 + (seed % 7);
-    spark.y = 61 + (seed % 3);
-    spark.drift = ((seed % 5) - 2) * 0.0022;
-    spark.image.setPosition(spark.x, spark.y).setAlpha(1).setVisible(true);
-  }
-
+  /**
+   * Sparks come from the shared seeded emitter — the same one the asset lab
+   * steps — so what the lab shows for `sparks` is what this scene draws, and a
+   * capture of it is reproducible rather than merely plausible.
+   */
   private updateSparks(delta: number): void {
-    for (const spark of this.sparks) {
-      if (!spark.active) {
-        continue;
-      }
-      spark.ageMs += delta;
-      if (spark.ageMs >= spark.lifeMs) {
-        spark.active = false;
-        spark.image.setVisible(false);
-        continue;
-      }
+    stepEmitter(this.emitter, delta);
 
-      spark.x += spark.drift * delta;
-      spark.y -= 0.0085 * delta;
-      const fade = 1 - spark.ageMs / spark.lifeMs;
-      spark.image.setPosition(Math.round(spark.x), Math.round(spark.y)).setAlpha(fade);
-    }
+    this.emitter.particles.forEach((particle, index) => {
+      const image = this.sparkImages[index];
+      if (image === undefined) {
+        return;
+      }
+      if (!particle.active) {
+        image.setVisible(false);
+        return;
+      }
+      image
+        .setPosition(Math.round(particle.x), Math.round(particle.y))
+        .setAlpha(particleAlpha(particle))
+        .setVisible(true);
+    });
   }
 }
 
