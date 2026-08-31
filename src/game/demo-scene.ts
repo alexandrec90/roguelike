@@ -21,7 +21,7 @@ export class DemoScene extends Phaser.Scene {
   private elapsedMs = 0;
 
   constructor() {
-    super("ember-cellar");
+    super("world");
   }
 
   create(): void {
@@ -134,15 +134,6 @@ export class DemoScene extends Phaser.Scene {
     for (const [x, y] of positions) {
       motes.fillStyle(0xc08b57, 0.24).fillRect(x ?? 0, y ?? 0, 1, 1);
     }
-
-    this.add
-      .text(26, 154, "A QUIET MOMENT BELOW", {
-        color: "#66594f",
-        fontFamily: "monospace",
-        fontSize: "5px",
-        letterSpacing: 1,
-      })
-      .setResolution(1);
   }
 
   private animateHero(): void {
