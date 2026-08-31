@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ASSET_REGISTRY, textureKey, type AssetEntry } from "./asset-registry";
 import type { PixelSpriteSource } from "./pixel-art";
+import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import {
   installAssetTextures,
   installPixelTexture,
@@ -114,9 +115,11 @@ describe("installAssetTextures", () => {
 
     installAssetTextures(host);
 
-    const tiled = textures.get(textureKey("floor-stone", "authored", 0, TILE_PREVIEW_SUFFIX));
-    expect(tiled?.width).toBe(16 * TILE_PREVIEW_COLUMNS);
-    expect(tiled?.height).toBe(16 * TILE_PREVIEW_ROWS);
+    // Ground tiles are 16 wide by TILE_DEPTH tall, because they are authored in
+    // the camera's projection rather than squashed into it at draw time.
+    const tiled = textures.get(textureKey("grass", "authored", 0, TILE_PREVIEW_SUFFIX));
+    expect(tiled?.width).toBe(TILE_WIDTH * TILE_PREVIEW_COLUMNS);
+    expect(tiled?.height).toBe(TILE_DEPTH * TILE_PREVIEW_ROWS);
   });
 
   it("does not compose tiled sheets for actors", () => {

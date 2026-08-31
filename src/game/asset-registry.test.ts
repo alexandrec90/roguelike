@@ -86,7 +86,7 @@ describe("textureKey", () => {
   });
 
   it("namespaces derived textures with a suffix", () => {
-    expect(textureKey("floor-stone", "authored", 0, "3x3")).toBe("asset:floor-stone:authored:0:3x3");
+    expect(textureKey("grass", "authored", 0, "3x3")).toBe("asset:grass:authored:0:3x3");
   });
 });
 

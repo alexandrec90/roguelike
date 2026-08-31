@@ -19,12 +19,44 @@ These are product constraints, not suggestions tied to the proof of concept.
 | Area | Contract |
 | --- | --- |
 | Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by an integer factor and letterbox the remainder. |
-| Grid | Use 16×16 world tiles. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
+| Setting | **Outdoors.** The game is an overworld — fields, paths, rock, sky — not a dungeon interior. |
+| Camera | A **pitched-back overhead** view, not a 45°-yaw diamond isometric: rows and columns stay axis-aligned and only the vertical axis is foreshortened. A 16×16 world square lands on 16×12 of screen, and height rises straight up the screen by `WALL_RISE`, which is what makes walls stand. `src/game/projection.ts` owns that math; nothing else re-derives it. |
+| Grid | 16×16 world tiles. Author ground art **already foreshortened** — 16×`TILE_DEPTH` for anything lying on the ground, 16×`WALL_RISE` for anything standing up — so every tile blits 1:1 and nothing is scaled at draw time. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
+| Flatness | Below the horizon band the ground is **affine, not perspective**: every world row is exactly `TILE_DEPTH` scanlines tall, with no convergence and no per-row scaling. A tile's screen size never depends on how far up the screen it is. |
+| Horizon | The top of the screen **rolls over the horizon** — sky, then a short band where the ground curves away and a dozen world rows compress into a few scanlines, then the flat field. `src/game/horizon.ts` owns it, and one knob sets the split. |
 | Identity art | Characters, monsters, items, and tiles are authored palette-indexed raster sprites. Keep their source text-defined and diffable; generated PNG atlases are build output. SVG is not a primary game-art format. |
 | Procedural art | Use math for motion, light, particles, and other effects—not for complete character silhouettes. Image-generated art may guide mood and composition but must be redrawn and validated on the game grid before becoming production art. |
 | Animation | Combine a small number of authored silhouette-changing frames with discrete, grid-quantized translation and squash/stretch. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. |
 | Effects | Build particles from 1–4 logical-pixel primitives or tiny raster sprites. Pool them, cap their count, and use seeded randomness when reproducibility matters. |
 | Separation | Keep turn simulation deterministic and independent of the real-time presentation layer. Rendering may exaggerate an event but must not determine its outcome. |
+
+### The camera, and the band at the top of it
+
+Four modules, and no fifth place where any of this is decided:
+
+| Module | Owns |
+| --- | --- |
+| `src/game/projection.ts` | `TILE_WIDTH` 16, `TILE_DEPTH` 12, `WALL_RISE` 16, and `project()` / `cellOrigin()` / `wallCapY()` / `wallFaceY()` / `depthOf()`. Draw order is `row * TILE_WIDTH + rank` — painter's algorithm down the screen. |
+| `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, the roll's easing, and `ridgeProfile()` for distant silhouettes. |
+| `src/game/tiles.ts` | The terrain art, in one shared palette with per-material tokens, so a whole field can be spliced into a single texture by `composeTiles`. |
+| `src/game/field.ts` | The sample scene's map, as text. `demo-scene.ts` reads all four and only draws. |
+
+**The 95/5 split is a knob, not a constant to inline.** `DEFAULT_SKY_FRACTION` in
+`horizon.ts` is the default; `?horizon=8%` (or `?horizon=0.08`) overrides it per load;
+the on-screen caption prints the resulting pixel counts so it can be judged by eye. Read
+`horizonLayout()` for `groundTop` — never hard-code a y for the horizon, and never
+assume the flat field starts at 9px, because that number moves the moment the knob does.
+
+Two rules fall out of the projection and are easy to break by accident:
+
+- **Never scale a sprite to fake foreshortening.** A 16×16 source drawn at 0.75 resamples
+  every row, which is precisely the smearing the pixel contract exists to prevent. If a
+  thing lies on the ground, author it 16×12.
+- **A ground tile and a standing face are different art.** A face is not foreshortened at
+  all, it stacks vertically, and so it may carry nothing that reads as "the bottom" — a
+  contact shadow inside it becomes a stripe every sixteen pixels. Draw the shadow once, at
+  the wall's foot. Equally, a cap is a *surface*: give it no vertical lines, or an outcrop
+  reads as brickwork lying flat.
 
 ### Visual verification
 
@@ -45,7 +77,7 @@ Everything it shows is in the URL, so a capture can be reopened exactly:
 
 | Key | Meaning |
 | --- | --- |
-| `asset` | registry id — `hero`, `slime`, `torch`, `floor-stone`, `wall-top`, `wall-face`, `sparks` |
+| `asset` | registry id — `hero`, `slime`, `torch`, `grass`, `dirt-path`, `wall-top`, `wall-face`, `far-pine`, `far-tower`, `sparks` |
 | `variant` | palette swap id; `authored` is the art as drawn |
 | `frame` / `t` | frame index, and elapsed ms for effects |
 | `play` | `1` animates, `0` pins the view — captures use `0` |

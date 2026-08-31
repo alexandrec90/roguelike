@@ -189,9 +189,37 @@ export const SPARK: PixelSpriteSource = {
   rows: ["x"],
 };
 
+/**
+ * Landmarks beyond the horizon.
+ *
+ * These stand on the horizon line inside the rolled-over band, so they are
+ * authored at the scale that band affords — five or six pixels — and read as
+ * silhouette plus one lit window rather than as small versions of near art.
+ * The ridge they stand on is generated noise (`ridgeProfile`); anything with an
+ * identity is drawn, which is the split the art contract asks for.
+ */
+const DISTANT_PALETTE: Palette = {
+  ".": null,
+  P: "#2b3a4a",
+  Q: "#333f4d",
+  q: "#c9a05a",
+};
+
+export const FAR_PINE: PixelSpriteSource = {
+  palette: DISTANT_PALETTE,
+  rows: ["..P..", ".PPP.", ".PPP.", "PPPPP", "..P..", "..P.."],
+};
+
+export const FAR_TOWER: PixelSpriteSource = {
+  palette: DISTANT_PALETTE,
+  rows: ["Q.Q.Q", "QQQQQ", "QQQQQ", "QQqQQ", "QQQQQ", "QQQQQ"],
+};
+
 export const ALL_SPRITES: readonly PixelSpriteSource[] = [
   HERO,
   ...SLIME_FRAMES,
   ...TORCH_FRAMES,
   SPARK,
+  FAR_PINE,
+  FAR_TOWER,
 ];
