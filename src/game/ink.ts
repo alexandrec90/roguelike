@@ -135,10 +135,8 @@ export function stampMask(cloud: PixelCloud, mask: Mask, x: number, y: number, i
  */
 export function strokeLine(
   cloud: PixelCloud,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
+  from: { readonly x: number; readonly y: number },
+  to: { readonly x: number; readonly y: number },
   ink: InkId,
   thickness = 1,
 ): void {
@@ -148,10 +146,10 @@ export function strokeLine(
   const lo = -Math.floor((thickness - 1) / 2);
   const hi = Math.ceil((thickness - 1) / 2);
 
-  let x = Math.round(x0);
-  let y = Math.round(y0);
-  const endX = Math.round(x1);
-  const endY = Math.round(y1);
+  let x = Math.round(from.x);
+  let y = Math.round(from.y);
+  const endX = Math.round(to.x);
+  const endY = Math.round(to.y);
   const dx = Math.abs(endX - x);
   const dy = -Math.abs(endY - y);
   const stepX = x < endX ? 1 : -1;

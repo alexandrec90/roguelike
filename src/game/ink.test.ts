@@ -67,7 +67,7 @@ describe("stampMask", () => {
 describe("strokeLine", () => {
   it("connects both endpoints inclusively", () => {
     const cloud: PixelCloud = [];
-    strokeLine(cloud, 0, 0, 3, 2, "bone");
+    strokeLine(cloud, { x: 0, y: 0 }, { x: 3, y: 2 }, "bone");
     const keys = new Set(cloud.map((pixel) => `${pixel.x},${pixel.y}`));
     expect(keys.has("0,0")).toBe(true);
     expect(keys.has("3,2")).toBe(true);
@@ -77,11 +77,11 @@ describe("strokeLine", () => {
 
   it("handles a single point and any octant", () => {
     const point: PixelCloud = [];
-    strokeLine(point, 2, 2, 2, 2, "cyan");
+    strokeLine(point, { x: 2, y: 2 }, { x: 2, y: 2 }, "cyan");
     expect(point).toEqual([{ x: 2, y: 2, ink: "cyan" }]);
 
     const up: PixelCloud = [];
-    strokeLine(up, 0, 0, -2, -4, "cyan");
+    strokeLine(up, { x: 0, y: 0 }, { x: -2, y: -4 }, "cyan");
     const keys = new Set(up.map((pixel) => `${pixel.x},${pixel.y}`));
     expect(keys.has("-2,-4")).toBe(true);
   });
@@ -89,10 +89,12 @@ describe("strokeLine", () => {
   it("widens with a square brush and rejects a zero thickness", () => {
     const thin: PixelCloud = [];
     const thick: PixelCloud = [];
-    strokeLine(thin, 0, 0, 0, 4, "bone", 1);
-    strokeLine(thick, 0, 0, 0, 4, "bone", 2);
+    strokeLine(thin, { x: 0, y: 0 }, { x: 0, y: 4 }, "bone", 1);
+    strokeLine(thick, { x: 0, y: 0 }, { x: 0, y: 4 }, "bone", 2);
     expect(thick.length).toBeGreaterThan(thin.length);
-    expect(() => strokeLine([], 0, 0, 1, 1, "bone", 0)).toThrow(/thickness/);
+    expect(() => strokeLine([], { x: 0, y: 0 }, { x: 1, y: 1 }, "bone", 0)).toThrow(
+      /thickness/,
+    );
   });
 });
 

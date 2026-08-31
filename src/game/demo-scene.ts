@@ -94,6 +94,74 @@ const SHOWCASE: readonly ShowPhase[] = [
 ];
 const SHOWCASE_TOTAL = SHOWCASE.reduce((total, phase) => total + phase.ms, 0);
 
+function installSceneTextures(scene: Phaser.Scene, columns: number, rows: number): void {
+  SLIME_FRAMES.forEach((frame, index) =>
+    installPixelTexture(scene.textures, `slime-${index}`, frame),
+  );
+  TORCH_FRAMES.forEach((frame, index) =>
+    installPixelTexture(scene.textures, `torch-${index}`, frame),
+  );
+  installPixelTexture(scene.textures, "spark", SPARK);
+  installPixelTexture(scene.textures, "rain", RAIN_STREAK);
+  installPixelTexture(scene.textures, "wall-top", WALL_TOP);
+  installPixelTexture(scene.textures, "wall-face", WALL_FACE);
+  installPixelTexture(scene.textures, "far-pine", FAR_PINE);
+  installPixelTexture(scene.textures, "far-tower", FAR_TOWER);
+  installPixelTexture(scene.textures, "ground", composeGround(columns, rows));
+}
+
+function drawSky(scene: Phaser.Scene, layout: HorizonLayout): void {
+  const sky = scene.add.graphics().setDepth(BAND_DEPTH);
+  for (const band of skyBands(layout.skyHeight)) {
+    sky.fillStyle(hexToInt(band.color)).fillRect(0, band.y, WIDTH, band.height);
+  }
+  for (const star of starField(WIDTH, layout.skyHeight)) {
+    sky.fillStyle(hexToInt(star.bright ? "#f2f7ff" : "#5e7ea6")).fillRect(star.x, star.y, 1, 1);
+  }
+}
+
+function drawDistantObjects(scene: Phaser.Scene, layout: HorizonLayout): void {
+  const { horizonY } = layout;
+  const ridges = scene.add.graphics().setDepth(BAND_DEPTH + 1);
+  for (const ridge of [RIDGE_FAR, RIDGE_NEAR]) {
+    const profile = ridgeProfile(WIDTH, { ...ridge, maxHeight: horizonY });
+    ridges.fillStyle(hexToInt(ridge.color));
+    profile.forEach((height, x) => {
+      if (height > 0) {
+        ridges.fillRect(x, horizonY - height, 1, height);
+      }
+    });
+  }
+  for (const x of DISTANT_PINES) {
+    scene.add.image(x, horizonY, "far-pine").setOrigin(0, 1).setDepth(BAND_DEPTH + 2);
+  }
+  scene.add.image(DISTANT_TOWER_X, horizonY, "far-tower").setOrigin(0, 1).setDepth(BAND_DEPTH + 2);
+}
+
+function drawWorld(scene: Phaser.Scene, layout: HorizonLayout, columns: number, rows: number): void {
+  drawSky(scene, layout);
+  drawDistantObjects(scene, layout);
+  const roll = scene.add.graphics().setDepth(BAND_DEPTH + 3);
+  for (const band of rollColors(rollBands(layout.rollHeight))) {
+    roll.fillStyle(hexToInt(band.color)).fillRect(0, layout.horizonY + band.y, WIDTH, band.height);
+  }
+  scene.add.image(0, layout.groundTop, "ground").setOrigin(0, 0).setDepth(GROUND_DEPTH);
+  for (const cell of rockCells(columns, rows)) {
+    const origin = cellOrigin(cell.column, cell.row, layout.groundTop);
+    scene.add
+      .image(origin.x, wallCapY(origin.y), "wall-top")
+      .setOrigin(0, 0)
+      .setDepth(cell.row * TILE_WIDTH + RANK_CAP);
+  }
+  for (const cell of faceCells(columns, rows)) {
+    const origin = cellOrigin(cell.column, cell.row, layout.groundTop);
+    scene.add
+      .image(origin.x, wallFaceY(origin.y), "wall-face")
+      .setOrigin(0, 0)
+      .setDepth(cell.row * TILE_WIDTH + RANK_FACE);
+  }
+}
+
 /**
  * The sample outdoor scene, in the 1-bit direction: a pitch-black field with
  * neon marks on it. The hero is not a sprite — it is the humanoid rig from
@@ -133,12 +201,8 @@ export class DemoScene extends Phaser.Scene {
     this.columns = columnsAcross(WIDTH);
     this.rows = rowsDown(this.layout.groundHeight);
 
-    this.createTextures();
-    this.drawSky();
-    this.drawDistantObjects();
-    this.drawRoll();
-    this.drawGround();
-    this.drawRocks();
+    installSceneTextures(this, this.columns, this.rows);
+    drawWorld(this, this.layout, this.columns, this.rows);
     this.drawPuddle();
     this.createHero();
     this.createSlime();
@@ -154,97 +218,6 @@ export class DemoScene extends Phaser.Scene {
     this.updateSparks(delta);
     this.updateRain(delta);
     this.updateLightning();
-  }
-
-  private createTextures(): void {
-    SLIME_FRAMES.forEach((frame, index) =>
-      installPixelTexture(this.textures, `slime-${index}`, frame),
-    );
-    TORCH_FRAMES.forEach((frame, index) =>
-      installPixelTexture(this.textures, `torch-${index}`, frame),
-    );
-    installPixelTexture(this.textures, "spark", SPARK);
-    installPixelTexture(this.textures, "rain", RAIN_STREAK);
-    installPixelTexture(this.textures, "wall-top", WALL_TOP);
-    installPixelTexture(this.textures, "wall-face", WALL_FACE);
-    installPixelTexture(this.textures, "far-pine", FAR_PINE);
-    installPixelTexture(this.textures, "far-tower", FAR_TOWER);
-    installPixelTexture(this.textures, "ground", composeGround(this.columns, this.rows));
-  }
-
-  /** One filled scanline per row of the ramp, then the stars over it. */
-  private drawSky(): void {
-    const sky = this.add.graphics().setDepth(BAND_DEPTH);
-    for (const band of skyBands(this.layout.skyHeight)) {
-      sky.fillStyle(hexToInt(band.color)).fillRect(0, band.y, WIDTH, band.height);
-    }
-    for (const star of starField(WIDTH, this.layout.skyHeight)) {
-      sky.fillStyle(hexToInt(star.bright ? "#f2f7ff" : "#5e7ea6")).fillRect(star.x, star.y, 1, 1);
-    }
-  }
-
-  private drawDistantObjects(): void {
-    const { horizonY } = this.layout;
-    const ridges = this.add.graphics().setDepth(BAND_DEPTH + 1);
-
-    for (const ridge of [RIDGE_FAR, RIDGE_NEAR]) {
-      const profile = ridgeProfile(WIDTH, { ...ridge, maxHeight: horizonY });
-      ridges.fillStyle(hexToInt(ridge.color));
-      profile.forEach((height, x) => {
-        if (height > 0) {
-          ridges.fillRect(x, horizonY - height, 1, height);
-        }
-      });
-    }
-
-    // Landmarks stand *on* the horizon line. When the band is squeezed small
-    // enough that they overrun the top of the screen the canvas clips them,
-    // which reads as a distant thing half over the curve — the right answer.
-    for (const x of DISTANT_PINES) {
-      this.add.image(x, horizonY, "far-pine").setOrigin(0, 1).setDepth(BAND_DEPTH + 2);
-    }
-    this.add.image(DISTANT_TOWER_X, horizonY, "far-tower").setOrigin(0, 1).setDepth(BAND_DEPTH + 2);
-  }
-
-  /**
-   * The ground curving away, between the horizon line and the flat playfield.
-   */
-  private drawRoll(): void {
-    const roll = this.add.graphics().setDepth(BAND_DEPTH + 3);
-    const bands = rollColors(rollBands(this.layout.rollHeight));
-    for (const band of bands) {
-      roll.fillStyle(hexToInt(band.color)).fillRect(0, this.layout.horizonY + band.y, WIDTH, band.height);
-    }
-  }
-
-  private drawGround(): void {
-    this.add.image(0, this.layout.groundTop, "ground").setOrigin(0, 0).setDepth(GROUND_DEPTH);
-  }
-
-  /**
-   * Rock blocks: a cap lifted by one wall unit, and a face for the blocks that
-   * have nothing standing in front of them. On a black ground the mortar
-   * outlines carry the shape, so no contact shadow is drawn — there is nothing
-   * darker than the field to draw it with.
-   */
-  private drawRocks(): void {
-    const { groundTop } = this.layout;
-
-    for (const cell of rockCells(this.columns, this.rows)) {
-      const origin = cellOrigin(cell.column, cell.row, groundTop);
-      this.add
-        .image(origin.x, wallCapY(origin.y), "wall-top")
-        .setOrigin(0, 0)
-        .setDepth(cell.row * TILE_WIDTH + RANK_CAP);
-    }
-
-    for (const cell of faceCells(this.columns, this.rows)) {
-      const origin = cellOrigin(cell.column, cell.row, groundTop);
-      this.add
-        .image(origin.x, wallFaceY(origin.y), "wall-face")
-        .setOrigin(0, 0)
-        .setDepth(cell.row * TILE_WIDTH + RANK_FACE);
-    }
   }
 
   /** Still water at the hero's feet, and the lookup the reflection clips to. */
