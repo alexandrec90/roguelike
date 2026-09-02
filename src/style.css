@@ -18,8 +18,8 @@ body {
 
 /*
  * The game world is the page. No chrome, no border, no title, no controls —
- * the only thing on screen is the canvas, centred with its letterbox margins
- * painted the same black as the surround so no frame is implied.
+ * the only thing on screen is the canvas, enlarged until it covers the host.
+ * Any excess is clipped here, so no frame or letterbox can appear.
  */
 #game {
   position: relative;
@@ -31,9 +31,9 @@ body {
 }
 
 /*
- * Size and position come from `integerScale`/`letterbox` in main.ts, never from
- * CSS. Stretching this canvas to 100% of its box resamples a 320x180 grid onto
- * a fractional one — which is exactly the blur pixel art is drawn to avoid.
+ * Size and position come from `integerCoverScale`/`centerCrop` in main.ts,
+ * never from CSS. Stretching this canvas to 100% of its box would distort the
+ * 320x180 grid on windows with a different aspect ratio.
  */
 #game canvas {
   position: absolute;

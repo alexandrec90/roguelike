@@ -3,7 +3,7 @@ import Phaser from "phaser";
 import "./style.css";
 import { DemoScene, GAME_SIZE } from "./game/demo-scene";
 import { parseSkyFraction } from "./game/horizon";
-import { integerScale, letterbox } from "./game/integer-scale";
+import { centerCrop, integerCoverScale } from "./game/integer-scale";
 
 // The 95/5 horizon split is a framing decision, so it is retunable without a
 // rebuild: `?horizon=0.08` or `?horizon=8%`. An unreadable value falls back to
@@ -28,9 +28,8 @@ const game = new Phaser.Game({
     smoothStep: true,
   },
   scale: {
-    // NONE, not FIT: `FIT` picks a fractional factor, and a 320x180 grid drawn
-    // at 3.47x is resampled — every one-pixel highlight lands on a seam. The
-    // canvas keeps its logical size and we scale it by a whole number below.
+    // NONE, not ENVELOP: Phaser may pick a fractional factor, while the cover
+    // layout below keeps every logical pixel at a uniform whole-number size.
     mode: Phaser.Scale.NONE,
     autoCenter: Phaser.Scale.NO_CENTER,
   },
@@ -39,20 +38,20 @@ const game = new Phaser.Game({
   },
 });
 
-/** Largest whole upscale that fits the frame, centred on integer pixels. */
-function fitCanvas(): void {
+/** Whole-number cover scale, centred so the host clips excess canvas evenly. */
+function coverCanvas(): void {
   const host = game.canvas.parentElement;
   if (host === null) {
     return;
   }
 
-  const { factor, width, height } = integerScale(
+  const { factor, width, height } = integerCoverScale(
     host.clientWidth,
     host.clientHeight,
     GAME_SIZE.width,
     GAME_SIZE.height,
   );
-  const { left, top } = letterbox(host.clientWidth, host.clientHeight, width, height);
+  const { left, top } = centerCrop(host.clientWidth, host.clientHeight, width, height);
 
   game.canvas.style.width = `${GAME_SIZE.width * factor}px`;
   game.canvas.style.height = `${GAME_SIZE.height * factor}px`;
@@ -60,8 +59,8 @@ function fitCanvas(): void {
   game.canvas.style.top = `${top}px`;
 }
 
-window.addEventListener("resize", fitCanvas);
-game.events.once(Phaser.Core.Events.READY, fitCanvas);
+window.addEventListener("resize", coverCanvas);
+game.events.once(Phaser.Core.Events.READY, coverCanvas);
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => game.destroy(true));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { integerScale, letterbox } from "./integer-scale";
+import { centerCrop, integerCoverScale, integerScale, letterbox } from "./integer-scale";
 
 describe("integerScale", () => {
   it("picks the largest whole factor that fits", () => {
@@ -46,5 +46,37 @@ describe("letterbox", () => {
 
   it("never offsets content larger than the viewport", () => {
     expect(letterbox(320, 180, 640, 360)).toEqual({ left: 0, top: 0 });
+  });
+});
+
+describe("integerCoverScale", () => {
+  it("picks the smallest whole factor that covers an awkward viewport", () => {
+    expect(integerCoverScale(1000, 700, 320, 180)).toEqual({
+      factor: 4,
+      width: 1280,
+      height: 720,
+    });
+  });
+
+  it("does not enlarge a canvas that already covers the viewport", () => {
+    expect(integerCoverScale(200, 100, 320, 180)).toEqual({
+      factor: 1,
+      width: 320,
+      height: 180,
+    });
+  });
+
+  it("rejects a non-positive base size", () => {
+    expect(() => integerCoverScale(100, 100, 0, 180)).toThrow(/positive/);
+  });
+});
+
+describe("centerCrop", () => {
+  it("centres oversized content with negative whole-pixel offsets", () => {
+    expect(centerCrop(1000, 700, 1280, 720)).toEqual({ left: -140, top: -10 });
+  });
+
+  it("centres an odd crop without using half pixels", () => {
+    expect(centerCrop(999, 699, 1280, 720)).toEqual({ left: -141, top: -11 });
   });
 });

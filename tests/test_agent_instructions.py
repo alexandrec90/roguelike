@@ -7,6 +7,9 @@ def test_visual_architecture_is_a_durable_agent_contract():
     required_constraints = (
         "Render the world at 320",
         "nearest-neighbor upscale",
+        "covers the full window",
+        "Centre-crop overflow evenly",
+        "never expose a border or distort the aspect ratio",
         "palette-indexed raster sprites",
         "SVG is not a primary game-art format",
         "Use math for motion, light, particles",
