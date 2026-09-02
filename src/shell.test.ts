@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 const root = resolve(import.meta.dirname, "..");
 const html = readFileSync(resolve(root, "index.html"), "utf8");
 const css = readFileSync(resolve(root, "src/style.css"), "utf8");
+const main = readFileSync(resolve(root, "src/main.ts"), "utf8");
 const scene = readFileSync(resolve(root, "src/game/demo-scene.ts"), "utf8");
 
 /** The block of a CSS rule, so a property is matched against its own selector. */
@@ -45,6 +46,13 @@ describe("the page shell", () => {
     for (const property of ["border", "outline", "box-shadow", "aspect-ratio"]) {
       expect(game).not.toContain(`${property}:`);
     }
+  });
+
+  it("covers the window without distortion while keeping the horizon visible", () => {
+    expect(main).toContain("integerCoverScale(");
+    expect(main).toContain("coverOffset(");
+    expect(main).not.toContain("integerScale(");
+    expect(main).not.toContain("letterbox(");
   });
 
   it("leaves no decorative overlay over the world", () => {
