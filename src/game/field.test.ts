@@ -9,6 +9,7 @@ import {
   PUDDLE_SITES,
   rockCells,
   terrainAt,
+  TREE_SITES,
 } from "./field";
 import { DEFAULT_SKY_FRACTION, horizonLayout } from "./horizon";
 import { rasterizeSprite } from "./pixel-art";
@@ -121,6 +122,18 @@ describe("composeGround", () => {
 describe("cellFoot", () => {
   it("puts an actor's feet on the near edge of its cell, centred", () => {
     expect(cellFoot(10, 11, 9)).toEqual({ x: 10 * TILE_WIDTH + 8, y: 9 + 12 * TILE_DEPTH });
+  });
+});
+
+describe("tree placement", () => {
+  it("roots every tree in visible grass rather than through a path or rock", () => {
+    for (const site of TREE_SITES) {
+      expect(site.column).toBeGreaterThanOrEqual(0);
+      expect(site.column).toBeLessThan(COLUMNS);
+      expect(site.row).toBeGreaterThanOrEqual(0);
+      expect(site.row).toBeLessThan(ROWS);
+      expect(terrainAt(site.column, site.row)).toBe("grass");
+    }
   });
 });
 

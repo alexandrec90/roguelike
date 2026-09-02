@@ -7,6 +7,7 @@
  */
 
 import type { Palette, PixelSpriteSource } from "./pixel-art";
+import { sampleDistantPineFrames } from "./vegetation";
 
 const SLIME_PALETTE: Palette = {
   ".": null,
@@ -183,15 +184,11 @@ export const RAIN_STREAK: PixelSpriteSource = {
  */
 const DISTANT_PALETTE: Palette = {
   ".": null,
-  P: "#0f2b1c",
   Q: "#131a2b",
   q: "#ffd23d",
 };
 
-export const FAR_PINE: PixelSpriteSource = {
-  palette: DISTANT_PALETTE,
-  rows: ["..P..", ".PPP.", ".PPP.", "PPPPP", "..P..", "..P.."],
-};
+export const FAR_PINE_FRAMES = sampleDistantPineFrames();
 
 export const FAR_TOWER: PixelSpriteSource = {
   palette: DISTANT_PALETTE,
@@ -203,6 +200,6 @@ export const ALL_SPRITES: readonly PixelSpriteSource[] = [
   ...TORCH_FRAMES,
   SPARK,
   RAIN_STREAK,
-  FAR_PINE,
+  ...FAR_PINE_FRAMES,
   FAR_TOWER,
 ];

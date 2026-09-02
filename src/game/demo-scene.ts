@@ -26,10 +26,11 @@ import {
 } from "./projection";
 import { renderModel, samplePose, type Clip, type Facing } from "./rig";
 import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./spark-emitter";
-import { FAR_PINE, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
+import { FAR_PINE_FRAMES, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { installPixelTexture } from "./textures";
 import { WALL_FACE, WALL_TOP } from "./tiles";
 import { freezeCloud, meltCloud } from "./transforms";
+import { VegetationLayer } from "./vegetation-layer";
 import { WaterLayer } from "./water-layer";
 import { createRain, lightningAt, lightningBolt } from "./weather";
 
@@ -94,7 +95,9 @@ function installSceneTextures(scene: Phaser.Scene, columns: number, rows: number
   installPixelTexture(scene.textures, "rain", RAIN_STREAK);
   installPixelTexture(scene.textures, "wall-top", WALL_TOP);
   installPixelTexture(scene.textures, "wall-face", WALL_FACE);
-  installPixelTexture(scene.textures, "far-pine", FAR_PINE);
+  FAR_PINE_FRAMES.forEach((frame, index) =>
+    installPixelTexture(scene.textures, `far-pine-${index}`, frame),
+  );
   installPixelTexture(scene.textures, "far-tower", FAR_TOWER);
   installPixelTexture(scene.textures, "ground", composeGround(columns, rows));
 }
@@ -109,7 +112,10 @@ function drawSky(scene: Phaser.Scene, layout: HorizonLayout): void {
   }
 }
 
-function drawDistantObjects(scene: Phaser.Scene, layout: HorizonLayout): void {
+function drawDistantObjects(
+  scene: Phaser.Scene,
+  layout: HorizonLayout,
+): Phaser.GameObjects.Image[] {
   const { horizonY } = layout;
   const ridges = scene.add.graphics().setDepth(BAND_DEPTH + 1);
   for (const ridge of [RIDGE_FAR, RIDGE_NEAR]) {
@@ -121,15 +127,21 @@ function drawDistantObjects(scene: Phaser.Scene, layout: HorizonLayout): void {
       }
     });
   }
-  for (const x of DISTANT_PINES) {
-    scene.add.image(x, horizonY, "far-pine").setOrigin(0, 1).setDepth(BAND_DEPTH + 2);
-  }
+  const pines = DISTANT_PINES.map((x) =>
+    scene.add.image(x, horizonY, "far-pine-0").setOrigin(0.5, 1).setDepth(BAND_DEPTH + 2),
+  );
   scene.add.image(DISTANT_TOWER_X, horizonY, "far-tower").setOrigin(0, 1).setDepth(BAND_DEPTH + 2);
+  return pines;
 }
 
-function drawWorld(scene: Phaser.Scene, layout: HorizonLayout, columns: number, rows: number): void {
+function drawWorld(
+  scene: Phaser.Scene,
+  layout: HorizonLayout,
+  columns: number,
+  rows: number,
+): Phaser.GameObjects.Image[] {
   drawSky(scene, layout);
-  drawDistantObjects(scene, layout);
+  const pines = drawDistantObjects(scene, layout);
   const roll = scene.add.graphics().setDepth(BAND_DEPTH + 3);
   for (const band of rollColors(rollBands(layout.rollHeight))) {
     roll.fillStyle(hexToInt(band.color)).fillRect(0, layout.horizonY + band.y, WIDTH, band.height);
@@ -149,6 +161,7 @@ function drawWorld(scene: Phaser.Scene, layout: HorizonLayout, columns: number, 
       .setOrigin(0, 0)
       .setDepth(cell.row * TILE_WIDTH + RANK_FACE);
   }
+  return pines;
 }
 
 /**
@@ -176,6 +189,8 @@ export class DemoScene extends Phaser.Scene {
   private rainImages: Phaser.GameObjects.Image[] = [];
   private emitter!: EmitterState;
   private rain!: EmitterState;
+  private distantPines: Phaser.GameObjects.Image[] = [];
+  private readonly vegetation = new VegetationLayer();
   private readonly water = new WaterLayer();
   private elapsedMs = 0;
 
@@ -190,7 +205,8 @@ export class DemoScene extends Phaser.Scene {
     this.rows = rowsDown(this.layout.groundHeight);
 
     installSceneTextures(this, this.columns, this.rows);
-    drawWorld(this, this.layout, this.columns, this.rows);
+    this.distantPines = drawWorld(this, this.layout, this.columns, this.rows);
+    this.vegetation.create(this, this.layout.groundTop, this.columns, this.rows);
     this.water.create(this, this.layout.groundTop);
     this.createHero();
     this.createSlime();
@@ -200,6 +216,8 @@ export class DemoScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.elapsedMs += Math.min(delta, 40);
+    this.vegetation.animate(this.elapsedMs);
+    this.animateDistantPines();
     const heroCloud = this.heroCloud();
     this.animateHero(heroCloud);
     this.animateSlime();
@@ -332,6 +350,14 @@ export class DemoScene extends Phaser.Scene {
       Math.sin(this.elapsedMs * 0.019) * 0.035 + Math.sin(this.elapsedMs * 0.047) * 0.018;
     this.torchGlow.setScale(1 + flicker, 1 + flicker * 0.72);
     this.torchGlow.alpha = 0.86 + flicker * 2.1;
+  }
+
+  private animateDistantPines(): void {
+    const frameMs = 600;
+    this.distantPines.forEach((pine, index) => {
+      const frame = Math.floor((this.elapsedMs + index * 900) / frameMs) % FAR_PINE_FRAMES.length;
+      pine.setTexture(`far-pine-${frame}`);
+    });
   }
 
   /**

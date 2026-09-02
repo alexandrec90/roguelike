@@ -168,6 +168,21 @@ export const PUDDLE_SITES: readonly PuddleSite[] = [
   { id: "path-near", column: 12, row: 12, radius: 9, seed: 0x3f0a, offsetX: 5 },
 ];
 
+/** Foreground trees are models; this is only where their roots meet the map. */
+export interface TreeSite {
+  readonly column: number;
+  readonly row: number;
+  readonly seed: number;
+  readonly offsetX?: number;
+}
+
+export const TREE_SITES: readonly TreeSite[] = [
+  { column: 2, row: 3, seed: 0x4a11, offsetX: -2 },
+  { column: 18, row: 5, seed: 0x0c72, offsetX: 3 },
+  { column: 1, row: 10, seed: 0x7d03, offsetX: -1 },
+  { column: 18, row: 12, seed: 0x2eb4, offsetX: 2 },
+];
+
 /** Screen position of a cell's near edge, centred — where an actor's feet go. */
 export function cellFoot(
   column: number,
