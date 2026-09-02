@@ -7,10 +7,21 @@ import {
   HERO_CLIPS,
   HERO_EQUIPPED,
   HERO_MODEL,
+  HUMANOID_BASE,
   HUMANOID_SKELETON,
   SWING,
+  WALK,
 } from "./models";
-import { equip, partBoneNames, renderModel, samplePose, validateClip, validateModel } from "./rig";
+import {
+  equip,
+  partBoneNames,
+  projectRigPoint,
+  renderModel,
+  samplePose,
+  solvePose,
+  validateClip,
+  validateModel,
+} from "./rig";
 
 describe("the humanoid hero", () => {
   it("is a valid model, dressed or not", () => {
@@ -26,6 +37,31 @@ describe("the humanoid hero", () => {
     expect(bounds?.top).toBeLessThanOrEqual(-12);
   });
 
+  it("plants straight legs symmetrically beneath the torso", () => {
+    const poses = [
+      HUMANOID_BASE,
+      samplePose(WALK, HUMANOID_BASE, 0),
+      samplePose(WALK, HUMANOID_BASE, WALK.durationMs / 2),
+    ];
+
+    for (const pose of poses) {
+      const solved = solvePose(HUMANOID_SKELETON, pose);
+      const left = solved["leg-l"];
+      const right = solved["leg-r"];
+      expect(left).toBeDefined();
+      expect(right).toBeDefined();
+
+      const leftStart = projectRigPoint(left!.start);
+      const leftEnd = projectRigPoint(left!.end);
+      const rightStart = projectRigPoint(right!.start);
+      const rightEnd = projectRigPoint(right!.end);
+      expect(leftStart.x).toBe(leftEnd.x);
+      expect(rightStart.x).toBe(rightEnd.x);
+      expect(leftStart.x).toBe(-rightStart.x);
+      expect(leftEnd.x).toBe(-rightEnd.x);
+    }
+  });
+
   it("shows eyes from the front and none from the back", () => {
     const front = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose);
     const back = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, { facing: "back" });
@@ -35,11 +71,11 @@ describe("the humanoid hero", () => {
     expect(back.length).toBeGreaterThan(0);
   });
 
-  it("carries the sword and hat as modular parts", () => {
+  it("carries the sword without the hat", () => {
     expect(partBoneNames(HERO_EQUIPPED)).toEqual(["sword"]);
     const cloud = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose);
     expect(cloud.some((pixel) => pixel.ink === "cyan")).toBe(true);
-    expect(cloud.some((pixel) => pixel.ink === "magenta")).toBe(true);
+    expect(cloud.some((pixel) => pixel.ink === "magenta")).toBe(false);
   });
 
   it("re-inks the torso under armor without changing the pixel count", () => {

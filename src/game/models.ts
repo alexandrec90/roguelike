@@ -32,8 +32,10 @@ export const HUMANOID_SKELETON: SkeletonDef = {
     { name: "head", parent: "torso", attach: "end", length: 2 },
     { name: "arm-l", parent: "torso", attach: "end", length: 4 },
     { name: "arm-r", parent: "torso", attach: "end", length: 4 },
-    { name: "leg-l", parent: "torso", attach: "start", length: 6 },
-    { name: "leg-r", parent: "torso", attach: "start", length: 6 },
+    { name: "hip-l", parent: "torso", attach: "start", length: 1 },
+    { name: "hip-r", parent: "torso", attach: "start", length: 1 },
+    { name: "leg-l", parent: "hip-l", attach: "end", length: 6 },
+    { name: "leg-r", parent: "hip-r", attach: "end", length: 6 },
   ],
 };
 
@@ -44,8 +46,10 @@ export const HUMANOID_BASE: RigPose = {
     head: vec3(0, 0, 1),
     "arm-l": vec3(-0.9, 0.25, -0.9),
     "arm-r": vec3(0.9, 0.25, -0.9),
-    "leg-l": vec3(-0.3, 0, -1),
-    "leg-r": vec3(0.3, 0, -1),
+    "hip-l": vec3(-1, 0, 0),
+    "hip-r": vec3(1, 0, 0),
+    "leg-l": vec3(0, 0, -1),
+    "leg-r": vec3(0, 0, -1),
   },
 };
 
@@ -67,6 +71,8 @@ export const HERO_MODEL: RigModel = {
     head: { ink: "bone" },
     "arm-l": { ink: "bone" },
     "arm-r": { ink: "bone" },
+    "hip-l": { ink: "bone" },
+    "hip-r": { ink: "bone" },
     "leg-l": { ink: "bone" },
     "leg-r": { ink: "bone" },
   },
@@ -166,8 +172,8 @@ export const WALK: Clip = {
       t: 0,
       root: vec3(0, 0, HIP_Z),
       bones: {
-        "leg-l": vec3(-0.25, 0.9, -1),
-        "leg-r": vec3(0.25, -0.9, -1),
+        "leg-l": vec3(0, 0.9, -1),
+        "leg-r": vec3(0, -0.9, -1),
         "arm-l": vec3(-0.8, -0.6, -0.9),
         "arm-r": vec3(0.8, 0.6, -0.9),
       },
@@ -177,8 +183,8 @@ export const WALK: Clip = {
       t: 0.5,
       root: vec3(0, 0, HIP_Z),
       bones: {
-        "leg-l": vec3(-0.25, -0.9, -1),
-        "leg-r": vec3(0.25, 0.9, -1),
+        "leg-l": vec3(0, -0.9, -1),
+        "leg-r": vec3(0, 0.9, -1),
         "arm-l": vec3(-0.8, 0.6, -0.9),
         "arm-r": vec3(0.8, -0.6, -0.9),
       },
@@ -265,5 +271,5 @@ export const CAST: Clip = {
 
 export const HERO_CLIPS: readonly Clip[] = [IDLE, WALK, SWING, CAST];
 
-/** The hero as the demo dresses it: sword in hand, hat on head. */
-export const HERO_EQUIPPED: RigModel = equip(HERO_MODEL, SWORD, HAT);
+/** The hero as the demo dresses it: sword in hand, head uncovered. */
+export const HERO_EQUIPPED: RigModel = equip(HERO_MODEL, SWORD);
