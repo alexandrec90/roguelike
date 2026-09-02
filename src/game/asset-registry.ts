@@ -18,8 +18,9 @@ import { sampleRippleFrames } from "./ripples";
 import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
-import { FAR_PINE, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
+import { FAR_PINE_FRAMES, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { DIRT_PATH, GRASS, WALL_FACE, WALL_TOP } from "./tiles";
+import { sampleGrassFrames, sampleTreeFrames } from "./vegetation";
 
 export type AssetCategory = "actor" | "prop" | "tile" | "effect";
 
@@ -220,6 +221,34 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     ],
   },
   {
+    id: "grass-sway",
+    label: "Grass — wind-swept tuft",
+    category: "prop",
+    frames: sampleGrassFrames(),
+    frameDurationMs: 600,
+    notes:
+      "Five rooted blades derived from one seeded wind field. Their tips move by whole pixels; " +
+      "the field draws a differently seeded tuft in every grass cell.",
+    variants: [
+      AUTHORED,
+      { id: "frost", label: "Frost", overrides: { g: INK_COLORS.ice } },
+    ],
+  },
+  {
+    id: "wind-tree",
+    label: "Tree — procedural broadleaf",
+    category: "prop",
+    frames: sampleTreeFrames(),
+    frameDurationMs: 600,
+    notes:
+      "A rooted trunk, independent branches, and seeded foliage clusters. Wind displacement " +
+      "increases with height, so the crown bends while the foot remains fixed.",
+    variants: [
+      AUTHORED,
+      { id: "autumn", label: "Autumn", overrides: { g: INK_COLORS.amber } },
+    ],
+  },
+  {
     id: "dirt-path",
     label: "Ground — dirt path",
     category: "tile",
@@ -273,12 +302,14 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     id: "far-pine",
     label: "Distant — pine",
     category: "prop",
-    frames: [FAR_PINE],
-    frameDurationMs: 200,
-    notes: "Stands on the horizon line inside the rolled-over band. Silhouette only, six pixels tall.",
+    frames: FAR_PINE_FRAMES,
+    frameDurationMs: 600,
+    notes:
+      "A six-pixel procedural silhouette rooted on the horizon. The crown bends one logical " +
+      "pixel through the same wind cycle as the foreground vegetation.",
     variants: [
       AUTHORED,
-      { id: "night", label: "Night", overrides: { P: "#1c2531" } },
+      { id: "night", label: "Night", overrides: { d: INK_COLORS.steel } },
     ],
   },
   {
