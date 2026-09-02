@@ -133,6 +133,41 @@ export function composeGround(
   return composeTiles(columns, rows, (column, row) => GROUND_SOURCE[terrainAt(column, row, map)]);
 }
 
+/**
+ * Where the field holds water.
+ *
+ * Standing water is not terrain: a puddle straddles cells, has no square edge,
+ * and its shape comes from a seed rather than from a tile (`puddles.ts`). So
+ * it is placed here as a list of sites rather than given a map glyph — the map
+ * says what the ground *is*, this says what has collected on it.
+ *
+ * A site is anchored to a cell's foot so it moves with the horizon knob like
+ * everything else, then nudged off it in logical pixels.
+ */
+export interface PuddleSite {
+  readonly id: string;
+  readonly column: number;
+  readonly row: number;
+  /** Half-width in logical pixels; the depth half-axis is foreshortened from it. */
+  readonly radius: number;
+  readonly seed: number;
+  readonly offsetX?: number;
+  readonly offsetY?: number;
+}
+
+export const PUDDLE_SITES: readonly PuddleSite[] = [
+  // The two that carry a reflection are pushed *forward* of the foot they
+  // belong to: a reflection hangs below the thing it reflects, so a puddle
+  // centred on the feet would clip half of it away behind them.
+  { id: "hero", column: 10, row: 11, radius: 13, seed: 0x9a7e, offsetY: 5 },
+  { id: "torch", column: 13, row: 10, radius: 7, seed: 0x51bd, offsetY: 4 },
+  { id: "path-far", column: 7, row: 6, radius: 7, seed: 0x2c41, offsetX: 3 },
+  { id: "rock-foot", column: 15, row: 5, radius: 6, seed: 0x1e93, offsetY: -2 },
+  { id: "east-verge", column: 17, row: 8, radius: 8, seed: 0x77e2, offsetX: -4 },
+  { id: "west-verge", column: 3, row: 12, radius: 10, seed: 0xb103, offsetX: 2 },
+  { id: "path-near", column: 12, row: 12, radius: 9, seed: 0x3f0a, offsetX: 5 },
+];
+
 /** Screen position of a cell's near edge, centred — where an actor's feet go. */
 export function cellFoot(
   column: number,

@@ -89,6 +89,27 @@ describe("stepEmitter", () => {
     expect(state.particles[0]?.y ?? 0).toBeLessThan(start);
   });
 
+  it("pushes every particle the same way when there is a wind", () => {
+    const state = createEmitter({ capacity: 6, spawnJitterMs: 0, driftX: 0, windX: 0.05 });
+    run(state, 40);
+
+    const active = state.particles.filter((particle) => particle.active);
+    expect(active.length).toBeGreaterThan(1);
+    expect(active.every((particle) => particle.vx === 0.05)).toBe(true);
+  });
+
+  it("leaves sideways motion to the jitter when no wind is set", () => {
+    // The default matters: the torch sparks predate the wind and must not
+    // start leaning because the rain wanted it.
+    const state = createEmitter({ capacity: 6, spawnJitterMs: 0 });
+    run(state, 40);
+
+    const active = state.particles.filter((particle) => particle.active);
+    expect(active.length).toBeGreaterThan(1);
+    expect(active.some((particle) => particle.vx < 0)).toBe(true);
+    expect(active.some((particle) => particle.vx > 0)).toBe(true);
+  });
+
   it("ignores a zero or negative delta", () => {
     const state = createEmitter();
     const before = snapshot(state);

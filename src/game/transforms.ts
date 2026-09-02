@@ -142,15 +142,25 @@ export function burnFront(
 /**
  * A reflection for still water: the cloud flipped below its foot line,
  * vertically squashed, interlaced so scanlines of water show through, and
- * re-inked to a single dim water tone. The scene clips it to the puddle and
- * adds ripple by offsetting alternate rows.
+ * re-inked. The scene clips it to the puddle and adds ripple by offsetting
+ * alternate rows.
+ *
+ * `ink` chooses what the water gives back. `"deep"` is the default flat
+ * silhouette; `null` keeps every pixel's own ink, so a neon-green mark
+ * reflects green — draw that at a reduced alpha and the water reads as
+ * reflective rather than as a dark cut-out of the thing above it.
  */
 export function reflectCloud(
   cloud: PixelCloud,
-  options: { readonly squash?: number; readonly interlace?: number } = {},
+  options: {
+    readonly squash?: number;
+    readonly interlace?: number;
+    readonly ink?: InkId | null;
+  } = {},
 ): PixelCloud {
   const squash = options.squash ?? 0.6;
   const interlace = options.interlace ?? 2;
+  const ink = options.ink === undefined ? "deep" : options.ink;
   if (squash <= 0 || squash > 1) {
     throw new Error("Reflection squash must be in (0, 1]");
   }
@@ -167,7 +177,7 @@ export function reflectCloud(
     if (y < 1 || y % interlace !== 1 % interlace) {
       continue;
     }
-    reflected.push({ x: pixel.x, y, ink: "deep" });
+    reflected.push({ x: pixel.x, y, ink: ink ?? pixel.ink });
   }
   return reflected;
 }

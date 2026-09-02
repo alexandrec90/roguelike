@@ -2,32 +2,57 @@
  * Weather: rain and lightning, both seeded, both particle- or line-shaped.
  *
  * Rain is the same pooled emitter the torch sparks use (`spark-emitter.ts`)
- * with the velocity turned downward — one emitter implementation, two skies.
+ * with the velocity turned downward and a steady wind on it — one emitter
+ * implementation, two skies.
  * Lightning is a seeded jagged polyline plus a deterministic schedule, so two
  * captures of the same second of the scene show the same bolt.
  */
 
 import { createEmitter, type EmitterConfig, type EmitterState } from "./spark-emitter";
 
+/** Fall speed of a drop, in logical pixels per millisecond. */
+export const RAIN_FALL_SPEED = 0.16;
+
+/**
+ * How far the wind carries a drop sideways per pixel it falls.
+ *
+ * This is the number the whole storm agrees on: the emitter's `windX` is
+ * derived from it, and `RAIN_STREAK` is drawn leaning by exactly it, so the
+ * trail a drop paints points where the drop is actually going. Change it here
+ * and `sprites.test.ts` fails until the streak is redrawn to match.
+ */
+export const RAIN_SLANT = 0.4;
+
+const RAIN_LIFE_MS = 900;
+const RAIN_LIFE_JITTER_MS = 600;
+
 /**
  * Rain across a `width`-wide sky. Drops spawn in a strip above the top edge
- * and fall; each lives long enough to cross most of the frame, and the pool
- * caps how hard it can ever rain.
+ * and fall on the slant; each lives long enough to cross most of the frame,
+ * and the pool caps how hard it can ever rain.
+ *
+ * Slanted rain has to be *aimed*: a drop spawned above the right edge is
+ * downwind of the screen by the time it reaches the ground, so the spawn strip
+ * is shifted upwind by half a drop's sideways travel and widened by the other
+ * half. Travel is read off the drop's own lifetime rather than the frame
+ * height, so the sky does not need to be told how tall the screen is.
  */
 export function createRain(width: number, overrides: Partial<EmitterConfig> = {}): EmitterState {
+  const travelX = (RAIN_LIFE_MS + RAIN_LIFE_JITTER_MS / 2) * RAIN_FALL_SPEED * RAIN_SLANT;
   return createEmitter({
     capacity: 44,
     seed: 0x1d872b41,
     spawnIntervalMs: 36,
     spawnJitterMs: 40,
-    lifeMs: 900,
-    lifeJitterMs: 600,
-    originX: Math.floor(width / 2),
+    lifeMs: RAIN_LIFE_MS,
+    lifeJitterMs: RAIN_LIFE_JITTER_MS,
+    originX: Math.floor(width / 2 - travelX / 2),
     originY: -8,
-    spreadX: Math.ceil(width / 2) + 8,
+    spreadX: Math.ceil(width / 2 + travelX / 2) + 8,
     spreadY: 8,
     driftX: 0.006,
-    riseY: -0.16,
+    windX: RAIN_FALL_SPEED * RAIN_SLANT,
+    riseY: -RAIN_FALL_SPEED,
     ...overrides,
   });
 }

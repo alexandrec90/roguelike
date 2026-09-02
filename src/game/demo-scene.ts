@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
 import { hexToInt } from "./color";
-import { cellFoot, composeGround, faceCells, rockCells } from "./field";
+import { cellFoot, composeGround, faceCells, PUDDLE_SITES, rockCells } from "./field";
 import {
   DEFAULT_SKY_FRACTION,
   horizonLayout,
@@ -12,7 +12,7 @@ import {
   starField,
   type HorizonLayout,
 } from "./horizon";
-import { INK_COLORS, maskFromRows, type InkId, type PixelCloud } from "./ink";
+import { INK_ALPHA, INK_COLORS, type InkId, type PixelCloud } from "./ink";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import { quantizedWave } from "./pixel-art";
 import {
@@ -23,12 +23,34 @@ import {
   wallCapY,
   wallFaceY,
 } from "./projection";
+import {
+  clipToPuddle,
+  createPuddle,
+  createRippleField,
+  puddleGlints,
+  puddleHolds,
+  puddleReflection,
+  puddleSurface,
+  rainImpact,
+  rippleAlpha,
+  rippleCloud,
+  spawnRipple,
+  stepRipples,
+  type Puddle,
+  type RippleField,
+} from "./puddles";
 import { renderModel, samplePose, type Clip, type Facing } from "./rig";
-import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./spark-emitter";
+import {
+  createEmitter,
+  MAX_STEP_MS,
+  particleAlpha,
+  stepEmitter,
+  type EmitterState,
+} from "./spark-emitter";
 import { FAR_PINE, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { installPixelTexture } from "./textures";
 import { WALL_FACE, WALL_TOP } from "./tiles";
-import { freezeCloud, meltCloud, reflectCloud } from "./transforms";
+import { freezeCloud, meltCloud } from "./transforms";
 import { createRain, lightningAt, lightningBolt } from "./weather";
 
 const WIDTH = 320;
@@ -61,17 +83,20 @@ const STORM_SEED = 0x51a7;
 const FREEZE_SEED = 0xf20e;
 const MELT_SEED = 0xa11ce;
 
-/** The still water the hero stands over. Stamped as pixels, not an ellipse. */
-const PUDDLE_MASK = maskFromRows([
-  "......########......",
-  "...##############...",
-  ".##################.",
-  "####################",
-  ".##################.",
-  "...##############...",
-  "......########......",
-]);
-const PUDDLE_COLOR = "#08141f";
+/**
+ * How sheer each water layer is drawn.
+ *
+ * These are the scene's lighting, not the water's geometry — `puddles.ts`
+ * hands back clouds and says nothing about how hard they are lit, so a darker
+ * night is these five numbers rather than a second set of art.
+ */
+const GLINT_ALPHA = 0.5;
+const REFLECTION_ALPHA = 0.5;
+const TORCH_REFLECTION_ALPHA = 0.55;
+/** How far the torch's light reaches down its puddle before it breaks up. */
+const TORCH_REFLECTION_ROWS = 14;
+/** How much brighter a strike makes every puddle at its peak. */
+const LIGHTNING_WATER_GAIN = 0.55;
 
 /**
  * What the hero demonstrates, in order: clips in three facings, then the
@@ -178,7 +203,11 @@ export class DemoScene extends Phaser.Scene {
   private rows = 0;
 
   private heroGfx!: Phaser.GameObjects.Graphics;
+  private waterGfx!: Phaser.GameObjects.Graphics;
+  private waterFlashGfx!: Phaser.GameObjects.Graphics;
+  private glintGfx!: Phaser.GameObjects.Graphics;
   private reflectionGfx!: Phaser.GameObjects.Graphics;
+  private rippleGfx!: Phaser.GameObjects.Graphics;
   private boltGfx!: Phaser.GameObjects.Graphics;
   private flash!: Phaser.GameObjects.Rectangle;
   private slime!: Phaser.GameObjects.Image;
@@ -188,7 +217,8 @@ export class DemoScene extends Phaser.Scene {
   private rainImages: Phaser.GameObjects.Image[] = [];
   private emitter!: EmitterState;
   private rain!: EmitterState;
-  private puddlePixels = new Set<string>();
+  private puddles: Puddle[] = [];
+  private ripples!: RippleField;
   private elapsedMs = 0;
 
   constructor(skyFraction: number = DEFAULT_SKY_FRACTION) {
@@ -203,7 +233,7 @@ export class DemoScene extends Phaser.Scene {
 
     installSceneTextures(this, this.columns, this.rows);
     drawWorld(this, this.layout, this.columns, this.rows);
-    this.drawPuddle();
+    this.createPuddles();
     this.createHero();
     this.createSlime();
     this.createTorch();
@@ -212,32 +242,66 @@ export class DemoScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.elapsedMs += Math.min(delta, 40);
-    this.animateHero();
+    const heroCloud = this.heroCloud();
+    this.animateHero(heroCloud);
     this.animateSlime();
     this.animateTorch();
     this.updateSparks(delta);
+    // Before the water, so a drop that lands this frame rings this frame.
     this.updateRain(delta);
+    this.animateWater(delta, heroCloud);
     this.updateLightning();
   }
 
-  /** Still water at the hero's feet, and the lookup the reflection clips to. */
-  private drawPuddle(): void {
-    const foot = this.heroFoot();
-    const left = foot.x - Math.floor(PUDDLE_MASK.width / 2);
-    const top = foot.y - 1;
+  /**
+   * The field's standing water: one generated puddle per site, and the four
+   * layers drawn over them.
+   *
+   * The bodies never change, so they are stamped once here; only the glints,
+   * the reflections and the rings are redrawn per frame.
+   */
+  private createPuddles(): void {
+    this.puddles = PUDDLE_SITES.map((site) => {
+      const foot = cellFoot(site.column, site.row, this.layout.groundTop);
+      return createPuddle({
+        id: site.id,
+        centerX: foot.x + (site.offsetX ?? 0),
+        centerY: foot.y + (site.offsetY ?? 0),
+        radius: site.radius,
+        seed: site.seed,
+      });
+    });
 
-    const puddle = this.add.graphics().setDepth(PUDDLE_DEPTH);
-    puddle.fillStyle(hexToInt(PUDDLE_COLOR));
-    for (const pixel of PUDDLE_MASK.pixels) {
-      puddle.fillRect(left + pixel.x, top + pixel.y, 1, 1);
-      this.puddlePixels.add(`${left + pixel.x},${top + pixel.y}`);
+    this.waterGfx = this.add.graphics().setDepth(PUDDLE_DEPTH);
+    for (const puddle of this.puddles) {
+      drawCloud(this.waterGfx, puddleSurface(puddle), 0, 0);
     }
+
+    this.glintGfx = this.add.graphics().setDepth(PUDDLE_DEPTH + 1);
+    this.reflectionGfx = this.add.graphics().setDepth(PUDDLE_DEPTH + 2);
+    this.rippleGfx = this.add.graphics().setDepth(PUDDLE_DEPTH + 3);
+
+    // Lightning lights water harder than it lights grass. Stamped once at full
+    // strength and then held at alpha 0; a strike only turns it up.
+    this.waterFlashGfx = this.add
+      .graphics()
+      .setDepth(PUDDLE_DEPTH + 4)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0);
+    for (const puddle of this.puddles) {
+      const lit: PixelCloud = puddle.water.map((pixel) => ({ ...pixel, ink: "deep" }));
+      drawCloud(this.waterFlashGfx, lit, 0, 0);
+    }
+
+    this.ripples = createRippleField();
   }
 
   private createHero(): void {
-    const depth = HERO_CELL.row * TILE_WIDTH + RANK_ACTOR;
-    this.reflectionGfx = this.add.graphics().setDepth(PUDDLE_DEPTH + 1);
-    this.heroGfx = this.add.graphics().setDepth(depth);
+    this.heroGfx = this.add.graphics().setDepth(HERO_CELL.row * TILE_WIDTH + RANK_ACTOR);
+  }
+
+  private puddleFor(id: string): Puddle | undefined {
+    return this.puddles.find((puddle) => puddle.id === id);
   }
 
   private createSlime(): void {
@@ -273,8 +337,17 @@ export class DemoScene extends Phaser.Scene {
 
   private createWeather(): void {
     this.rain = createRain(WIDTH);
+    // Bottom-right origin: the streak leans, and its bright head is its
+    // last pixel, so that corner is where the drop actually is. An origin of
+    // 1 keeps the offset a whole number of pixels, which a centred one would
+    // not on an odd-sized texture.
     this.rainImages = this.rain.particles.map(() =>
-      this.add.image(-10, -10, "rain").setVisible(false).setDepth(RAIN_DEPTH).setAlpha(0.7),
+      this.add
+        .image(-10, -10, "rain")
+        .setOrigin(1, 1)
+        .setVisible(false)
+        .setDepth(RAIN_DEPTH)
+        .setAlpha(0.7),
     );
 
     this.boltGfx = this.add.graphics().setDepth(BOLT_DEPTH);
@@ -319,26 +392,74 @@ export class DemoScene extends Phaser.Scene {
     return meltCloud(still, progress, MELT_SEED);
   }
 
-  private animateHero(): void {
+  private animateHero(cloud: PixelCloud): void {
     const foot = this.heroFoot();
-    const cloud = this.heroCloud();
-
     this.heroGfx.clear();
     drawCloud(this.heroGfx, cloud, foot.x, foot.y);
+  }
 
-    // The puddle sees whatever is standing over it, transforms included, with
-    // a one-pixel ripple that scrolls down the reflection.
+  /**
+   * Everything drawn on water, in the order light reaches the eye: the sky's
+   * shimmer, then what is standing over it, then the rings the rain punched.
+   *
+   * The puddle sees whatever the hero is doing, transforms included, and gives
+   * it back in the hero's own inks — a frozen hero reflects ice.
+   */
+  private animateWater(delta: number, heroCloud: PixelCloud): void {
+    stepRipples(this.ripples, Math.min(delta, 40));
+
+    this.glintGfx.clear();
+    for (const puddle of this.puddles) {
+      drawCloud(this.glintGfx, puddleGlints(puddle, this.elapsedMs), 0, 0, GLINT_ALPHA);
+    }
+
     this.reflectionGfx.clear();
-    const reflection = reflectCloud(cloud);
-    this.reflectionGfx.fillStyle(hexToInt(INK_COLORS.deep));
-    for (const pixel of reflection) {
-      const ripple = quantizedWave(this.elapsedMs + pixel.y * 90, 1700, 1);
-      const x = foot.x + pixel.x + ripple;
-      const y = foot.y + pixel.y;
-      if (this.puddlePixels.has(`${x},${y}`)) {
-        this.reflectionGfx.fillRect(x, y, 1, 1);
+    const heroPuddle = this.puddleFor("hero");
+    if (heroPuddle !== undefined) {
+      const foot = this.heroFoot();
+      const reflection = puddleReflection(heroPuddle, heroCloud, foot.x, foot.y, this.elapsedMs);
+      drawCloud(this.reflectionGfx, reflection, 0, 0, REFLECTION_ALPHA);
+    }
+    const torchPuddle = this.puddleFor("torch");
+    if (torchPuddle !== undefined) {
+      const light = this.torchReflection(torchPuddle);
+      drawCloud(this.reflectionGfx, light, 0, 0, TORCH_REFLECTION_ALPHA);
+    }
+
+    this.rippleGfx.clear();
+    for (const ripple of this.ripples.ripples) {
+      if (!ripple.active) {
+        continue;
+      }
+      drawCloud(this.rippleGfx, this.overWater(rippleCloud(ripple)), 0, 0, rippleAlpha(ripple));
+    }
+  }
+
+  /** Rings spread past the rim they started inside; the water is the frame. */
+  private overWater(cloud: PixelCloud): PixelCloud {
+    return cloud.filter((pixel) =>
+      this.puddles.some((puddle) => puddleHolds(puddle, pixel.x, pixel.y)),
+    );
+  }
+
+  /**
+   * The torch on the water — a swaying column of light, not a mirrored sprite.
+   *
+   * A flame has no silhouette worth flipping; what a puddle actually shows of
+   * one is a smeared streak that breaks up with distance, which is three lines
+   * of wave rather than a second set of torch frames.
+   */
+  private torchReflection(puddle: Puddle): PixelCloud {
+    const foot = cellFoot(TORCH_CELL.column, TORCH_CELL.row, this.layout.groundTop);
+    const cloud: PixelCloud = [];
+    for (let dy = 0; dy < TORCH_REFLECTION_ROWS; dy += 1) {
+      const sway = quantizedWave(this.elapsedMs + dy * 130, 1100, 2, dy * 0.4);
+      const half = dy < 5 ? 1 : 0;
+      for (let dx = -half; dx <= half; dx += 1) {
+        cloud.push({ x: foot.x + dx + sway, y: foot.y + dy, ink: dx === 0 ? "amber" : "ember" });
       }
     }
+    return clipToPuddle(puddle, cloud);
   }
 
   private animateSlime(): void {
@@ -384,9 +505,13 @@ export class DemoScene extends Phaser.Scene {
     });
   }
 
-  /** The same pooled emitter as the sparks, pointed down instead of up. */
+  /**
+   * The same pooled emitter as the sparks, pointed down and leaned over by the
+   * wind. Drops that reach water land in it rather than falling through.
+   */
   private updateRain(delta: number): void {
     stepEmitter(this.rain, delta);
+    this.landRain(delta);
 
     this.rain.particles.forEach((particle, index) => {
       const image = this.rainImages[index];
@@ -404,11 +529,40 @@ export class DemoScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Retire every drop that crossed water this step, and ring the puddle where
+   * it went in.
+   *
+   * The drop's own velocity reconstructs where it was before the step; where
+   * along that segment the ring belongs is `rainImpact`'s problem, and the
+   * comment there is the one worth reading.
+   */
+  private landRain(delta: number): void {
+    const step = Math.min(Math.max(delta, 0), MAX_STEP_MS);
+    for (const particle of this.rain.particles) {
+      if (!particle.active) {
+        continue;
+      }
+      const impact = rainImpact(
+        this.puddles,
+        particle.x - particle.vx * step,
+        particle.y - particle.vy * step,
+        particle.x,
+        particle.y,
+      );
+      if (impact !== null) {
+        spawnRipple(this.ripples, impact.x, impact.y);
+        particle.active = false;
+      }
+    }
+  }
+
   /** Bolt and flash are pure functions of time, so a capture is repeatable. */
   private updateLightning(): void {
     const strike = lightningAt(this.elapsedMs, STORM_SEED);
     this.boltGfx.clear();
     this.flash.setVisible(strike.active);
+    this.waterFlashGfx.setAlpha(strike.active ? LIGHTNING_WATER_GAIN * strike.alpha : 0);
     if (!strike.active) {
       return;
     }
@@ -433,12 +587,20 @@ export class DemoScene extends Phaser.Scene {
   }
 }
 
-/** Group by ink so a 100-pixel model costs a handful of fill-style switches. */
+/**
+ * Group by ink so a 100-pixel model costs a handful of fill-style switches.
+ *
+ * `alpha` is the *scene's* opinion — how hard this particular draw is lit — and
+ * it multiplies the ink's own `INK_ALPHA`, which is a property of the colour
+ * and travels with it everywhere. Phaser takes the two as a numeric fill alpha
+ * rather than as an eight-digit hex, which `hexToInt` could not parse anyway.
+ */
 function drawCloud(
   gfx: Phaser.GameObjects.Graphics,
   cloud: PixelCloud,
   originX: number,
   originY: number,
+  alpha = 1,
 ): void {
   const byInk = new Map<InkId, { x: number; y: number }[]>();
   for (const pixel of cloud) {
@@ -450,7 +612,7 @@ function drawCloud(
     }
   }
   for (const [ink, pixels] of byInk) {
-    gfx.fillStyle(hexToInt(INK_COLORS[ink]));
+    gfx.fillStyle(hexToInt(INK_COLORS[ink]), INK_ALPHA[ink] * alpha);
     for (const pixel of pixels) {
       gfx.fillRect(originX + pixel.x, originY + pixel.y, 1, 1);
     }

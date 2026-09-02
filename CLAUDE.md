@@ -20,7 +20,7 @@ These are product constraints, not suggestions tied to the proof of concept.
 | --- | --- |
 | Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by an integer factor and letterbox the remainder. |
 | Setting | **Outdoors.** The game is an overworld — fields, paths, rock, sky — not a dungeon interior. |
-| Color | **1-bit neon on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. |
+| Color | **1-bit neon on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. An ink may be **translucent** — `INK_ALPHA` carries its opacity and `inkHex` spells it, so `water` is sheer wherever it is drawn and no call site invents an alpha for a colour. A scene dimming a whole layer is lighting, and multiplies the ink's own alpha rather than replacing it. |
 | Camera | A **pitched-back overhead** view, not a 45°-yaw diamond isometric: rows and columns stay axis-aligned and only the vertical axis is foreshortened. A 16×16 world square lands on 16×12 of screen, and height rises straight up the screen by `WALL_RISE`, which is what makes walls stand. `src/game/projection.ts` owns that math; nothing else re-derives it. |
 | Grid | 16×16 world tiles. Author ground art **already foreshortened** — 16×`TILE_DEPTH` for anything lying on the ground, 16×`WALL_RISE` for anything standing up — so every tile blits 1:1 and nothing is scaled at draw time. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
 | Flatness | Below the horizon band the ground is **affine, not perspective**: every world row is exactly `TILE_DEPTH` scanlines tall, with no convergence and no per-row scaling. A tile's screen size never depends on how far up the screen it is. |
@@ -45,8 +45,8 @@ Four modules, and no fifth place where any of this is decided:
 ### The 1-bit ink pipeline
 
 Everything renderable flattens to a **pixel cloud** — an ordered list of lit pixels,
-later wins — which is what lets one melt apply to any model. Six modules, and no
-seventh place where any of this is decided:
+later wins — which is what lets one melt apply to any model. Seven modules, and no
+eighth place where any of this is decided:
 
 | Module | Owns |
 | --- | --- |
@@ -54,7 +54,8 @@ seventh place where any of this is decided:
 | `src/game/rig.ts` | Skeletons, poses, clip sampling, `renderModel`. Rig space is x right, y toward the viewer, z up; a rig point projects `(x, y·DEPTH_RATIO − z)` — exactly the world's projection, re-used, never re-derived. |
 | `src/game/models.ts` | The authored humanoid: skeleton, base pose, gear (`SWORD` is a real bone clips can key; `HAT` a stamp; `ARMOR` a reink) and the clips (`IDLE`, `WALK`, `SWING`, `CAST`). The file an agent edits for a new move or item. |
 | `src/game/transforms.ts` | `meltCloud` / `freezeCloud` / `burnCloud` / `reflectCloud` — pure, seeded functions of (cloud, progress); identity at 0, deterministic always. |
-| `src/game/weather.ts` | Rain (the pooled spark emitter pointed downward) and lightning (seeded bolt polyline plus a pure-function-of-time storm schedule). |
+| `src/game/weather.ts` | Rain (the pooled spark emitter pointed downward, with a steady wind on it — `RAIN_SLANT` is the one number the sky and the drawn streak both read) and lightning (seeded bolt polyline plus a pure-function-of-time storm schedule). |
+| `src/game/puddles.ts` | Standing water: a seeded, foreshortened outline generated from a centre and a radius, plus everything on its surface — rim, glints, reflection, and the rings the rain punches into it. Placement is data in `field.ts`; the scene only draws. |
 | `src/game/rig-frames.ts` | Sampling clips and transforms into fixed frame lists so the asset registry and the lab cannot tell rig art from hand-drawn art. |
 
 **How to actually draw and animate with it is `.claude/rules/art-pipeline.md`** — the

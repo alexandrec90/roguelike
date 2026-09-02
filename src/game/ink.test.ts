@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   cloudBounds,
   cloudToSprite,
+  inkHex,
+  INK_ALPHA,
   INK_COLORS,
   INK_TOKENS,
   maskFromRows,
@@ -21,6 +23,24 @@ describe("the ink set", () => {
     const tokens = Object.values(INK_TOKENS);
     expect(new Set(tokens).size).toBe(inks.length);
     expect(tokens.every((token) => token.length === 1 && token !== ".")).toBe(true);
+  });
+
+  it("gives every ink an opacity, so transparency is never a call site's guess", () => {
+    const inks = Object.keys(INK_COLORS);
+    expect(Object.keys(INK_ALPHA).sort()).toEqual(inks.sort());
+    expect(Object.values(INK_ALPHA).every((alpha) => alpha > 0 && alpha <= 1)).toBe(true);
+  });
+
+  it("spells an opaque ink in six digits and a sheer one in eight", () => {
+    expect(inkHex("bone")).toBe(INK_COLORS.bone);
+    expect(inkHex("water")).toBe(`${INK_COLORS.water}9e`);
+    expect(INK_ALPHA.water).toBeLessThan(1);
+  });
+
+  it("keeps every ink hex parseable by the rasterizer", () => {
+    for (const ink of Object.keys(INK_COLORS) as (keyof typeof INK_COLORS)[]) {
+      expect(inkHex(ink)).toMatch(/^#[0-9a-f]{6}([0-9a-f]{2})?$/);
+    }
   });
 });
 
