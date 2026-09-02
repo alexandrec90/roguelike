@@ -1,5 +1,5 @@
 ---
-description: How to draw and animate in the 1-bit ink pipeline — write mechanisms, never hand-drawn frames
+description: How to draw and animate in the ink pipeline — write mechanisms, never hand-drawn frames
 paths:
   - src/game/**/*.ts
 ---
@@ -8,13 +8,19 @@ paths:
 
 Everything renderable in this game flattens to a **pixel cloud** — an ordered list of
 `{x, y, ink}`, later wins. That one representation is why a single `meltCloud` melts the
-hero, a slime, and a signpost, and why a new attack is a handful of direction vectors
-instead of eight drawings.
+hero, a slime, and a signpost, why one `shadeCloud` lights all three, and why a new
+attack is a handful of direction vectors instead of eight drawings.
 
 So the job here is almost never "draw the picture". It is **"find the mechanism that
 produces the picture, and the family of pictures next to it."** A mechanism is written
 once, tested once, and every future model gets it free. A frame is written once and
 helps nothing else, ever.
+
+This is not a limitation being worked around — it is the art direction. An image model
+cannot make frame 3 agree with frame 2, and neither of them will ever agree with a
+particle system whose ink, pixel size and dither are decided in code. **Nothing enters
+this game as pixels a model painted.** Generated images are reference for mood and
+silhouette, and stop there.
 
 ## Spend the fewest tokens that can produce the picture
 
@@ -26,16 +32,18 @@ codebase — it costs tokens now and costs them again on every asset that follow
 | --- | --- | --- | --- |
 | 0 | **Palette variant** — a `PaletteVariant` in `asset-registry.ts` | 1 line | Any existing art in new inks: frost, cursed, poisoned |
 | 1 | **An existing transform at a new progress** | 0 lines | A half-melted statue, a part-frozen enemy, a scorched prop |
-| 2 | **A new cloud transform** in `transforms.ts` | ~20 lines | A status effect on *every* model that exists or ever will |
-| 3 | **A new clip** in `models.ts` | 3–5 keyframes | A whole action: kick, parry, bow-draw, stagger |
-| 4 | **A new gear part** in `models.ts` | 1–8 lines | An item, worn and animated by clips that already exist |
-| 5 | **A particle effect** — an emitter over 1–4px primitives | ~15 lines | Spells, impacts, weather, blood, embers |
-| 6 | **A new skeleton and model** | ~40 lines | A creature with a shape the humanoid cannot pose |
-| 7 | **Hand-authored frames** | expensive, and dead weight forever | **Props and tiles only. Never a character.** |
+| 2 | **A light pass** — `shadeCloud` with a ramp and a direction | 1–3 lines | Volume on any model at all; a torchlit, moonlit or backlit version of it |
+| 3 | **A cycled ramp** — `cycleRamp` re-inking a static cloud per tick | 1 line | A rune that circulates, an energy bar that flows, lava that crawls |
+| 4 | **A new cloud transform** in `transforms.ts` | ~20 lines | A status effect on *every* model that exists or ever will |
+| 5 | **A new clip** in `models.ts` | 3–5 keyframes | A whole action: kick, parry, bow-draw, stagger |
+| 6 | **A new gear part** in `models.ts` | 1–8 lines | An item, worn and animated by clips that already exist |
+| 7 | **A particle effect** — an emitter over 1–4px primitives | ~15 lines | Spells, impacts, weather, blood, embers |
+| 8 | **A new skeleton and model** | ~40 lines | A creature with a shape the humanoid cannot pose |
+| 9 | **Hand-authored frames** | expensive, and dead weight forever | **Props and tiles only. Never a character.** |
 
 **Never draw frame N+1 of something you already drew frame N of.** If you find yourself
-writing a second mask that is the first one shifted, recoloured, or sagging, you wanted
-rung 2 or rung 3 and you are on rung 7.
+writing a second mask that is the first one shifted, recoloured, shaded, or sagging, you
+wanted a rung between 1 and 5 and you are on rung 9.
 
 ## "I want X" → the one file to open
 
@@ -49,8 +57,12 @@ other module; the API table below covers the calls.
 | Armour, a scar, a glow — gear that **recolours** | a `reink` part | `src/game/models.ts` |
 | An attack, a dodge, an emote | a `Clip` | `src/game/models.ts` |
 | Burning, freezing, petrifying, dissolving | a cloud transform | `src/game/transforms.ts` |
+| Shadow, highlight, volume on anything | a light pass: `shadeCloud(cloud, { ramp, light })` | `src/game/shading.ts` |
+| Torchlight, moonlight, a backlit rim | the same light pass, with a warm or cold ramp and a tuned `ambient` | `src/game/shading.ts` |
+| A pulsing rune, flowing lava, an energy bar | `cycleRamp` per tick over a static cloud | `src/game/shading.ts` |
 | A projectile, an impact, a spell trail | a seeded emitter | `src/game/spark-emitter.ts` |
 | Rain, snow, lightning, wind | an emitter or a seeded polyline | `src/game/weather.ts` |
+| Smoke, fog, a swarm, spreading fire | a field over particles — see `procedural-effects.md` | `src/game/spark-emitter.ts` |
 | A puddle, a pool, water on the ground | a seeded outline plus its surface layers | `src/game/puddles.ts` |
 | A ring spreading from an impact | a pooled `Ripple`, aged by a clock | `src/game/ripples.ts` |
 | Where the water *is* in the sample scene | a `PuddleSite`, one line of data | `src/game/field.ts` |
@@ -60,9 +72,10 @@ other module; the API table below covers the calls.
 | The same model facing **left** | nothing — pass `flipX` | — |
 | The same model facing **away** | nothing — pass `facing: "back"` | — |
 | A melting / frozen / burning **frame** | nothing — call the transform at a progress | — |
+| A **shaded** copy of a frame you have | nothing — `shadeCloud` at a light direction | — |
 | A reflection in water | nothing — `reflectCloud` | — |
 
-The last four rows are there because they are the four things an agent reflexively draws
+The last five rows are there because they are the five things an agent reflexively draws
 and must not.
 
 ## The API, in one table
@@ -75,6 +88,7 @@ export-checked by `src/game/art-pipeline-rule.test.ts`, so this table cannot rot
 | `ink.ts` | `INK_COLORS` · `INK_TOKENS` · `INK_ALPHA` · `inkHex` · `BACKGROUND` · `maskFromRows` · `mirrorMask` · `stampMask` · `strokeLine` · `mirrorCloud` · `translateCloud` · `cloudBounds` · `cloudToSprite` | Inks, text masks, and the cloud primitives |
 | `rig.ts` | `vec3` · `ZERO` · `solvePose` · `samplePose` · `renderModel` · `equip` · `projectRigPoint` · `effectiveSkeleton` · `partBoneNames` · `validateSkeleton` · `validateClip` · `validateModel` | Posing, sampling, rendering, dressing |
 | `models.ts` | `HUMANOID_SKELETON` · `HUMANOID_BASE` · `HERO_MODEL` · `HERO_EQUIPPED` · `HERO_CLIPS` · `SWORD` · `HAT` · `ARMOR` · `IDLE` · `WALK` · `SWING` · `CAST` | The authored humanoid, its gear, its clips |
+| `shading.ts` | `INK_RAMPS` · `rampInk` · `cycleRamp` · `shadeCloud` · `directionalLevel` · `ditherThreshold` · `BAYER_4X4` | Ramps, the light pass, ordered dither, palette cycling |
 | `transforms.ts` | `meltCloud` · `freezeCloud` · `burnCloud` · `burnFront` · `reflectCloud` · `pixelHash` | Status effects and water, as pure functions |
 | `spark-emitter.ts` | `createEmitter` · `stepEmitter` · `resetEmitter` · `particleAlpha` · `DEFAULT_EMITTER` · `MAX_STEP_MS` | The pooled, seeded particle system |
 | `weather.ts` | `createRain` · `lightningBolt` · `lightningAt` · `RAIN_FALL_SPEED` · `RAIN_SLANT` | Rain, its wind, and the storm schedule |
@@ -124,6 +138,24 @@ model in the game.
 beat — not a drawn projectile sprite. Where the fire *is* on a burning model,
 `burnFront` already tells you, so the flame and the sprite agree for free.
 
+**Light on anything.** One call, wrapped around a cloud you already have:
+
+```ts
+shadeCloud(cloud, {
+  ramp: INK_RAMPS.bone,          // darkest first; ember / arcane / verdant / tide too
+  light: { x: -0.6, y: -0.8 },   // screen space, +y is DOWN, need not be normalised
+  ambient: 0.2,                  // the floor on the shadow side
+  only: ["bone", "steel"],       // hold identity inks out of the pass
+})
+```
+
+`only` is the part that decides whether the result reads. Shade the flesh and the
+armour; leave the cyan blade, the magenta hat and the `void` eyes alone, or the model
+loses the three pixels that said which character it was. Pass it through
+`sampleClipFrames`'s `mapCloud` to light a whole clip — `hero-lit` in the registry is
+exactly that, and not one shaded frame was drawn. `dither: false` gives flat cel bands
+instead of a gradient, which is what a shield or a rune usually wants.
+
 **A puddle.** A line in `PUDDLE_SITES` (`field.ts`) — a cell, a radius, a seed. Nothing is
 drawn: `createPuddle` grows a foreshortened outline with seeded lobes in it, and the four
 layers over it are `puddleSurface` (stamp once), `puddleGlints`, `puddleReflection` and
@@ -147,11 +179,37 @@ where the drop really landed, so `rainImpact` gives it one: it walks the chord t
 would cut and lands at a seeded fraction along it. The tests were green and the rings were
 spawning at the right rate the whole time this was wrong; only the screen showed it.
 
+## Motion is a sum of terms, not a list of frames
+
+What is on screen at time *t* is terms added together, each cheap and each testable
+alone:
+
+```
+pose(t) = base pose + clip sample + secondary motion + reaction
+```
+
+Reach for a **new term** before a new keyframe, and certainly before a new drawing:
+
+| Want | Term | Not |
+| --- | --- | --- |
+| Aliveness while standing still | a slow bob or breathe added to the root | more idle frames |
+| Weight on landing, charge, or a hit | squash/stretch as a scale on the cloud, 1–2px | a squashed drawing |
+| Recoil, stagger, knockback | a decaying offset added to the root | a stagger clip |
+| Wind, water, nerves, a flame's wander | seeded noise sampled at *t* | jitter frames |
+| Impact | hit stop, a camera impulse, and a burst — all three | a bigger explosion sprite |
+
+Every term is a pure function of `(t, seed)`, so it composes with every other term, and
+a capture at a fixed `t` reproduces byte for byte. Anything that reads `Math.random()`
+breaks both properties at once.
+
 ## Non-negotiable
 
-- **The ink set is closed.** No asset writes a hex value. A new colour is a new entry in
-  `INK_COLORS` and `INK_TOKENS`, added deliberately, with a token nothing else uses.
-  `void` is deliberate black for punching holes into a lit silhouette.
+- **The ink set is closed, and shading arranges it rather than extending it.** No asset
+  writes a hex value. A new colour is a new entry in `INK_COLORS` and `INK_TOKENS`,
+  added deliberately, with a token nothing else uses; a new *shading* is a ramp over
+  inks that already exist. `void` is deliberate black for punching holes into a lit
+  silhouette. Gradients come from `shadeCloud`'s ordered dither and nowhere else —
+  never from blending two hexes, and never from a scaled or blurred sprite.
 - **Transparency is a property of the ink, not of the call site.** An ink's opacity is
   `INK_ALPHA` and `inkHex` spells it, so `water` is sheer everywhere it is used and
   nowhere does a draw call invent an alpha for a colour. A scene may still dim a whole
