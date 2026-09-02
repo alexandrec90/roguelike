@@ -31,7 +31,7 @@ body {
 }
 
 /*
- * Size and position come from `integerCoverScale`/`centerCrop` in main.ts,
+ * Size and position come from `integerCoverScale`/`coverOffset` in main.ts,
  * never from CSS. Stretching this canvas to 100% of its box would distort the
  * 320x180 grid on windows with a different aspect ratio.
  */

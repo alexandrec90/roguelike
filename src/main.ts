@@ -3,7 +3,7 @@ import Phaser from "phaser";
 import "./style.css";
 import { DemoScene, GAME_SIZE } from "./game/demo-scene";
 import { parseSkyFraction } from "./game/horizon";
-import { centerCrop, integerCoverScale } from "./game/integer-scale";
+import { coverOffset, integerCoverScale } from "./game/integer-scale";
 
 // The 95/5 horizon split is a framing decision, so it is retunable without a
 // rebuild: `?horizon=0.08` or `?horizon=8%`. An unreadable value falls back to
@@ -38,20 +38,20 @@ const game = new Phaser.Game({
   },
 });
 
-/** Whole-number cover scale, centred so the host clips excess canvas evenly. */
+/** Whole-number cover scale with centred sides and a horizon-pinned top edge. */
 function coverCanvas(): void {
   const host = game.canvas.parentElement;
   if (host === null) {
     return;
   }
 
-  const { factor, width, height } = integerCoverScale(
+  const { factor, width } = integerCoverScale(
     host.clientWidth,
     host.clientHeight,
     GAME_SIZE.width,
     GAME_SIZE.height,
   );
-  const { left, top } = centerCrop(host.clientWidth, host.clientHeight, width, height);
+  const { left, top } = coverOffset(host.clientWidth, width);
 
   game.canvas.style.width = `${GAME_SIZE.width * factor}px`;
   game.canvas.style.height = `${GAME_SIZE.height * factor}px`;

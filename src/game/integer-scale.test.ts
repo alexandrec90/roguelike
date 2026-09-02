@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { centerCrop, integerCoverScale, integerScale, letterbox } from "./integer-scale";
+import { coverOffset, integerCoverScale, integerScale, letterbox } from "./integer-scale";
 
 describe("integerScale", () => {
   it("picks the largest whole factor that fits", () => {
@@ -71,12 +71,12 @@ describe("integerCoverScale", () => {
   });
 });
 
-describe("centerCrop", () => {
-  it("centres oversized content with negative whole-pixel offsets", () => {
-    expect(centerCrop(1000, 700, 1280, 720)).toEqual({ left: -140, top: -10 });
+describe("coverOffset", () => {
+  it("centres horizontal overflow while preserving the top edge", () => {
+    expect(coverOffset(1000, 1280)).toEqual({ left: -140, top: 0 });
   });
 
-  it("centres an odd crop without using half pixels", () => {
-    expect(centerCrop(999, 699, 1280, 720)).toEqual({ left: -141, top: -11 });
+  it("centres an odd horizontal crop without using half pixels", () => {
+    expect(coverOffset(999, 1280)).toEqual({ left: -141, top: 0 });
   });
 });

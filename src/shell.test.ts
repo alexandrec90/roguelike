@@ -48,9 +48,9 @@ describe("the page shell", () => {
     }
   });
 
-  it("covers and centre-crops the window without distorting the canvas", () => {
+  it("covers the window without distortion while keeping the horizon visible", () => {
     expect(main).toContain("integerCoverScale(");
-    expect(main).toContain("centerCrop(");
+    expect(main).toContain("coverOffset(");
     expect(main).not.toContain("integerScale(");
     expect(main).not.toContain("letterbox(");
   });

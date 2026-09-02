@@ -99,15 +99,13 @@ export function letterbox(
   };
 }
 
-/** Whole-pixel offsets that centre content while allowing its edges to clip. */
-export function centerCrop(
+/** Centre horizontal overflow, but keep the horizon pinned to the top edge. */
+export function coverOffset(
   availableWidth: number,
-  availableHeight: number,
   contentWidth: number,
-  contentHeight: number,
 ): { readonly left: number; readonly top: number } {
   return {
     left: Math.floor((availableWidth - contentWidth) / 2),
-    top: Math.floor((availableHeight - contentHeight) / 2),
+    top: 0,
   };
 }
