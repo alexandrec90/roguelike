@@ -2,7 +2,7 @@ import Phaser from "phaser";
 
 import { hexToInt } from "./color";
 import { drawCloud } from "./draw-cloud";
-import { cellFoot, composeGround, faceCells, rockCells } from "./field";
+import { cellFoot, composeGround, faceCells, rockCells, rowAtFoot } from "./field";
 import {
   DEFAULT_SKY_FRACTION,
   horizonLayout,
@@ -13,7 +13,7 @@ import {
   starField,
   type HorizonLayout,
 } from "./horizon";
-import { INK_COLORS, type PixelCloud } from "./ink";
+import { cloudBounds, INK_COLORS, type PixelCloud } from "./ink";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import { quantizedWave } from "./pixel-art";
 import {
@@ -31,6 +31,7 @@ import { installPixelTexture } from "./textures";
 import { WALL_FACE, WALL_TOP } from "./tiles";
 import { freezeCloud, meltCloud } from "./transforms";
 import { VegetationLayer } from "./vegetation-layer";
+import { centerFoot, walkableBand, type Anchor } from "./viewport";
 import { WaterLayer } from "./water-layer";
 import { createRain, lightningAt, lightningBolt } from "./weather";
 
@@ -48,9 +49,18 @@ const RAIN_DEPTH = 5000;
 const BOLT_DEPTH = 6000;
 
 /** Cells the sample scene puts things on. Row 0 is at the horizon. */
-const HERO_CELL = { column: 10, row: 11 } as const;
 const SLIME_CELL = { column: 16, row: 9 } as const;
 const TORCH_CELL = { column: 13, row: 10 } as const;
+
+/**
+ * The hero is placed by the window rather than by the map, so what decides
+ * where he stands is how tall he is — measured once, from the base pose.
+ *
+ * A clip or a transform changes the silhouette frame by frame, and anchoring
+ * to *that* would make him drift up the screen as he swung. The base pose is
+ * the one that holds still.
+ */
+const HERO_BOUNDS = cloudBounds(renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose));
 
 /** Landmarks in the rolled-over band, as screen x of their left edge. */
 const DISTANT_PINES = [52, 68, 244, 276];
@@ -193,6 +203,10 @@ export class DemoScene extends Phaser.Scene {
   private readonly vegetation = new VegetationLayer();
   private readonly water = new WaterLayer();
   private elapsedMs = 0;
+  /** Scanlines of the render target the window is showing; the rest is clipped. */
+  private visible = HEIGHT;
+  private heroAnchor: Anchor = { x: WIDTH / 2, y: HEIGHT };
+  private built = false;
 
   constructor(skyFraction: number = DEFAULT_SKY_FRACTION) {
     super("overworld-field");
@@ -203,15 +217,39 @@ export class DemoScene extends Phaser.Scene {
     this.layout = horizonLayout(HEIGHT, this.skyFraction);
     this.columns = columnsAcross(WIDTH);
     this.rows = rowsDown(this.layout.groundHeight);
+    this.placeHero();
 
     installSceneTextures(this, this.columns, this.rows);
     this.distantPines = drawWorld(this, this.layout, this.columns, this.rows);
     this.vegetation.create(this, this.layout.groundTop, this.columns, this.rows);
-    this.water.create(this, this.layout.groundTop);
+    this.water.create(this, this.layout.groundTop, this.heroAnchor);
     this.createHero();
     this.createSlime();
     this.createTorch();
     this.createWeather();
+    this.built = true;
+  }
+
+  /**
+   * How much playfield the window is still showing, so the hero can be put in
+   * the middle of it.
+   *
+   * The shell calls this on every resize, and once before the scene has built
+   * anything — so it stores the number either way and only redraws when there
+   * is something to redraw.
+   */
+  setVisibleHeight(height: number): void {
+    const clamped = Math.min(Math.max(Math.floor(height), 1), HEIGHT);
+    if (clamped === this.visible) {
+      return;
+    }
+    this.visible = clamped;
+    if (!this.built) {
+      return;
+    }
+    this.placeHero();
+    this.heroGfx.setDepth(this.heroDepth());
+    this.water.relocateHero(this.heroAnchor);
   }
 
   update(_time: number, delta: number): void {
@@ -228,14 +266,27 @@ export class DemoScene extends Phaser.Scene {
     this.water.animate(
       delta,
       this.elapsedMs,
-      { cloud: heroCloud, foot: this.heroFoot() },
+      { cloud: heroCloud, foot: this.heroAnchor },
       cellFoot(TORCH_CELL.column, TORCH_CELL.row, this.layout.groundTop),
     );
     this.updateLightning();
   }
 
   private createHero(): void {
-    this.heroGfx = this.add.graphics().setDepth(HERO_CELL.row * TILE_WIDTH + RANK_ACTOR);
+    this.heroGfx = this.add.graphics().setDepth(this.heroDepth());
+  }
+
+  /** Centred across the target, and halfway down whatever playfield is left. */
+  private placeHero(): void {
+    this.heroAnchor = centerFoot(
+      HERO_BOUNDS,
+      walkableBand(this.layout.groundTop, this.visible),
+      WIDTH / 2,
+    );
+  }
+
+  private heroDepth(): number {
+    return rowAtFoot(this.heroAnchor.y, this.layout.groundTop) * TILE_WIDTH + RANK_ACTOR;
   }
 
   private createSlime(): void {
@@ -293,10 +344,6 @@ export class DemoScene extends Phaser.Scene {
       .setVisible(false);
   }
 
-  private heroFoot(): { readonly x: number; readonly y: number } {
-    return cellFoot(HERO_CELL.column, HERO_CELL.row, this.layout.groundTop);
-  }
-
   /** The hero this instant: which phase of the showcase, flattened to pixels. */
   private heroCloud(): PixelCloud {
     let t = this.elapsedMs % SHOWCASE_TOTAL;
@@ -327,9 +374,8 @@ export class DemoScene extends Phaser.Scene {
   }
 
   private animateHero(cloud: PixelCloud): void {
-    const foot = this.heroFoot();
     this.heroGfx.clear();
-    drawCloud(this.heroGfx, cloud, foot.x, foot.y);
+    drawCloud(this.heroGfx, cloud, this.heroAnchor.x, this.heroAnchor.y);
   }
 
   private animateSlime(): void {
