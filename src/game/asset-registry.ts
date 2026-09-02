@@ -13,6 +13,8 @@ import { INK_COLORS } from "./ink";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import type { Palette, PixelSpriteSource } from "./pixel-art";
 import { rasterizeSprite } from "./pixel-art";
+import { samplePuddleFrames } from "./puddles";
+import { sampleRippleFrames } from "./ripples";
 import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
@@ -289,6 +291,36 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     variants: [
       AUTHORED,
       { id: "dark", label: "Unlit", overrides: { q: "#2a3542" } },
+    ],
+  },
+  {
+    id: "puddle",
+    label: "Puddle — standing water",
+    category: "prop",
+    frames: samplePuddleFrames(8),
+    frameDurationMs: 600,
+    notes:
+      "Not drawn: a seeded lobed ellipse from puddles.ts, foreshortened by the camera pitch. " +
+      "The body ink is translucent, so judge it on the checker ground as well as the duo one — " +
+      "what makes it read as water is the lit rim and the drifting glints, not a dark fill.",
+    variants: [
+      AUTHORED,
+      { id: "tar", label: "Tar", overrides: { b: "#1a0f18c0" } },
+      { id: "shallow", label: "Shallow", overrides: { b: "#0b2b3e66" } },
+    ],
+  },
+  {
+    id: "ripple",
+    label: "Ripple — rain impact",
+    category: "effect",
+    frames: sampleRippleFrames(8),
+    frameDurationMs: 80,
+    notes:
+      "One ring's whole life, from the splash pixel to the faded rim. The scene fades it out " +
+      "as it spreads; here every frame draws at full strength so the shape is legible.",
+    variants: [
+      AUTHORED,
+      { id: "ember", label: "Ember", overrides: { i: "#ff7a1f" } },
     ],
   },
   {

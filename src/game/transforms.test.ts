@@ -131,6 +131,18 @@ describe("reflectCloud", () => {
     expect(deepest).toBeLessThan(8);
   });
 
+  it("gives back the source inks when the water is asked for a colour image", () => {
+    const mixed: PixelCloud = [
+      { x: 0, y: 0, ink: "amber" },
+      { x: 0, y: -1, ink: "ice" },
+    ];
+    const reflection = reflectCloud(mixed, { interlace: 1, ink: null });
+    expect(new Set(reflection.map((pixel) => pixel.ink))).toEqual(new Set(["amber", "ice"]));
+    // Passing null is the opt-in; the flat silhouette stays the default, so a
+    // caller that says nothing keeps the reflection it had before.
+    expect(reflectCloud(mixed, { interlace: 1 }).every((pixel) => pixel.ink === "deep")).toBe(true);
+  });
+
   it("drops punched holes and rejects bad options", () => {
     const withEye: PixelCloud = [...column(), { x: 1, y: -6, ink: "void" }];
     expect(reflectCloud(withEye, { interlace: 1 }).some((pixel) => pixel.x === 1)).toBe(false);

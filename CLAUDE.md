@@ -63,7 +63,7 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 | --- | --- |
 | Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by an integer factor and letterbox the remainder. |
 | Setting | **Outdoors.** The game is an overworld — fields, paths, rock, sky — not a dungeon interior. |
-| Color | **A closed palette of named inks on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. |
+| Color | **A closed palette of named inks on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. An ink may be **translucent** — `INK_ALPHA` carries its opacity and `inkHex` spells it, so `water` is sheer wherever it is drawn and no call site invents an alpha for a colour. A scene dimming a whole layer is lighting, and multiplies the ink's own alpha rather than replacing it. |
 | Light and shade | The palette is closed but **not one bit deep**. Shadow, highlight and gradient are *computed, never painted*: an ordered **ink ramp**, a light direction, and a 4×4 Bayer dither locked to the logical pixel grid (`src/game/shading.ts`). Shading is a pass over a pixel cloud, so it applies to every model that exists or ever will, and a ramp arranges the palette rather than extending it. Hold identity inks — a cyan blade, a magenta hat, `void` eyes — out of the light pass, so the silhouette still reads at 1×. |
 | Camera | A **pitched-back overhead** view, not a 45°-yaw diamond isometric: rows and columns stay axis-aligned and only the vertical axis is foreshortened. A 16×16 world square lands on 16×12 of screen, and height rises straight up the screen by `WALL_RISE`, which is what makes walls stand. `src/game/projection.ts` owns that math; nothing else re-derives it. |
 | Grid | 16×16 world tiles. Author ground art **already foreshortened** — 16×`TILE_DEPTH` for anything lying on the ground, 16×`WALL_RISE` for anything standing up — so every tile blits 1:1 and nothing is scaled at draw time. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
@@ -90,8 +90,8 @@ Four modules, and no fifth place where any of this is decided:
 ### The ink pipeline
 
 Everything renderable flattens to a **pixel cloud** — an ordered list of lit pixels,
-later wins — which is what lets one melt, or one light pass, apply to any model. Seven
-modules, and no eighth place where any of this is decided:
+later wins — which is what lets one melt, or one light pass, apply to any model. Eight
+modules, and no ninth place where any of this is decided:
 
 | Module | Owns |
 | --- | --- |
@@ -100,7 +100,8 @@ modules, and no eighth place where any of this is decided:
 | `src/game/rig.ts` | Skeletons, poses, clip sampling, `renderModel`. Rig space is x right, y toward the viewer, z up; a rig point projects `(x, y·DEPTH_RATIO − z)` — exactly the world's projection, re-used, never re-derived. |
 | `src/game/models.ts` | The authored humanoid: skeleton, base pose, gear (`SWORD` is a real bone clips can key; `HAT` a stamp; `ARMOR` a reink) and the clips (`IDLE`, `WALK`, `SWING`, `CAST`). The file an agent edits for a new move or item. |
 | `src/game/transforms.ts` | `meltCloud` / `freezeCloud` / `burnCloud` / `reflectCloud` — pure, seeded functions of (cloud, progress); identity at 0, deterministic always. |
-| `src/game/weather.ts` | Rain (the pooled spark emitter pointed downward) and lightning (seeded bolt polyline plus a pure-function-of-time storm schedule). |
+| `src/game/weather.ts` | Rain (the pooled spark emitter pointed downward, with a steady wind on it — `RAIN_SLANT` is the one number the sky and the drawn streak both read) and lightning (seeded bolt polyline plus a pure-function-of-time storm schedule). |
+| `src/game/puddles.ts` | Standing water: a seeded, foreshortened outline generated from a centre and a radius, plus everything on its surface — rim, glints, reflection, and the rings the rain punches into it. Placement is data in `field.ts`; the scene only draws. |
 | `src/game/rig-frames.ts` | Sampling clips and transforms into fixed frame lists so the asset registry and the lab cannot tell rig art from hand-drawn art. |
 
 **How to actually draw and animate with it is `.claude/rules/art-pipeline.md`** — the
@@ -234,6 +235,43 @@ and full runs in CI.
 Add this project's specifics *below* — fixtures, isolation rules, markers, what to mock
 and where — but do not restate the policy above. It is vendored and drift-gated; a copy
 here is a fork that will disagree with it the first time either is edited.
+
+**The gate here is `npm run check`** — `vitest run` then `tsc --noEmit && vite build`.
+There is **no `lint` script**, so the vendored rule's "targeted tests plus the linter"
+has no second half in this project: `npm run lint` fails with *"Missing script"*, which
+reads as a broken toolchain rather than as an instruction that does not apply. The
+scripts are `dev`, `build`, `typecheck`, `test`, `check`, and `check` is the one to run
+before shipping. Formatting is not gated at all; type errors are, through `build`.
+
+**`npm run check` is not the whole CI gate.** The Tests job also runs
+`scripts/hooks/structure_check.py` through pytest, which caps file length, class length
+and method count — a limit no npm script enforces, so a branch can be green locally and
+fail the gate on nothing but size. Run it before pushing:
+
+```bash
+python scripts/hooks/structure_check.py     # stdlib only; no venv needed
+```
+
+Its verdict is *"fix the code, do not add to the baseline"*, and that is meant literally:
+a file over the limit is two jobs in one file, and the split is the fix. `demo-scene.ts`
+was 622 lines because it had quietly become the overworld *and* the pond in it; the seams
+it named are now `water-layer.ts`, `draw-cloud.ts` and `ripples.ts`.
+
+**Green tests are not the gate for anything you can see.** This is the lesson the water
+cost: `rainImpact`'s rings were spawning at the right rate, every unit test passed, and
+the scene had no visible ripples in it for a whole session, because the rings were
+opening on the far rim and being clipped away. Any change to art, motion, or effects is
+inspected in the running browser as well — `npm run dev`, then the scene at an integer
+zoom and `/lab.html` for the frames. A test can only assert the property you thought to
+name; the screen asserts the rest.
+
+The same gap has a second, sharper form: **`Phaser` is an ambient type namespace, so a
+module can annotate `Phaser.GameObjects.Graphics` all day without importing it — and then
+die on the first frame at `Phaser.BlendModes.ADD`, which is a *value*.** `tsc --noEmit`
+and all 306 tests passed on exactly that; the browser said `Phaser is not defined` and the
+canvas was black. Any new module that touches Phaser at runtime needs
+`import Phaser from "phaser"`, and the only thing that catches a missing one is loading
+the page.
 
 ## Guardrails
 

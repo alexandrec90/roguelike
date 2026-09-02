@@ -63,6 +63,9 @@ other module; the API table below covers the calls.
 | A projectile, an impact, a spell trail | a seeded emitter | `src/game/spark-emitter.ts` |
 | Rain, snow, lightning, wind | an emitter or a seeded polyline | `src/game/weather.ts` |
 | Smoke, fog, a swarm, spreading fire | a field over particles — see `procedural-effects.md` | `src/game/spark-emitter.ts` |
+| A puddle, a pool, water on the ground | a seeded outline plus its surface layers | `src/game/puddles.ts` |
+| A ring spreading from an impact | a pooled `Ripple`, aged by a clock | `src/game/ripples.ts` |
+| Where the water *is* in the sample scene | a `PuddleSite`, one line of data | `src/game/field.ts` |
 | A recolour of anything at all | a `PaletteVariant` | `src/game/asset-registry.ts` |
 | A new creature | reuse `HUMANOID_SKELETON` if it is bipedal; else a new `SkeletonDef` | `src/game/models.ts` |
 | A rock, a tree, a tile — it never moves | an authored mask | `src/game/sprites.ts`, `src/game/tiles.ts` |
@@ -82,13 +85,15 @@ export-checked by `src/game/art-pipeline-rule.test.ts`, so this table cannot rot
 
 | Module | Symbols | Use |
 | --- | --- | --- |
-| `ink.ts` | `INK_COLORS` · `INK_TOKENS` · `BACKGROUND` · `maskFromRows` · `mirrorMask` · `stampMask` · `strokeLine` · `mirrorCloud` · `translateCloud` · `cloudBounds` · `cloudToSprite` | Inks, text masks, and the cloud primitives |
+| `ink.ts` | `INK_COLORS` · `INK_TOKENS` · `INK_ALPHA` · `inkHex` · `BACKGROUND` · `maskFromRows` · `mirrorMask` · `stampMask` · `strokeLine` · `mirrorCloud` · `translateCloud` · `cloudBounds` · `cloudToSprite` | Inks, text masks, and the cloud primitives |
 | `rig.ts` | `vec3` · `ZERO` · `solvePose` · `samplePose` · `renderModel` · `equip` · `projectRigPoint` · `effectiveSkeleton` · `partBoneNames` · `validateSkeleton` · `validateClip` · `validateModel` | Posing, sampling, rendering, dressing |
 | `models.ts` | `HUMANOID_SKELETON` · `HUMANOID_BASE` · `HERO_MODEL` · `HERO_EQUIPPED` · `HERO_CLIPS` · `SWORD` · `HAT` · `ARMOR` · `IDLE` · `WALK` · `SWING` · `CAST` | The authored humanoid, its gear, its clips |
 | `shading.ts` | `INK_RAMPS` · `rampInk` · `cycleRamp` · `shadeCloud` · `directionalLevel` · `ditherThreshold` · `BAYER_4X4` | Ramps, the light pass, ordered dither, palette cycling |
 | `transforms.ts` | `meltCloud` · `freezeCloud` · `burnCloud` · `burnFront` · `reflectCloud` · `pixelHash` | Status effects and water, as pure functions |
 | `spark-emitter.ts` | `createEmitter` · `stepEmitter` · `resetEmitter` · `particleAlpha` · `DEFAULT_EMITTER` · `MAX_STEP_MS` | The pooled, seeded particle system |
-| `weather.ts` | `createRain` · `lightningBolt` · `lightningAt` | Rain and the storm schedule |
+| `weather.ts` | `createRain` · `lightningBolt` · `lightningAt` · `RAIN_FALL_SPEED` · `RAIN_SLANT` | Rain, its wind, and the storm schedule |
+| `puddles.ts` | `createPuddle` · `puddleHolds` · `clipToPuddle` · `puddleSurface` · `puddleGlints` · `puddleReflection` · `rainImpact` · `samplePuddleFrames` | Standing water: its shape, what it shows, and where a drop goes in |
+| `ripples.ts` | `createRippleField` · `spawnRipple` · `stepRipples` · `resetRipples` · `rippleAlpha` · `rippleCloud` · `sampleRippleFrames` | The rings a drop leaves — a pool, a clock, an outline |
 | `rig-frames.ts` | `RIG_FRAME` · `sampleClipFrames` · `sampleMeltFrames` | Baking clips and transforms into lab filmstrips |
 
 The three shapes worth having in front of you, field names only:
@@ -151,6 +156,29 @@ loses the three pixels that said which character it was. Pass it through
 exactly that, and not one shaded frame was drawn. `dither: false` gives flat cel bands
 instead of a gradient, which is what a shield or a rune usually wants.
 
+**A puddle.** A line in `PUDDLE_SITES` (`field.ts`) — a cell, a radius, a seed. Nothing is
+drawn: `createPuddle` grows a foreshortened outline with seeded lobes in it, and the four
+layers over it are `puddleSurface` (stamp once), `puddleGlints`, `puddleReflection` and
+`rippleCloud`. Two of them are pure functions of time, so a capture at *t* is repeatable.
+What makes water read on pitch black is the lit rim, the glints and what it gives back —
+never a darker fill, which on this background is a hole.
+
+**Rain that lands.** The wind is one number, `RAIN_SLANT`: the emitter's `windX` derives
+from it and `RAIN_STREAK` is drawn leaning by exactly it, so the trail always points where
+the drop is going. To make weather leave a mark, hand the drop's segment — its position
+now, and `vx`/`vy` times the clamped delta back — to `rainImpact`, rather than testing its
+current pixel; a drop moving several pixels a frame otherwise steps straight over a puddle.
+
+**A mark lands *in* the thing it marks, not on the near side of it.** The first pixel a
+falling segment shares with a puddle is always on the puddle's **far rim**, because the
+segment comes down the screen — so a ring opened there has most of itself outside the
+water and is clipped away to an arc. This is not a puddle problem; it is what happens
+whenever a marker is placed at the first intersection of a downward path with a
+foreshortened ground shape. The projection has thrown away the depth that would say
+where the drop really landed, so `rainImpact` gives it one: it walks the chord the drop
+would cut and lands at a seeded fraction along it. The tests were green and the rings were
+spawning at the right rate the whole time this was wrong; only the screen showed it.
+
 ## Motion is a sum of terms, not a list of frames
 
 What is on screen at time *t* is terms added together, each cheap and each testable
@@ -182,6 +210,11 @@ breaks both properties at once.
   inks that already exist. `void` is deliberate black for punching holes into a lit
   silhouette. Gradients come from `shadeCloud`'s ordered dither and nowhere else —
   never from blending two hexes, and never from a scaled or blurred sprite.
+- **Transparency is a property of the ink, not of the call site.** An ink's opacity is
+  `INK_ALPHA` and `inkHex` spells it, so `water` is sheer everywhere it is used and
+  nowhere does a draw call invent an alpha for a colour. A scene may still dim a whole
+  *layer* — that is lighting, and it multiplies the ink's own alpha rather than replacing
+  it.
 - **Rig space is 3D**: x right, **y toward the viewer** (positive = nearer, down-screen),
   z up. Animate by moving bone directions through that space. Rotating on the screen
   plane is the thing this pipeline exists to avoid.

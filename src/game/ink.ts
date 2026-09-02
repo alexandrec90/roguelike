@@ -34,6 +34,7 @@ export type InkId =
   | "violet"
   | "steel"
   | "deep"
+  | "water"
   | "void";
 
 /**
@@ -51,6 +52,7 @@ export const INK_COLORS: Readonly<Record<InkId, string>> = {
   violet: "#a06bff",
   steel: "#5e7ea6",
   deep: "#1d4d6b",
+  water: "#0b2b3e",
   void: "#000000",
 };
 
@@ -66,8 +68,52 @@ export const INK_TOKENS: Readonly<Record<InkId, string>> = {
   violet: "v",
   steel: "s",
   deep: "d",
+  water: "b",
   void: "k",
 };
+
+/**
+ * How opaque an ink is, 0..1.
+ *
+ * Transparency is a property of the **ink**, not of the thing drawn with it:
+ * an agent picks `water` and gets water's translucency without deciding an
+ * alpha at the call site, exactly as it picks `ember` and gets ember's orange.
+ * That keeps the set closed in the dimension that matters — a scene still
+ * cannot invent a look, only choose one.
+ *
+ * Everything opaque is 1, which is why `cloudToSprite` emits six-digit hex for
+ * every ink that existed before water: the alpha byte appears only where an
+ * ink actually asked for it.
+ */
+export const INK_ALPHA: Readonly<Record<InkId, number>> = {
+  bone: 1,
+  "neon-green": 1,
+  cyan: 1,
+  magenta: 1,
+  amber: 1,
+  ember: 1,
+  ice: 1,
+  violet: 1,
+  steel: 1,
+  deep: 1,
+  // Dark enough to swallow the grass blades under it, sheer enough that the
+  // ground still reads through — which is the whole difference between a
+  // puddle and a hole.
+  water: 0.62,
+  void: 1,
+};
+
+/** An ink as CSS hex: eight digits when it carries alpha, six when it does not. */
+export function inkHex(ink: InkId): string {
+  const alpha = INK_ALPHA[ink];
+  if (alpha >= 1) {
+    return INK_COLORS[ink];
+  }
+  const byte = Math.round(Math.min(Math.max(alpha, 0), 1) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `${INK_COLORS[ink]}${byte}`;
+}
 
 export interface InkPixel {
   readonly x: number;
@@ -255,7 +301,7 @@ export function cloudToSprite(cloud: PixelCloud, frame: CloudFrame): PixelSprite
           return ".";
         }
         const token = INK_TOKENS[ink];
-        palette[token] = INK_COLORS[ink];
+        palette[token] = inkHex(ink);
         return token;
       })
       .join(""),

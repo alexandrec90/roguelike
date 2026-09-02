@@ -28,6 +28,13 @@ export interface EmitterConfig {
   readonly spreadY: number;
   /** Horizontal drift in logical pixels per millisecond, applied as +/- range. */
   readonly driftX: number;
+  /**
+   * Steady sideways push in logical pixels per millisecond, same for every
+   * particle. `driftX` is the jitter each one gets on top of it, so wind is
+   * what slants a whole sky of rain while drift is what stops it looking
+   * combed.
+   */
+  readonly windX: number;
   /** Upward speed in logical pixels per millisecond. */
   readonly riseY: number;
 }
@@ -61,6 +68,7 @@ export const DEFAULT_EMITTER: EmitterConfig = {
   spreadX: 3,
   spreadY: 1,
   driftX: 0.0022,
+  windX: 0,
   riseY: 0.0085,
 };
 
@@ -161,7 +169,7 @@ function spawn(state: EmitterState): void {
   slot.lifeMs = config.lifeMs + nextFloat(state) * config.lifeJitterMs;
   slot.x = config.originX + (nextFloat(state) * 2 - 1) * config.spreadX;
   slot.y = config.originY + (nextFloat(state) * 2 - 1) * config.spreadY;
-  slot.vx = (nextFloat(state) * 2 - 1) * config.driftX;
+  slot.vx = config.windX + (nextFloat(state) * 2 - 1) * config.driftX;
   slot.vy = -config.riseY;
 }
 
