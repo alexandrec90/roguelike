@@ -9,10 +9,12 @@
  * failing test instead of a puzzling screenshot.
  */
 
+import { INK_COLORS } from "./ink";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import type { Palette, PixelSpriteSource } from "./pixel-art";
 import { rasterizeSprite } from "./pixel-art";
 import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
+import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
 import { FAR_PINE, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { DIRT_PATH, GRASS, WALL_FACE, WALL_TOP } from "./tiles";
@@ -64,6 +66,30 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
       "Not drawn: rendered from the humanoid rig in models.ts with sword and hat equipped. " +
       "Edit the clip or the gear, and these frames follow.",
     variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-lit",
+    label: "Hero — idle, lit (shaded rig)",
+    category: "actor",
+    frames: sampleClipFrames(HERO_EQUIPPED, IDLE, 8, {
+      mapCloud: (cloud) =>
+        shadeCloud(cloud, {
+          ramp: INK_RAMPS.bone,
+          light: { x: -0.6, y: -0.8 },
+          ambient: 0.2,
+          only: ["bone", "steel"],
+        }),
+    }),
+    frameDurationMs: 175,
+    notes:
+      "The same idle clip as 'hero', re-inked by shadeCloud(): one light direction, a four-step " +
+      "ink ramp, and a 4x4 ordered dither locked to the pixel grid. No shaded frame was drawn. " +
+      "The identity inks — cyan blade, magenta hat, void eyes — are held out of the light pass, " +
+      "which is why the silhouette still reads at 1x.",
+    variants: [
+      AUTHORED,
+      { id: "ember-blade", label: "Ember blade", overrides: { c: INK_COLORS.ember } },
+    ],
   },
   {
     id: "hero-walk",
