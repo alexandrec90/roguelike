@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   activityMsOf,
   advancePlayer,
+  clampToRows,
   ATTACK_MS,
   createPlayer,
   passable,
@@ -235,5 +236,38 @@ describe("attacking", () => {
     const after = advancePlayer(during.player, { attack: true }, STEP_MS / 2, WORLD);
     expect(after.player.activity).toBe("attack");
     expect(after.attacked).toBe(true);
+  });
+});
+
+describe("a field that just got shorter", () => {
+  it("leaves a player the window can still show exactly where he is", () => {
+    const player = createPlayer(START);
+
+    expect(clampToRows(player, 15)).toBe(player);
+    expect(clampToRows(player, 12)).toBe(player);
+  });
+
+  it("pulls a player back onto the last row that survived the crop", () => {
+    const clamped = clampToRows(createPlayer(START), 7);
+
+    expect(clamped.cell).toEqual({ column: 10, row: 6 });
+    // Clamped, not re-centred: the player put him in column 10 and a resize is
+    // not a reason to move him sideways as well.
+    expect(clamped.cell.column).toBe(START.column);
+  });
+
+  it("clamps the cell a step is leaving as well as the one it is entering", () => {
+    // Only clamping the destination would let the slide start off the field
+    // and carry him back out of view for the rest of the step.
+    const stepping = advancePlayer(createPlayer(START), walk("north"), 0, WORLD).player;
+    const clamped = clampToRows(stepping, 8);
+
+    expect(clamped.from.row).toBe(7);
+    expect(clamped.cell.row).toBe(7);
+    expect(playerPosition(clamped).row).toBe(7);
+  });
+
+  it("keeps a row to stand on even when the window left room for none", () => {
+    expect(clampToRows(createPlayer(START), 0).cell.row).toBe(0);
   });
 });

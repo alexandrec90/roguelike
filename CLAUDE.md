@@ -61,7 +61,7 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 
 | Area | Contract |
 | --- | --- |
-| Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by the smallest integer factor that covers the full window. Centre-crop horizontal overflow, keep the horizon pinned to the top, and clip vertical overflow from the near foreground; never expose a border or distort the aspect ratio. |
+| Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by the smallest integer factor that covers the full window. Centre-crop horizontal overflow, keep the horizon pinned to the top, and clip vertical overflow from the near foreground; never expose a border or distort the aspect ratio. **The window therefore decides how much playfield exists**: a short window clips the near rows, so the walkable field is the map capped by what survived the crop (`src/game/viewport.ts`). Walking off the near edge and being carried off it by a dragged window edge are the same bug, and the cap is where both are answered. |
 | Setting | **Outdoors.** The game is an overworld — fields, paths, rock, sky — not a dungeon interior. |
 | Color | **A closed palette of named inks on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. An ink may be **translucent** — `INK_ALPHA` carries its opacity and `inkHex` spells it, so `water` is sheer wherever it is drawn and no call site invents an alpha for a colour. A scene dimming a whole layer is lighting, and multiplies the ink's own alpha rather than replacing it. |
 | Light and shade | The palette is closed but **not one bit deep**. Shadow, highlight and gradient are *computed, never painted*: an ordered **ink ramp**, a light direction, and a 4×4 Bayer dither locked to the logical pixel grid (`src/game/shading.ts`). Shading is a pass over a pixel cloud, so it applies to every model that exists or ever will, and a ramp arranges the palette rather than extending it. Hold identity inks — a cyan blade, a magenta hat, `void` eyes — out of the light pass, so the silhouette still reads at 1×. |
@@ -78,14 +78,15 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 
 ### The camera, and the band at the top of it
 
-Four modules, and no fifth place where any of this is decided:
+Five modules, and no sixth place where any of this is decided:
 
 | Module | Owns |
 | --- | --- |
 | `src/game/projection.ts` | `TILE_WIDTH` 16, `TILE_DEPTH` 12, `WALL_RISE` 16, and `project()` / `cellOrigin()` / `wallCapY()` / `wallFaceY()` / `depthOf()`. Draw order is `row * TILE_WIDTH + rank` — painter's algorithm down the screen. |
 | `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, the roll's easing, and `ridgeProfile()` for distant silhouettes. |
 | `src/game/tiles.ts` | The terrain art, in one shared palette with per-material tokens, so a whole field can be spliced into a single texture by `composeTiles`. |
-| `src/game/field.ts` | The sample scene's map, as text. `demo-scene.ts` reads all four and only draws. |
+| `src/game/field.ts` | The sample scene's map, as text. `demo-scene.ts` reads all five and only draws. |
+| `src/game/viewport.ts` | What the window left of the render target: `visibleHeight()` (how many scanlines survived the cover crop), `walkableBand()` (that, horizon roll excluded) and `visibleRows()` (whole field rows inside it — a row counts only when its *foot* is still on screen). The one place the *window* is allowed to influence the simulation, and it only ever takes ground away. |
 
 ### The ink pipeline
 

@@ -4,6 +4,7 @@ import "./style.css";
 import { DemoScene, GAME_SIZE } from "./game/demo-scene";
 import { parseSkyFraction } from "./game/horizon";
 import { coverOffset, integerCoverScale } from "./game/integer-scale";
+import { visibleHeight } from "./game/viewport";
 
 // The 95/5 horizon split is a framing decision, so it is retunable without a
 // rebuild: `?horizon=0.08` or `?horizon=8%`. An unreadable value falls back to
@@ -11,6 +12,10 @@ import { coverOffset, integerCoverScale } from "./game/integer-scale";
 const skyFraction = parseSkyFraction(
   new URLSearchParams(window.location.search).get("horizon"),
 );
+
+// Held rather than built inline: the layout below has to tell it how much of
+// the render target survived the window's crop.
+const scene = new DemoScene(skyFraction);
 
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
@@ -22,7 +27,7 @@ const game = new Phaser.Game({
   roundPixels: true,
   antialias: false,
   antialiasGL: false,
-  scene: new DemoScene(skyFraction),
+  scene,
   fps: {
     target: 60,
     smoothStep: true,
@@ -57,6 +62,11 @@ function coverCanvas(): void {
   game.canvas.style.height = `${GAME_SIZE.height * factor}px`;
   game.canvas.style.left = `${left}px`;
   game.canvas.style.top = `${top}px`;
+
+  // The top edge is pinned, so a short window clips the *near* rows — the ones
+  // the hero would otherwise be standing on. Tell the scene how much playfield
+  // is left and it re-centres him in it.
+  scene.setVisibleHeight(visibleHeight(host.clientHeight, factor, GAME_SIZE.height));
 }
 
 window.addEventListener("resize", coverCanvas);

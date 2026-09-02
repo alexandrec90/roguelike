@@ -194,3 +194,14 @@ export function cellFoot(
     y: groundTop + (row + 1) * TILE_DEPTH,
   };
 }
+
+/**
+ * `cellFoot`'s y, inverted: which row an actor standing at this height is on.
+ *
+ * Fractional on purpose, because the scanline handed to it is usually not a row
+ * boundary — it is wherever the window happened to cut the render target. What
+ * reads it is `viewport.ts`, asking how many whole rows survived that cut.
+ */
+export function rowAtFoot(footY: number, groundTop: number): number {
+  return (footY - groundTop) / TILE_DEPTH - 1;
+}

@@ -28,6 +28,7 @@ import { FAR_PINE_FRAMES, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRA
 import { installPixelTexture } from "./textures";
 import { WALL_FACE, WALL_TOP } from "./tiles";
 import { VegetationLayer } from "./vegetation-layer";
+import { visibleRows, walkableBand } from "./viewport";
 import { WaterLayer } from "./water-layer";
 import { createRain, lightningAt, lightningBolt } from "./weather";
 
@@ -167,6 +168,9 @@ export class DemoScene extends Phaser.Scene {
   private readonly vegetation = new VegetationLayer();
   private readonly water = new WaterLayer();
   private elapsedMs = 0;
+  /** Scanlines of the render target the window is showing; the rest is clipped. */
+  private visible = HEIGHT;
+  private built = false;
 
   constructor(skyFraction: number = DEFAULT_SKY_FRACTION) {
     super("overworld-field");
@@ -182,10 +186,39 @@ export class DemoScene extends Phaser.Scene {
     this.distantPines = drawWorld(this, this.layout, this.columns, this.rows);
     this.vegetation.create(this, this.layout.groundTop, this.columns, this.rows);
     this.water.create(this, this.layout.groundTop);
-    this.hero.create(this, this.layout.groundTop, this.columns, this.rows);
+    this.hero.create(this, this.layout.groundTop, this.columns, this.walkableRows());
     this.createSlime();
     this.createTorch();
     this.createWeather();
+    this.built = true;
+  }
+
+  /**
+   * How much playfield the window is still showing, so the hero cannot walk off
+   * the edge of it — or be carried off it by the window's own edge.
+   *
+   * The shell calls this on every resize, and once before the scene has built
+   * anything, so it stores the number either way and only re-fences the field
+   * when there is a hero to fence.
+   */
+  setVisibleHeight(height: number): void {
+    const clamped = Math.min(Math.max(Math.floor(height), 1), HEIGHT);
+    if (clamped === this.visible) {
+      return;
+    }
+    this.visible = clamped;
+    if (this.built) {
+      this.hero.setVisibleRows(this.walkableRows());
+    }
+  }
+
+  /**
+   * Rows the player may stand on: what the map has, capped by what the crop
+   * left. The map is never *widened* by a tall window — a row the field does
+   * not draw is not ground because the screen has room for it.
+   */
+  private walkableRows(): number {
+    return Math.min(this.rows, visibleRows(walkableBand(this.layout.groundTop, this.visible)));
   }
 
   update(_time: number, delta: number): void {

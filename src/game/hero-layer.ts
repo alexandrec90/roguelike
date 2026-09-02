@@ -32,6 +32,7 @@ import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import {
   advancePlayer,
+  clampToRows,
   createPlayer,
   playerPosition,
   walkClipMs,
@@ -54,10 +55,13 @@ export class HeroLayer {
   private readonly controls = createControls();
   private player: PlayerState;
   private world: World = { columns: 0, rows: 0, blocked: () => false };
+  private columns = 0;
   private groundTop = 0;
   private gfx!: Phaser.GameObjects.Graphics;
   private cloud: PixelCloud = [];
   private foot: Foot = { x: 0, y: 0 };
+  /** Kept so a resize can redraw the idle pose it was already holding. */
+  private lastElapsedMs = 0;
 
   constructor(start: Cell) {
     this.player = createPlayer(start);
@@ -65,10 +69,36 @@ export class HeroLayer {
 
   create(scene: Phaser.Scene, groundTop: number, columns: number, rows: number): void {
     this.groundTop = groundTop;
-    this.world = { columns, rows, blocked: (column, row) => isRock(column, row) };
+    this.columns = columns;
+    this.setRows(rows);
     this.gfx = scene.add.graphics();
     this.bindInput(scene);
     this.redraw(0);
+  }
+
+  /**
+   * Re-fence the field after the window changed how much of it is on screen.
+   *
+   * The scene calls this on every resize. Walking off the near edge and being
+   * *carried* off it by a dragged window are the same bug, so both ends are
+   * handled in one place: the world shrinks, and a hero already standing past
+   * the new edge is clamped back inside it.
+   */
+  setVisibleRows(rows: number): void {
+    if (rows === this.world.rows) {
+      return;
+    }
+    this.setRows(rows);
+    this.player = clampToRows(this.player, rows);
+    this.redraw(this.lastElapsedMs);
+  }
+
+  private setRows(rows: number): void {
+    this.world = {
+      columns: this.columns,
+      rows,
+      blocked: (column, row) => isRock(column, row),
+    };
   }
 
   /**
@@ -107,6 +137,7 @@ export class HeroLayer {
   }
 
   private redraw(elapsedMs: number): void {
+    this.lastElapsedMs = elapsedMs;
     const position = playerPosition(this.player);
     const anchor = cellFoot(position.column, position.row, this.groundTop);
     this.foot = { x: Math.round(anchor.x), y: Math.round(anchor.y) };

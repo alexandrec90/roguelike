@@ -102,6 +102,30 @@ export function createPlayer(cell: Cell): PlayerState {
   };
 }
 
+/**
+ * Pull the player back inside a field that just got shorter.
+ *
+ * The window decides how many rows exist (`viewport.ts`), so dragging its
+ * bottom edge up can leave the hero standing on ground the crop has taken away.
+ * This clamps rather than re-centres on purpose: the player put him where he
+ * is, and a resize is not a reason to move him one row further than it must.
+ *
+ * A step in flight is clamped at both ends — the cell he is arriving at *and*
+ * the one he left — because a slide that starts off the field would carry him
+ * back out of view for the rest of its `STEP_MS`.
+ */
+export function clampToRows(player: PlayerState, rows: number): PlayerState {
+  const last = Math.max(rows - 1, 0);
+  if (player.cell.row <= last && player.from.row <= last) {
+    return player;
+  }
+  return {
+    ...player,
+    cell: { ...player.cell, row: Math.min(player.cell.row, last) },
+    from: { ...player.from, row: Math.min(player.from.row, last) },
+  };
+}
+
 export function activityMsOf(activity: Activity): number {
   if (activity === "step") {
     return STEP_MS;

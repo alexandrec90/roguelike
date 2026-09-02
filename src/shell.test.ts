@@ -55,6 +55,14 @@ describe("the page shell", () => {
     expect(main).not.toContain("letterbox(");
   });
 
+  it("tells the scene how much playfield the window left it", () => {
+    // Pinning the horizon means a short window clips the rows the hero stands
+    // on, so the crop is only half the contract — the scene has to hear about
+    // it or the hero is simply gone below the near edge.
+    expect(main).toContain("visibleHeight(");
+    expect(main).toContain("setVisibleHeight(");
+  });
+
   it("leaves no decorative overlay over the world", () => {
     expect(css).not.toContain("::after");
     expect(css).not.toContain("::before");

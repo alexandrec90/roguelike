@@ -8,6 +8,7 @@ import {
   isRock,
   PUDDLE_SITES,
   rockCells,
+  rowAtFoot,
   terrainAt,
   TREE_SITES,
 } from "./field";
@@ -134,6 +135,21 @@ describe("tree placement", () => {
       expect(site.row).toBeLessThan(ROWS);
       expect(terrainAt(site.column, site.row)).toBe("grass");
     }
+  });
+});
+
+describe("rowAtFoot", () => {
+  it("inverts cellFoot exactly on a cell boundary", () => {
+    for (const row of [0, 5, 11]) {
+      expect(rowAtFoot(cellFoot(3, row, 9).y, 9)).toBe(row);
+    }
+  });
+
+  it("stays fractional between rows, so a partial row is not counted as whole", () => {
+    const between = cellFoot(3, 6, 9).y - TILE_DEPTH / 2;
+
+    expect(rowAtFoot(between, 9)).toBeCloseTo(5.5, 5);
+    expect(rowAtFoot(between, 9)).toBeGreaterThan(rowAtFoot(cellFoot(3, 5, 9).y, 9));
   });
 });
 
