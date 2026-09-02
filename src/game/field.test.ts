@@ -6,12 +6,17 @@ import {
   faceCells,
   FIELD_MAP,
   isRock,
+  PUDDLE_SITES,
   rockCells,
   terrainAt,
 } from "./field";
+import { DEFAULT_SKY_FRACTION, horizonLayout } from "./horizon";
 import { rasterizeSprite } from "./pixel-art";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
+import { createPuddle, puddleHolds, rainImpact, type Puddle } from "./puddles";
+import { stepEmitter } from "./spark-emitter";
 import { TERRAIN_PALETTE } from "./tiles";
+import { createRain } from "./weather";
 
 const COLUMNS = 20;
 const ROWS = FIELD_MAP.length;
@@ -116,5 +121,82 @@ describe("composeGround", () => {
 describe("cellFoot", () => {
   it("puts an actor's feet on the near edge of its cell, centred", () => {
     expect(cellFoot(10, 11, 9)).toEqual({ x: 10 * TILE_WIDTH + 8, y: 9 + 12 * TILE_DEPTH });
+  });
+});
+
+describe("the storm over the sample field", () => {
+  const GROUND_TOP = horizonLayout(180, DEFAULT_SKY_FRACTION).groundTop;
+
+  function sitePuddles(): Puddle[] {
+    return PUDDLE_SITES.map((site) => {
+      const foot = cellFoot(site.column, site.row, GROUND_TOP);
+      return createPuddle({
+        id: site.id,
+        centerX: foot.x + (site.offsetX ?? 0),
+        centerY: foot.y + (site.offsetY ?? 0),
+        radius: site.radius,
+        seed: site.seed,
+      });
+    });
+  }
+
+  it("gives every site a puddle that stays on screen", () => {
+    for (const pool of sitePuddles()) {
+      for (const pixel of pool.water) {
+        expect(pixel.x).toBeGreaterThanOrEqual(0);
+        expect(pixel.x).toBeLessThan(320);
+        expect(pixel.y).toBeGreaterThan(GROUND_TOP);
+        expect(pixel.y).toBeLessThan(180);
+      }
+    }
+  });
+
+  /**
+   * The end-to-end claim the user's request rests on: the rain the scene runs
+   * actually reaches the water the field lays out. Nothing below this line is
+   * hypothetical — it is `demo-scene`'s own step, minus the drawing.
+   */
+  it("lands drops in the water often enough to see, and always inside it", () => {
+    const puddles = sitePuddles();
+    const rain = createRain(320);
+    const impacts: { x: number; y: number }[] = [];
+
+    // Ten seconds at 60 fps.
+    for (let frame = 0; frame < 600; frame += 1) {
+      stepEmitter(rain, 16);
+      for (const drop of rain.particles) {
+        if (!drop.active) {
+          continue;
+        }
+        const impact = rainImpact(
+          puddles,
+          drop.x - drop.vx * 16,
+          drop.y - drop.vy * 16,
+          drop.x,
+          drop.y,
+        );
+        if (impact !== null) {
+          impacts.push({ x: impact.x, y: impact.y });
+          drop.active = false;
+        }
+      }
+    }
+
+    // A ring lives RIPPLE_LIFE_MS, so this rate is what decides whether the
+    // storm ever shows one. Two a second keeps roughly one on screen at all
+    // times, which is the floor for "the rain leaves ripples" being true.
+    expect(impacts.length / 10).toBeGreaterThan(2);
+
+    for (const impact of impacts) {
+      expect(puddles.some((pool) => puddleHolds(pool, impact.x, impact.y))).toBe(true);
+    }
+
+    // And they are spread over the field rather than all going into one pool.
+    const hit = new Set(
+      impacts.map(
+        (impact) => puddles.find((pool) => puddleHolds(pool, impact.x, impact.y))?.id ?? "",
+      ),
+    );
+    expect(hit.size).toBeGreaterThan(3);
   });
 });

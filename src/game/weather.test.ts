@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { stepEmitter } from "./spark-emitter";
-import { createRain, lightningAt, lightningBolt } from "./weather";
+import {
+  createRain,
+  lightningAt,
+  lightningBolt,
+  RAIN_FALL_SPEED,
+  RAIN_SLANT,
+} from "./weather";
 
 describe("createRain", () => {
   it("makes drops that fall, from a strip above the frame", () => {
@@ -22,6 +28,50 @@ describe("createRain", () => {
     const before = drop.y;
     stepEmitter(rain, 160);
     expect(drop.y).toBeGreaterThan(before);
+  });
+
+  it("blows the drops sideways at the slant the streak is drawn on", () => {
+    const rain = createRain(320);
+    expect(rain.config.windX).toBeCloseTo(RAIN_FALL_SPEED * RAIN_SLANT, 10);
+    // The jitter is a rounding error next to the wind, so every drop leans the
+    // same way — a slanted sky with a few drops falling straight is worse than
+    // no slant at all.
+    expect(rain.config.driftX).toBeLessThan(rain.config.windX);
+
+    for (let step = 0; step < 40; step += 1) {
+      stepEmitter(rain, 16);
+    }
+    const drop = rain.particles.find((particle) => particle.active);
+    if (drop === undefined) {
+      throw new Error("unreachable");
+    }
+    const from = { x: drop.x, y: drop.y };
+    stepEmitter(rain, 100);
+    expect(drop.x).toBeGreaterThan(from.x);
+    expect((drop.x - from.x) / (drop.y - from.y)).toBeCloseTo(RAIN_SLANT, 1);
+  });
+
+  it("aims the spawn strip upwind so the slant still covers the frame", () => {
+    const rain = createRain(320);
+    // Shifted upwind of centre, and wide enough that what lands on the right
+    // edge was launched from off the left of it.
+    expect(rain.config.originX).toBeLessThan(160);
+    expect(rain.config.originX + rain.config.spreadX).toBeGreaterThan(320);
+  });
+
+  it("rains on the near edge of the frame as well as the far one", () => {
+    const rain = createRain(320);
+    const landed: number[] = [];
+    for (let step = 0; step < 2000; step += 1) {
+      stepEmitter(rain, 16);
+      for (const particle of rain.particles) {
+        if (particle.active && particle.y >= 170 && particle.y < 176) {
+          landed.push(particle.x);
+        }
+      }
+    }
+    expect(Math.min(...landed)).toBeLessThan(40);
+    expect(Math.max(...landed)).toBeGreaterThan(280);
   });
 
   it("takes overrides for a scene that wants a different sky", () => {

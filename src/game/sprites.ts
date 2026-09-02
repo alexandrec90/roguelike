@@ -158,10 +158,18 @@ export const SPARK: PixelSpriteSource = {
   rows: ["x"],
 };
 
-/** A raindrop streak: one logical pixel wide, falling. */
+/**
+ * A raindrop streak, leaning the way the wind blows it.
+ *
+ * The bright head is the bottom-right pixel — where the drop *is* — and the
+ * dim trail runs back up and to the left, because that is where it has been.
+ * The lean is `RAIN_SLANT` from `weather.ts`, two columns across five rows;
+ * `sprites.test.ts` measures it against that constant, so the art cannot drift
+ * out of step with the motion it is drawn for.
+ */
 export const RAIN_STREAK: PixelSpriteSource = {
   palette: { ".": null, r: "#2a7fa8", R: "#7fd4f0" },
-  rows: ["r", "r", "R"],
+  rows: ["r..", "r..", ".r.", ".r.", "..r", "..R"],
 };
 
 /**

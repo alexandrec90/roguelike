@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import { hexToInt } from "./color";
+import { drawCloud } from "./draw-cloud";
 import { cellFoot, composeGround, faceCells, rockCells } from "./field";
 import {
   DEFAULT_SKY_FRACTION,
@@ -12,7 +13,7 @@ import {
   starField,
   type HorizonLayout,
 } from "./horizon";
-import { INK_COLORS, maskFromRows, type InkId, type PixelCloud } from "./ink";
+import { INK_COLORS, type PixelCloud } from "./ink";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import { quantizedWave } from "./pixel-art";
 import {
@@ -28,7 +29,8 @@ import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./
 import { FAR_PINE, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { installPixelTexture } from "./textures";
 import { WALL_FACE, WALL_TOP } from "./tiles";
-import { freezeCloud, meltCloud, reflectCloud } from "./transforms";
+import { freezeCloud, meltCloud } from "./transforms";
+import { WaterLayer } from "./water-layer";
 import { createRain, lightningAt, lightningBolt } from "./weather";
 
 const WIDTH = 320;
@@ -37,7 +39,6 @@ const HEIGHT = 180;
 /** Depths are `row * TILE_WIDTH + rank`; the ground sits below every row. */
 const GROUND_DEPTH = -1000;
 const BAND_DEPTH = -2000;
-const PUDDLE_DEPTH = -900;
 const RANK_CAP = 0;
 const RANK_FACE = 1;
 const RANK_ACTOR = 8;
@@ -60,18 +61,6 @@ const RIDGE_NEAR = { seed: 21, base: 1, amplitude: 3, wavelength: 26, color: "#0
 const STORM_SEED = 0x51a7;
 const FREEZE_SEED = 0xf20e;
 const MELT_SEED = 0xa11ce;
-
-/** The still water the hero stands over. Stamped as pixels, not an ellipse. */
-const PUDDLE_MASK = maskFromRows([
-  "......########......",
-  "...##############...",
-  ".##################.",
-  "####################",
-  ".##################.",
-  "...##############...",
-  "......########......",
-]);
-const PUDDLE_COLOR = "#08141f";
 
 /**
  * What the hero demonstrates, in order: clips in three facings, then the
@@ -178,7 +167,6 @@ export class DemoScene extends Phaser.Scene {
   private rows = 0;
 
   private heroGfx!: Phaser.GameObjects.Graphics;
-  private reflectionGfx!: Phaser.GameObjects.Graphics;
   private boltGfx!: Phaser.GameObjects.Graphics;
   private flash!: Phaser.GameObjects.Rectangle;
   private slime!: Phaser.GameObjects.Image;
@@ -188,7 +176,7 @@ export class DemoScene extends Phaser.Scene {
   private rainImages: Phaser.GameObjects.Image[] = [];
   private emitter!: EmitterState;
   private rain!: EmitterState;
-  private puddlePixels = new Set<string>();
+  private readonly water = new WaterLayer();
   private elapsedMs = 0;
 
   constructor(skyFraction: number = DEFAULT_SKY_FRACTION) {
@@ -203,7 +191,7 @@ export class DemoScene extends Phaser.Scene {
 
     installSceneTextures(this, this.columns, this.rows);
     drawWorld(this, this.layout, this.columns, this.rows);
-    this.drawPuddle();
+    this.water.create(this, this.layout.groundTop);
     this.createHero();
     this.createSlime();
     this.createTorch();
@@ -212,32 +200,24 @@ export class DemoScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.elapsedMs += Math.min(delta, 40);
-    this.animateHero();
+    const heroCloud = this.heroCloud();
+    this.animateHero(heroCloud);
     this.animateSlime();
     this.animateTorch();
     this.updateSparks(delta);
+    // Before the water, so a drop that lands this frame rings this frame.
     this.updateRain(delta);
+    this.water.animate(
+      delta,
+      this.elapsedMs,
+      { cloud: heroCloud, foot: this.heroFoot() },
+      cellFoot(TORCH_CELL.column, TORCH_CELL.row, this.layout.groundTop),
+    );
     this.updateLightning();
   }
 
-  /** Still water at the hero's feet, and the lookup the reflection clips to. */
-  private drawPuddle(): void {
-    const foot = this.heroFoot();
-    const left = foot.x - Math.floor(PUDDLE_MASK.width / 2);
-    const top = foot.y - 1;
-
-    const puddle = this.add.graphics().setDepth(PUDDLE_DEPTH);
-    puddle.fillStyle(hexToInt(PUDDLE_COLOR));
-    for (const pixel of PUDDLE_MASK.pixels) {
-      puddle.fillRect(left + pixel.x, top + pixel.y, 1, 1);
-      this.puddlePixels.add(`${left + pixel.x},${top + pixel.y}`);
-    }
-  }
-
   private createHero(): void {
-    const depth = HERO_CELL.row * TILE_WIDTH + RANK_ACTOR;
-    this.reflectionGfx = this.add.graphics().setDepth(PUDDLE_DEPTH + 1);
-    this.heroGfx = this.add.graphics().setDepth(depth);
+    this.heroGfx = this.add.graphics().setDepth(HERO_CELL.row * TILE_WIDTH + RANK_ACTOR);
   }
 
   private createSlime(): void {
@@ -273,8 +253,17 @@ export class DemoScene extends Phaser.Scene {
 
   private createWeather(): void {
     this.rain = createRain(WIDTH);
+    // Bottom-right origin: the streak leans, and its bright head is its
+    // last pixel, so that corner is where the drop actually is. An origin of
+    // 1 keeps the offset a whole number of pixels, which a centred one would
+    // not on an odd-sized texture.
     this.rainImages = this.rain.particles.map(() =>
-      this.add.image(-10, -10, "rain").setVisible(false).setDepth(RAIN_DEPTH).setAlpha(0.7),
+      this.add
+        .image(-10, -10, "rain")
+        .setOrigin(1, 1)
+        .setVisible(false)
+        .setDepth(RAIN_DEPTH)
+        .setAlpha(0.7),
     );
 
     this.boltGfx = this.add.graphics().setDepth(BOLT_DEPTH);
@@ -319,26 +308,10 @@ export class DemoScene extends Phaser.Scene {
     return meltCloud(still, progress, MELT_SEED);
   }
 
-  private animateHero(): void {
+  private animateHero(cloud: PixelCloud): void {
     const foot = this.heroFoot();
-    const cloud = this.heroCloud();
-
     this.heroGfx.clear();
     drawCloud(this.heroGfx, cloud, foot.x, foot.y);
-
-    // The puddle sees whatever is standing over it, transforms included, with
-    // a one-pixel ripple that scrolls down the reflection.
-    this.reflectionGfx.clear();
-    const reflection = reflectCloud(cloud);
-    this.reflectionGfx.fillStyle(hexToInt(INK_COLORS.deep));
-    for (const pixel of reflection) {
-      const ripple = quantizedWave(this.elapsedMs + pixel.y * 90, 1700, 1);
-      const x = foot.x + pixel.x + ripple;
-      const y = foot.y + pixel.y;
-      if (this.puddlePixels.has(`${x},${y}`)) {
-        this.reflectionGfx.fillRect(x, y, 1, 1);
-      }
-    }
   }
 
   private animateSlime(): void {
@@ -384,9 +357,13 @@ export class DemoScene extends Phaser.Scene {
     });
   }
 
-  /** The same pooled emitter as the sparks, pointed down instead of up. */
+  /**
+   * The same pooled emitter as the sparks, pointed down and leaned over by the
+   * wind. Drops that reach water land in it rather than falling through.
+   */
   private updateRain(delta: number): void {
     stepEmitter(this.rain, delta);
+    this.water.landRain(this.rain, delta);
 
     this.rain.particles.forEach((particle, index) => {
       const image = this.rainImages[index];
@@ -409,6 +386,7 @@ export class DemoScene extends Phaser.Scene {
     const strike = lightningAt(this.elapsedMs, STORM_SEED);
     this.boltGfx.clear();
     this.flash.setVisible(strike.active);
+    this.water.setStrike(strike.active ? strike.alpha : 0);
     if (!strike.active) {
       return;
     }
@@ -430,30 +408,6 @@ export class DemoScene extends Phaser.Scene {
       }
     }
     this.flash.setAlpha(0.1 * strike.alpha);
-  }
-}
-
-/** Group by ink so a 100-pixel model costs a handful of fill-style switches. */
-function drawCloud(
-  gfx: Phaser.GameObjects.Graphics,
-  cloud: PixelCloud,
-  originX: number,
-  originY: number,
-): void {
-  const byInk = new Map<InkId, { x: number; y: number }[]>();
-  for (const pixel of cloud) {
-    const bucket = byInk.get(pixel.ink);
-    if (bucket === undefined) {
-      byInk.set(pixel.ink, [{ x: pixel.x, y: pixel.y }]);
-    } else {
-      bucket.push({ x: pixel.x, y: pixel.y });
-    }
-  }
-  for (const [ink, pixels] of byInk) {
-    gfx.fillStyle(hexToInt(INK_COLORS[ink]));
-    for (const pixel of pixels) {
-      gfx.fillRect(originX + pixel.x, originY + pixel.y, 1, 1);
-    }
   }
 }
 
