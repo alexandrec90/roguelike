@@ -12,7 +12,8 @@
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import type { Palette, PixelSpriteSource } from "./pixel-art";
 import { rasterizeSprite } from "./pixel-art";
-import { samplePuddleFrames, sampleRippleFrames } from "./puddles";
+import { samplePuddleFrames } from "./puddles";
+import { sampleRippleFrames } from "./ripples";
 import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { swapPalette } from "./sprite-ops";
 import { FAR_PINE, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";

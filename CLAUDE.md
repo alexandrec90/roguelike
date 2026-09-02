@@ -192,6 +192,20 @@ reads as a broken toolchain rather than as an instruction that does not apply. T
 scripts are `dev`, `build`, `typecheck`, `test`, `check`, and `check` is the one to run
 before shipping. Formatting is not gated at all; type errors are, through `build`.
 
+**`npm run check` is not the whole CI gate.** The Tests job also runs
+`scripts/hooks/structure_check.py` through pytest, which caps file length, class length
+and method count — a limit no npm script enforces, so a branch can be green locally and
+fail the gate on nothing but size. Run it before pushing:
+
+```bash
+python scripts/hooks/structure_check.py     # stdlib only; no venv needed
+```
+
+Its verdict is *"fix the code, do not add to the baseline"*, and that is meant literally:
+a file over the limit is two jobs in one file, and the split is the fix. `demo-scene.ts`
+was 622 lines because it had quietly become the overworld *and* the pond in it; the seams
+it named are now `water-layer.ts`, `draw-cloud.ts` and `ripples.ts`.
+
 **Green tests are not the gate for anything you can see.** This is the lesson the water
 cost: `rainImpact`'s rings were spawning at the right rate, every unit test passed, and
 the scene had no visible ripples in it for a whole session, because the rings were
@@ -199,6 +213,14 @@ opening on the far rim and being clipped away. Any change to art, motion, or eff
 inspected in the running browser as well — `npm run dev`, then the scene at an integer
 zoom and `/lab.html` for the frames. A test can only assert the property you thought to
 name; the screen asserts the rest.
+
+The same gap has a second, sharper form: **`Phaser` is an ambient type namespace, so a
+module can annotate `Phaser.GameObjects.Graphics` all day without importing it — and then
+die on the first frame at `Phaser.BlendModes.ADD`, which is a *value*.** `tsc --noEmit`
+and all 306 tests passed on exactly that; the browser said `Phaser is not defined` and the
+canvas was black. Any new module that touches Phaser at runtime needs
+`import Phaser from "phaser"`, and the only thing that catches a missing one is loading
+the page.
 
 ## Guardrails
 

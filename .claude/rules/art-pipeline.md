@@ -52,6 +52,7 @@ other module; the API table below covers the calls.
 | A projectile, an impact, a spell trail | a seeded emitter | `src/game/spark-emitter.ts` |
 | Rain, snow, lightning, wind | an emitter or a seeded polyline | `src/game/weather.ts` |
 | A puddle, a pool, water on the ground | a seeded outline plus its surface layers | `src/game/puddles.ts` |
+| A ring spreading from an impact | a pooled `Ripple`, aged by a clock | `src/game/ripples.ts` |
 | Where the water *is* in the sample scene | a `PuddleSite`, one line of data | `src/game/field.ts` |
 | A recolour of anything at all | a `PaletteVariant` | `src/game/asset-registry.ts` |
 | A new creature | reuse `HUMANOID_SKELETON` if it is bipedal; else a new `SkeletonDef` | `src/game/models.ts` |
@@ -77,7 +78,8 @@ export-checked by `src/game/art-pipeline-rule.test.ts`, so this table cannot rot
 | `transforms.ts` | `meltCloud` · `freezeCloud` · `burnCloud` · `burnFront` · `reflectCloud` · `pixelHash` | Status effects and water, as pure functions |
 | `spark-emitter.ts` | `createEmitter` · `stepEmitter` · `resetEmitter` · `particleAlpha` · `DEFAULT_EMITTER` · `MAX_STEP_MS` | The pooled, seeded particle system |
 | `weather.ts` | `createRain` · `lightningBolt` · `lightningAt` · `RAIN_FALL_SPEED` · `RAIN_SLANT` | Rain, its wind, and the storm schedule |
-| `puddles.ts` | `createPuddle` · `puddleHolds` · `clipToPuddle` · `puddleSurface` · `puddleGlints` · `puddleReflection` · `rainImpact` · `createRippleField` · `spawnRipple` · `stepRipples` · `resetRipples` · `rippleAlpha` · `rippleCloud` · `samplePuddleFrames` · `sampleRippleFrames` | Standing water: its shape, what it shows, and the rings rain punches in it |
+| `puddles.ts` | `createPuddle` · `puddleHolds` · `clipToPuddle` · `puddleSurface` · `puddleGlints` · `puddleReflection` · `rainImpact` · `samplePuddleFrames` | Standing water: its shape, what it shows, and where a drop goes in |
+| `ripples.ts` | `createRippleField` · `spawnRipple` · `stepRipples` · `resetRipples` · `rippleAlpha` · `rippleCloud` · `sampleRippleFrames` | The rings a drop leaves — a pool, a clock, an outline |
 | `rig-frames.ts` | `RIG_FRAME` · `sampleClipFrames` · `sampleMeltFrames` | Baking clips and transforms into lab filmstrips |
 
 The three shapes worth having in front of you, field names only:
