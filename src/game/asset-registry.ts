@@ -66,7 +66,7 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     frames: sampleClipFrames(HERO_EQUIPPED, IDLE, 8),
     frameDurationMs: 175,
     notes:
-      "Not drawn: rendered from the humanoid rig in models.ts with sword and hat equipped. " +
+      "Not drawn: rendered from the humanoid rig in models.ts with its sword equipped. " +
       "Edit the clip or the gear, and these frames follow.",
     variants: [AUTHORED, FROST],
   },
@@ -87,7 +87,7 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     notes:
       "The same idle clip as 'hero', re-inked by shadeCloud(): one light direction, a four-step " +
       "ink ramp, and a 4x4 ordered dither locked to the pixel grid. No shaded frame was drawn. " +
-      "The identity inks — cyan blade, magenta hat, void eyes — are held out of the light pass, " +
+      "The identity inks — cyan blade and void eyes — are held out of the light pass, " +
       "which is why the silhouette still reads at 1x.",
     variants: [
       AUTHORED,
