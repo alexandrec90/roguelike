@@ -185,6 +185,21 @@ Add this project's specifics *below* — fixtures, isolation rules, markers, wha
 and where — but do not restate the policy above. It is vendored and drift-gated; a copy
 here is a fork that will disagree with it the first time either is edited.
 
+**The gate here is `npm run check`** — `vitest run` then `tsc --noEmit && vite build`.
+There is **no `lint` script**, so the vendored rule's "targeted tests plus the linter"
+has no second half in this project: `npm run lint` fails with *"Missing script"*, which
+reads as a broken toolchain rather than as an instruction that does not apply. The
+scripts are `dev`, `build`, `typecheck`, `test`, `check`, and `check` is the one to run
+before shipping. Formatting is not gated at all; type errors are, through `build`.
+
+**Green tests are not the gate for anything you can see.** This is the lesson the water
+cost: `rainImpact`'s rings were spawning at the right rate, every unit test passed, and
+the scene had no visible ripples in it for a whole session, because the rings were
+opening on the far rim and being clipped away. Any change to art, motion, or effects is
+inspected in the running browser as well — `npm run dev`, then the scene at an integer
+zoom and `/lab.html` for the frames. A test can only assert the property you thought to
+name; the screen asserts the rest.
+
 ## Guardrails
 
 Baseline guardrails — including the instruction-file feedback loop (**never silently
