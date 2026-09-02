@@ -183,6 +183,29 @@ branch its own Git worktree and dev-server port, and compare branches by switchi
 browser tabs. Vite hot replacement is for edits within one worktree, not for mixing two
 branches in one running module graph.
 
+## Controls
+
+**A rebinding touches exactly one file: `src/game/keybindings.ts`.** It is the config the
+rest of the game reads — `DEFAULT_KEYBINDINGS` maps each `GameAction` (four directions
+plus `attack`) to the physical `KeyboardEvent.code`s and mouse buttons that trigger it,
+and `validateKeybindings` rejects a map that leaves an action unbound or claims one input
+twice. Codes rather than `key` values, so the map survives a non-QWERTY layout. No other
+module may name a key.
+
+Four files, and no fifth place where any of this is decided:
+
+| Module | Owns |
+| --- | --- |
+| `src/game/keybindings.ts` | What an input *means*: the binding table, and the lookups over it. |
+| `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, newest-press-wins for opposing directions, and the one-shot queue that keeps a tap shorter than a frame. |
+| `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free turn simulation over (state, intent, elapsed, world). A press commits a whole cell step that runs to completion; sliding between the two cells is the renderer's business. |
+| `src/game/hero-layer.ts` | The wiring only — DOM events in, a posed rig into a `Graphics`. The single file here that imports Phaser. |
+
+That split is the `Separation` contract above, applied to input: the simulation is
+deterministic and testable without a canvas, and the presentation layer can exaggerate a
+step without being able to change where it lands. **Adding an action is a row in
+`keybindings.ts` and a branch in `player.ts`**, never a key check in a scene.
+
 ## Environment Variables
 
 See `.env.example` for every variable. `.env` is gitignored and holds this
