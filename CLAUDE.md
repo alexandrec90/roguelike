@@ -61,7 +61,7 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 
 | Area | Contract |
 | --- | --- |
-| Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by the smallest integer factor that covers the full window. Centre-crop horizontal overflow, keep the horizon pinned to the top, and clip vertical overflow from the near foreground; never expose a border or distort the aspect ratio. **The window therefore decides how much playfield exists, so the hero's position is derived rather than authored** — he is centred in the walkable band (`src/game/viewport.ts`), not placed on a map cell, and everything anchored to him (his reflection pool, his depth key) follows him there. |
+| Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by the smallest integer factor that covers the full window. Centre-crop horizontal overflow, keep the horizon pinned to the top, and clip vertical overflow from the near foreground; never expose a border or distort the aspect ratio. **The window therefore decides how much playfield exists**: a short window clips the near rows, so the walkable field is the map capped by what survived the crop (`src/game/viewport.ts`). Walking off the near edge and being carried off it by a dragged window edge are the same bug, and the cap is where both are answered. |
 | Setting | **Outdoors.** The game is an overworld — fields, paths, rock, sky — not a dungeon interior. |
 | Color | **A closed palette of named inks on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. An ink may be **translucent** — `INK_ALPHA` carries its opacity and `inkHex` spells it, so `water` is sheer wherever it is drawn and no call site invents an alpha for a colour. A scene dimming a whole layer is lighting, and multiplies the ink's own alpha rather than replacing it. |
 | Light and shade | The palette is closed but **not one bit deep**. Shadow, highlight and gradient are *computed, never painted*: an ordered **ink ramp**, a light direction, and a 4×4 Bayer dither locked to the logical pixel grid (`src/game/shading.ts`). Shading is a pass over a pixel cloud, so it applies to every model that exists or ever will, and a ramp arranges the palette rather than extending it. Hold identity inks — a cyan blade, a magenta hat, `void` eyes — out of the light pass, so the silhouette still reads at 1×. |
@@ -86,7 +86,7 @@ Five modules, and no sixth place where any of this is decided:
 | `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, the roll's easing, and `ridgeProfile()` for distant silhouettes. |
 | `src/game/tiles.ts` | The terrain art, in one shared palette with per-material tokens, so a whole field can be spliced into a single texture by `composeTiles`. |
 | `src/game/field.ts` | The sample scene's map, as text. `demo-scene.ts` reads all five and only draws. |
-| `src/game/viewport.ts` | What the window left of the render target, and where an actor stands in it: `visibleHeight()` (how many scanlines survived the cover crop), `walkableBand()` (the playfield, horizon excluded) and `centerFoot()` (a cloud's origin so its silhouette sits in the middle of that band). The one place the *window* is allowed to influence a position. |
+| `src/game/viewport.ts` | What the window left of the render target: `visibleHeight()` (how many scanlines survived the cover crop), `walkableBand()` (that, horizon roll excluded) and `visibleRows()` (whole field rows inside it — a row counts only when its *foot* is still on screen). The one place the *window* is allowed to influence the simulation, and it only ever takes ground away. |
 
 ### The ink pipeline
 
@@ -183,6 +183,29 @@ Do not switch branches inside a checkout whose Vite server is running. Give each
 branch its own Git worktree and dev-server port, and compare branches by switching
 browser tabs. Vite hot replacement is for edits within one worktree, not for mixing two
 branches in one running module graph.
+
+## Controls
+
+**A rebinding touches exactly one file: `src/game/keybindings.ts`.** It is the config the
+rest of the game reads — `DEFAULT_KEYBINDINGS` maps each `GameAction` (four directions
+plus `attack`) to the physical `KeyboardEvent.code`s and mouse buttons that trigger it,
+and `validateKeybindings` rejects a map that leaves an action unbound or claims one input
+twice. Codes rather than `key` values, so the map survives a non-QWERTY layout. No other
+module may name a key.
+
+Four files, and no fifth place where any of this is decided:
+
+| Module | Owns |
+| --- | --- |
+| `src/game/keybindings.ts` | What an input *means*: the binding table, and the lookups over it. |
+| `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, newest-press-wins for opposing directions, and the one-shot queue that keeps a tap shorter than a frame. |
+| `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free turn simulation over (state, intent, elapsed, world). A press commits a whole cell step that runs to completion; sliding between the two cells is the renderer's business. |
+| `src/game/hero-layer.ts` | The wiring only — DOM events in, a posed rig into a `Graphics`. The single file here that imports Phaser. |
+
+That split is the `Separation` contract above, applied to input: the simulation is
+deterministic and testable without a canvas, and the presentation layer can exaggerate a
+step without being able to change where it lands. **Adding an action is a row in
+`keybindings.ts` and a branch in `player.ts`**, never a key check in a scene.
 
 ## Environment Variables
 

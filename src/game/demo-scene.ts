@@ -1,8 +1,7 @@
 import Phaser from "phaser";
 
 import { hexToInt } from "./color";
-import { drawCloud } from "./draw-cloud";
-import { cellFoot, composeGround, faceCells, rockCells, rowAtFoot } from "./field";
+import { cellFoot, composeGround, faceCells, rockCells } from "./field";
 import {
   DEFAULT_SKY_FRACTION,
   horizonLayout,
@@ -13,8 +12,8 @@ import {
   starField,
   type HorizonLayout,
 } from "./horizon";
-import { cloudBounds, INK_COLORS, type PixelCloud } from "./ink";
-import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
+import { HeroLayer } from "./hero-layer";
+import { INK_COLORS } from "./ink";
 import { quantizedWave } from "./pixel-art";
 import {
   cellOrigin,
@@ -24,14 +23,12 @@ import {
   wallCapY,
   wallFaceY,
 } from "./projection";
-import { renderModel, samplePose, type Clip, type Facing } from "./rig";
 import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./spark-emitter";
 import { FAR_PINE_FRAMES, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { installPixelTexture } from "./textures";
 import { WALL_FACE, WALL_TOP } from "./tiles";
-import { freezeCloud, meltCloud } from "./transforms";
 import { VegetationLayer } from "./vegetation-layer";
-import { centerFoot, walkableBand, type Anchor } from "./viewport";
+import { visibleRows, walkableBand } from "./viewport";
 import { WaterLayer } from "./water-layer";
 import { createRain, lightningAt, lightningBolt } from "./weather";
 
@@ -49,18 +46,9 @@ const RAIN_DEPTH = 5000;
 const BOLT_DEPTH = 6000;
 
 /** Cells the sample scene puts things on. Row 0 is at the horizon. */
+const HERO_START = { column: 10, row: 11 } as const;
 const SLIME_CELL = { column: 16, row: 9 } as const;
 const TORCH_CELL = { column: 13, row: 10 } as const;
-
-/**
- * The hero is placed by the window rather than by the map, so what decides
- * where he stands is how tall he is — measured once, from the base pose.
- *
- * A clip or a transform changes the silhouette frame by frame, and anchoring
- * to *that* would make him drift up the screen as he swung. The base pose is
- * the one that holds still.
- */
-const HERO_BOUNDS = cloudBounds(renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose));
 
 /** Landmarks in the rolled-over band, as screen x of their left edge. */
 const DISTANT_PINES = [52, 68, 244, 276];
@@ -70,29 +58,6 @@ const RIDGE_FAR = { seed: 7, base: 3, amplitude: 3, wavelength: 55, color: "#0d1
 const RIDGE_NEAR = { seed: 21, base: 1, amplitude: 3, wavelength: 26, color: "#08101e" } as const;
 
 const STORM_SEED = 0x51a7;
-const FREEZE_SEED = 0xf20e;
-const MELT_SEED = 0xa11ce;
-
-/**
- * What the hero demonstrates, in order: clips in three facings, then the
- * freeze and melt transforms — the whole new art pipeline in one loop.
- */
-type ShowPhase =
-  | { readonly kind: "clip"; readonly clip: Clip; readonly ms: number; readonly facing: Facing; readonly flipX?: boolean }
-  | { readonly kind: "freeze"; readonly ms: number }
-  | { readonly kind: "melt"; readonly ms: number; readonly direction: 1 | -1 };
-
-const SHOWCASE: readonly ShowPhase[] = [
-  { kind: "clip", clip: IDLE, ms: 2800, facing: "front" },
-  { kind: "clip", clip: WALK, ms: 1920, facing: "back" },
-  { kind: "clip", clip: WALK, ms: 1920, facing: "front", flipX: true },
-  { kind: "clip", clip: SWING, ms: 700, facing: "front" },
-  { kind: "clip", clip: CAST, ms: 900, facing: "front" },
-  { kind: "freeze", ms: 1600 },
-  { kind: "melt", ms: 1400, direction: 1 },
-  { kind: "melt", ms: 1400, direction: -1 },
-];
-const SHOWCASE_TOTAL = SHOWCASE.reduce((total, phase) => total + phase.ms, 0);
 
 function installSceneTextures(scene: Phaser.Scene, columns: number, rows: number): void {
   SLIME_FRAMES.forEach((frame, index) =>
@@ -177,11 +142,11 @@ function drawWorld(
 /**
  * The sample outdoor scene, in the 1-bit direction: a pitch-black field with
  * neon marks on it. The hero is not a sprite — it is the humanoid rig from
- * `models.ts`, rendered to a pixel cloud every frame and cycled through its
- * clips, its transforms, and its reflection in a puddle.
+ * `models.ts`, rendered to a pixel cloud every frame, walked around the field
+ * by the player, and reflected in the puddle he is standing over.
  *
- * Nothing here decides the projection or the horizon split — it reads both
- * and draws.
+ * Nothing here decides the projection, the horizon split, or what a key means
+ * — it reads all three and draws.
  */
 export class DemoScene extends Phaser.Scene {
   private readonly skyFraction: number;
@@ -189,7 +154,6 @@ export class DemoScene extends Phaser.Scene {
   private columns = 0;
   private rows = 0;
 
-  private heroGfx!: Phaser.GameObjects.Graphics;
   private boltGfx!: Phaser.GameObjects.Graphics;
   private flash!: Phaser.GameObjects.Rectangle;
   private slime!: Phaser.GameObjects.Image;
@@ -200,12 +164,12 @@ export class DemoScene extends Phaser.Scene {
   private emitter!: EmitterState;
   private rain!: EmitterState;
   private distantPines: Phaser.GameObjects.Image[] = [];
+  private readonly hero = new HeroLayer(HERO_START);
   private readonly vegetation = new VegetationLayer();
   private readonly water = new WaterLayer();
   private elapsedMs = 0;
   /** Scanlines of the render target the window is showing; the rest is clipped. */
   private visible = HEIGHT;
-  private heroAnchor: Anchor = { x: WIDTH / 2, y: HEIGHT };
   private built = false;
 
   constructor(skyFraction: number = DEFAULT_SKY_FRACTION) {
@@ -217,13 +181,12 @@ export class DemoScene extends Phaser.Scene {
     this.layout = horizonLayout(HEIGHT, this.skyFraction);
     this.columns = columnsAcross(WIDTH);
     this.rows = rowsDown(this.layout.groundHeight);
-    this.placeHero();
 
     installSceneTextures(this, this.columns, this.rows);
     this.distantPines = drawWorld(this, this.layout, this.columns, this.rows);
     this.vegetation.create(this, this.layout.groundTop, this.columns, this.rows);
-    this.water.create(this, this.layout.groundTop, this.heroAnchor);
-    this.createHero();
+    this.water.create(this, this.layout.groundTop);
+    this.hero.create(this, this.layout.groundTop, this.columns, this.walkableRows());
     this.createSlime();
     this.createTorch();
     this.createWeather();
@@ -231,12 +194,12 @@ export class DemoScene extends Phaser.Scene {
   }
 
   /**
-   * How much playfield the window is still showing, so the hero can be put in
-   * the middle of it.
+   * How much playfield the window is still showing, so the hero cannot walk off
+   * the edge of it — or be carried off it by the window's own edge.
    *
    * The shell calls this on every resize, and once before the scene has built
-   * anything — so it stores the number either way and only redraws when there
-   * is something to redraw.
+   * anything, so it stores the number either way and only re-fences the field
+   * when there is a hero to fence.
    */
   setVisibleHeight(height: number): void {
     const clamped = Math.min(Math.max(Math.floor(height), 1), HEIGHT);
@@ -244,20 +207,25 @@ export class DemoScene extends Phaser.Scene {
       return;
     }
     this.visible = clamped;
-    if (!this.built) {
-      return;
+    if (this.built) {
+      this.hero.setVisibleRows(this.walkableRows());
     }
-    this.placeHero();
-    this.heroGfx.setDepth(this.heroDepth());
-    this.water.relocateHero(this.heroAnchor);
+  }
+
+  /**
+   * Rows the player may stand on: what the map has, capped by what the crop
+   * left. The map is never *widened* by a tall window — a row the field does
+   * not draw is not ground because the screen has room for it.
+   */
+  private walkableRows(): number {
+    return Math.min(this.rows, visibleRows(walkableBand(this.layout.groundTop, this.visible)));
   }
 
   update(_time: number, delta: number): void {
     this.elapsedMs += Math.min(delta, 40);
     this.vegetation.animate(this.elapsedMs);
     this.animateDistantPines();
-    const heroCloud = this.heroCloud();
-    this.animateHero(heroCloud);
+    this.hero.animate(delta, this.elapsedMs);
     this.animateSlime();
     this.animateTorch();
     this.updateSparks(delta);
@@ -266,27 +234,10 @@ export class DemoScene extends Phaser.Scene {
     this.water.animate(
       delta,
       this.elapsedMs,
-      { cloud: heroCloud, foot: this.heroAnchor },
+      { cloud: this.hero.cloudNow(), foot: this.hero.footNow() },
       cellFoot(TORCH_CELL.column, TORCH_CELL.row, this.layout.groundTop),
     );
     this.updateLightning();
-  }
-
-  private createHero(): void {
-    this.heroGfx = this.add.graphics().setDepth(this.heroDepth());
-  }
-
-  /** Centred across the target, and halfway down whatever playfield is left. */
-  private placeHero(): void {
-    this.heroAnchor = centerFoot(
-      HERO_BOUNDS,
-      walkableBand(this.layout.groundTop, this.visible),
-      WIDTH / 2,
-    );
-  }
-
-  private heroDepth(): number {
-    return rowAtFoot(this.heroAnchor.y, this.layout.groundTop) * TILE_WIDTH + RANK_ACTOR;
   }
 
   private createSlime(): void {
@@ -342,40 +293,6 @@ export class DemoScene extends Phaser.Scene {
       .setDepth(BOLT_DEPTH + 1)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setVisible(false);
-  }
-
-  /** The hero this instant: which phase of the showcase, flattened to pixels. */
-  private heroCloud(): PixelCloud {
-    let t = this.elapsedMs % SHOWCASE_TOTAL;
-    for (const phase of SHOWCASE) {
-      if (t < phase.ms) {
-        return this.phaseCloud(phase, t);
-      }
-      t -= phase.ms;
-    }
-    return renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose);
-  }
-
-  private phaseCloud(phase: ShowPhase, t: number): PixelCloud {
-    if (phase.kind === "clip") {
-      const pose = samplePose(phase.clip, HERO_EQUIPPED.basePose, t);
-      return renderModel(HERO_EQUIPPED, pose, { facing: phase.facing, flipX: phase.flipX });
-    }
-
-    const still = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose);
-    if (phase.kind === "freeze") {
-      // Frost climbs for the first stretch, then holds — the pose stays pinned
-      // because the scene simply stops advancing the clip, not because the
-      // transform knows about time.
-      return freezeCloud(still, Math.min(t / 600, 1), FREEZE_SEED);
-    }
-    const progress = phase.direction === 1 ? t / phase.ms : 1 - t / phase.ms;
-    return meltCloud(still, progress, MELT_SEED);
-  }
-
-  private animateHero(cloud: PixelCloud): void {
-    this.heroGfx.clear();
-    drawCloud(this.heroGfx, cloud, this.heroAnchor.x, this.heroAnchor.y);
   }
 
   private animateSlime(): void {

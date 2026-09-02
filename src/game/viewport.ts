@@ -1,18 +1,18 @@
 /**
- * How much of the render target the window is actually showing, and where the
- * hero stands inside it.
+ * How much of the render target the window is actually showing, and how much
+ * field is left to walk on inside it.
  *
  * The canvas is cover-scaled (`integer-scale.ts`): the 320x180 target is blown
  * up by the smallest whole factor that covers the window, horizontal overflow
  * is centre-cropped and vertical overflow is clipped off the *near* edge, so
  * the horizon stays pinned to the top of the screen whatever the window does.
  *
- * That contract keeps the sky on screen but says nothing about the hero, and a
- * fixed world cell is the wrong place for him: shorten the window and the near
- * rows he was standing on are the first thing clipped away. So his position is
- * derived rather than authored — he sits at the middle of the *walkable band*,
- * the strip between the foot of the horizon roll and the last scanline the
- * window still shows. Shorten or widen the window and he stays there.
+ * That contract keeps the sky on screen at the price of the near rows, and the
+ * player is the one thing on the field that can walk into them. So the window,
+ * not the map, has the last word on how big the field is: the *walkable band*
+ * is the strip between the foot of the horizon roll and the last scanline the
+ * window still shows, and only the rows whose feet land inside it exist as far
+ * as the simulation is concerned.
  *
  *     y = 0            +-----------------+  sky, always visible
  *     y = groundTop    +=================+  \
@@ -23,25 +23,19 @@
  *                      :  clipped away   :
  *     y = 180          + - - - - - - - - +
  *
- * Horizontally there is nothing to derive: cover scaling centre-crops, so the
- * middle of the render target is the middle of the screen at every window
- * width, and a hero centred on the target is centred on the screen.
+ * Horizontally there is nothing to derive: cover scaling centre-crops, so every
+ * column the target has is a column the screen shows.
  *
  * Everything here is pure so the arithmetic is asserted in tests rather than
  * eyeballed against a resized browser window.
  */
 
-import type { CloudBounds } from "./ink";
+import { rowAtFoot } from "./field";
 
 /** A vertical strip of the screen, in logical scanlines. `bottom` is exclusive. */
 export interface Band {
   readonly top: number;
   readonly bottom: number;
-}
-
-export interface Anchor {
-  readonly x: number;
-  readonly y: number;
 }
 
 /**
@@ -74,29 +68,18 @@ export function walkableBand(groundTop: number, visible: number): Band {
 }
 
 /**
- * Where to drop a pixel cloud so it sits in the middle of the band.
+ * How many field rows the band has room for.
  *
- * The returned point is the cloud's *origin* — its foot — because that is what
- * `drawCloud` takes and what the water layer reflects. Bounds are relative to
- * that origin, so a cloud drawn from `y` occupies `y + top .. y + bottom`, and
- * centring means putting the middle of that span on the middle of the band.
+ * A row counts only when its *foot* — the scanline an actor standing on it
+ * touches, and the one `cellFoot` returns — is still inside the band. Half a
+ * row of ground with nothing able to stand on it is scenery, not playfield:
+ * fencing the player at the last whole row is what stops him walking off the
+ * near edge of a short window into ground the crop has already taken away.
  *
- * A cloud taller than the band is pinned by its head instead of centred: it
- * cannot fit either way, and losing the feet reads as a hero standing behind
- * the near edge, while losing the head reads as a decapitation.
+ * The floor is one row. A window too short for even that leaves the hero
+ * hanging over the near edge, which is honest about the window, rather than
+ * leaving him nowhere to be at all.
  */
-export function centerFoot(bounds: CloudBounds | null, band: Band, centerX: number): Anchor {
-  if (bounds === null) {
-    return { x: Math.round(centerX), y: Math.round((band.top + band.bottom) / 2) };
-  }
-
-  const x = Math.round(centerX - (bounds.left + bounds.right) / 2);
-  const head = band.top - bounds.top;
-  const feet = band.bottom - bounds.bottom;
-  if (bounds.bottom - bounds.top + 1 >= band.bottom - band.top) {
-    return { x, y: head };
-  }
-
-  const centred = Math.round((band.top + band.bottom) / 2 - (bounds.top + bounds.bottom) / 2);
-  return { x, y: Math.min(Math.max(centred, head), feet) };
+export function visibleRows(band: Band): number {
+  return Math.max(Math.floor(rowAtFoot(band.bottom, band.top)) + 1, 1);
 }

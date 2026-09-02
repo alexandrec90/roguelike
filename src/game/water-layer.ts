@@ -21,7 +21,7 @@
 import Phaser from "phaser";
 
 import { drawCloud } from "./draw-cloud";
-import { cellFoot, HERO_PUDDLE, PUDDLE_SITES, type PuddleShape } from "./field";
+import { cellFoot, PUDDLE_SITES } from "./field";
 import type { PixelCloud } from "./ink";
 import { quantizedWave } from "./pixel-art";
 import {
@@ -72,8 +72,6 @@ export interface Foot {
 export class WaterLayer {
   private puddles: Puddle[] = [];
   private ripples!: RippleField;
-  private groundTop = 0;
-  private heroFoot: Foot = { x: 0, y: 0 };
 
   private bodyGfx!: Phaser.GameObjects.Graphics;
   private glintGfx!: Phaser.GameObjects.Graphics;
@@ -84,73 +82,43 @@ export class WaterLayer {
   /**
    * One generated puddle per site, and the five layers drawn over them.
    *
-   * Only the hero's pool ever moves, and only when the window is resized, so
-   * the bodies are stamped rather than redrawn per frame; the glints, the
-   * reflections and the rings are the per-frame half.
+   * The bodies never change, so they are stamped once here; only the glints,
+   * the reflections and the rings are redrawn per frame.
    */
-  create(scene: Phaser.Scene, groundTop: number, heroFoot: Foot): void {
-    this.groundTop = groundTop;
-    this.heroFoot = heroFoot;
-    this.buildPuddles();
+  create(scene: Phaser.Scene, groundTop: number): void {
+    this.puddles = PUDDLE_SITES.map((site) => {
+      const foot = cellFoot(site.column, site.row, groundTop);
+      return createPuddle({
+        id: site.id,
+        centerX: foot.x + (site.offsetX ?? 0),
+        centerY: foot.y + (site.offsetY ?? 0),
+        radius: site.radius,
+        seed: site.seed,
+      });
+    });
 
     this.bodyGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH);
+    for (const puddle of this.puddles) {
+      drawCloud(this.bodyGfx, puddleSurface(puddle), 0, 0);
+    }
+
     this.glintGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 1);
     this.reflectionGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 2);
     this.rippleGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 3);
 
-    // Stamped at full strength and then held at alpha 0; a strike only turns it
-    // up, so a flash costs one property set rather than a redraw.
+    // Stamped once at full strength and then held at alpha 0; a strike only
+    // turns it up, so a flash costs one property set rather than a redraw.
     this.flashGfx = scene.add
       .graphics()
       .setDepth(PUDDLE_DEPTH + 4)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setAlpha(0);
-
-    this.stampBodies();
-    this.ripples = createRippleField();
-  }
-
-  /**
-   * Put the hero's pool back under the hero.
-   *
-   * The window decides where he stands (`viewport.ts`), so resizing it moves
-   * him — and the water holding his reflection has to follow, or the reflection
-   * is clipped away against a pool that is no longer beneath him.
-   */
-  relocateHero(heroFoot: Foot): void {
-    this.heroFoot = heroFoot;
-    this.buildPuddles();
-    this.stampBodies();
-  }
-
-  private buildPuddles(): void {
-    this.puddles = [
-      this.generate(HERO_PUDDLE, this.heroFoot),
-      ...PUDDLE_SITES.map((site) =>
-        this.generate(site, cellFoot(site.column, site.row, this.groundTop)),
-      ),
-    ];
-  }
-
-  private generate(shape: PuddleShape, foot: Foot): Puddle {
-    return createPuddle({
-      id: shape.id,
-      centerX: foot.x + (shape.offsetX ?? 0),
-      centerY: foot.y + (shape.offsetY ?? 0),
-      radius: shape.radius,
-      seed: shape.seed,
-    });
-  }
-
-  /** The two layers that are a picture of the pools themselves, not of light. */
-  private stampBodies(): void {
-    this.bodyGfx.clear();
-    this.flashGfx.clear();
     for (const puddle of this.puddles) {
-      drawCloud(this.bodyGfx, puddleSurface(puddle), 0, 0);
       const lit: PixelCloud = puddle.water.map((pixel) => ({ ...pixel, ink: "deep" }));
       drawCloud(this.flashGfx, lit, 0, 0);
     }
+
+    this.ripples = createRippleField();
   }
 
   puddleFor(id: string): Puddle | undefined {

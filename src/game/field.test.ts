@@ -5,7 +5,6 @@ import {
   composeGround,
   faceCells,
   FIELD_MAP,
-  HERO_PUDDLE,
   isRock,
   PUDDLE_SITES,
   rockCells,
@@ -14,15 +13,11 @@ import {
   TREE_SITES,
 } from "./field";
 import { DEFAULT_SKY_FRACTION, horizonLayout } from "./horizon";
-import { cloudBounds } from "./ink";
-import { HERO_EQUIPPED } from "./models";
 import { rasterizeSprite } from "./pixel-art";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import { createPuddle, puddleHolds, rainImpact, type Puddle } from "./puddles";
-import { renderModel } from "./rig";
 import { stepEmitter } from "./spark-emitter";
 import { TERRAIN_PALETTE } from "./tiles";
-import { centerFoot, walkableBand } from "./viewport";
 import { createRain } from "./weather";
 
 const COLUMNS = 20;
@@ -150,7 +145,7 @@ describe("rowAtFoot", () => {
     }
   });
 
-  it("stays fractional between rows, so a near actor still sorts in front", () => {
+  it("stays fractional between rows, so a partial row is not counted as whole", () => {
     const between = cellFoot(3, 6, 9).y - TILE_DEPTH / 2;
 
     expect(rowAtFoot(between, 9)).toBeCloseTo(5.5, 5);
@@ -161,43 +156,18 @@ describe("rowAtFoot", () => {
 describe("the storm over the sample field", () => {
   const GROUND_TOP = horizonLayout(180, DEFAULT_SKY_FRACTION).groundTop;
 
-  /** Where the scene stands the hero when the window shows the whole target. */
-  const heroFoot = centerFoot(
-    cloudBounds(renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose)),
-    walkableBand(GROUND_TOP, 180),
-    160,
-  );
-
   function sitePuddles(): Puddle[] {
-    const sited = PUDDLE_SITES.map((site) =>
-      pool(site, cellFoot(site.column, site.row, GROUND_TOP)),
-    );
-    // The hero's pool is anchored to the hero rather than to a cell, so it is
-    // built the way the water layer builds it.
-    return [pool(HERO_PUDDLE, heroFoot), ...sited];
-  }
-
-  function pool(
-    shape: { id: string; radius: number; seed: number; offsetX?: number; offsetY?: number },
-    foot: { x: number; y: number },
-  ): Puddle {
-    return createPuddle({
-      id: shape.id,
-      centerX: foot.x + (shape.offsetX ?? 0),
-      centerY: foot.y + (shape.offsetY ?? 0),
-      radius: shape.radius,
-      seed: shape.seed,
+    return PUDDLE_SITES.map((site) => {
+      const foot = cellFoot(site.column, site.row, GROUND_TOP);
+      return createPuddle({
+        id: site.id,
+        centerX: foot.x + (site.offsetX ?? 0),
+        centerY: foot.y + (site.offsetY ?? 0),
+        radius: site.radius,
+        seed: site.seed,
+      });
     });
   }
-
-  it("stands the hero on a row that sorts him in front of the far rocks", () => {
-    // His depth key comes from this row, so a hero centred in the band must
-    // still land on the playfield rather than in the horizon's roll.
-    const row = rowAtFoot(heroFoot.y, GROUND_TOP);
-
-    expect(row).toBeGreaterThan(0);
-    expect(row).toBeLessThan(FIELD_MAP.length);
-  });
 
   it("gives every site a puddle that stays on screen", () => {
     for (const pool of sitePuddles()) {

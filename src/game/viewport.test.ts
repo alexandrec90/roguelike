@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { cellFoot } from "./field";
 import { horizonLayout, DEFAULT_SKY_FRACTION } from "./horizon";
-import { cloudBounds } from "./ink";
-import { HERO_EQUIPPED } from "./models";
-import { renderModel } from "./rig";
-import { centerFoot, visibleHeight, walkableBand } from "./viewport";
+import { visibleHeight, visibleRows, walkableBand } from "./viewport";
 
 const GROUND_TOP = horizonLayout(180, DEFAULT_SKY_FRACTION).groundTop;
-
-/** A cloud 10 wide and 20 tall standing on its origin, like every rig model. */
-const STANDING = { left: -5, right: 4, top: -19, bottom: 0 };
 
 describe("visibleHeight", () => {
   it("is the whole target when the window is exactly covered", () => {
@@ -48,69 +43,42 @@ describe("walkableBand", () => {
   });
 });
 
-describe("centerFoot", () => {
-  it("centres the cloud's span on the middle of the band", () => {
-    const foot = centerFoot(STANDING, { top: 9, bottom: 180 }, 160);
-
-    // An even-width cloud cannot straddle a pixel column, so half a pixel is
-    // the floor on both axes once the origin is snapped.
-    const across = foot.x + (STANDING.left + STANDING.right) / 2;
-    expect(Math.abs(across - 160)).toBeLessThanOrEqual(0.5);
-    const down = foot.y + (STANDING.top + STANDING.bottom) / 2;
-    expect(Math.abs(down - (9 + 180) / 2)).toBeLessThanOrEqual(0.5);
+describe("visibleRows", () => {
+  it("counts only the rows whose feet the band still holds", () => {
+    // A row's foot is the last of its 12 scanlines, so a band 24 deep holds
+    // exactly two rows and a band one scanline short of that holds one.
+    expect(visibleRows({ top: 9, bottom: 33 })).toBe(2);
+    expect(visibleRows({ top: 9, bottom: 32 })).toBe(1);
   });
 
-  it("moves the cloud up the screen as the window clips the near rows", () => {
-    const tall = centerFoot(STANDING, walkableBand(GROUND_TOP, 180), 160);
-    const short = centerFoot(STANDING, walkableBand(GROUND_TOP, 100), 160);
-
-    expect(short.y).toBeLessThan(tall.y);
-    expect(short.x).toBe(tall.x);
-  });
-
-  it("keeps the whole cloud inside the band at every window height", () => {
-    for (let visible = 60; visible <= 180; visible += 1) {
+  it("agrees with cellFoot about where the last row it counted ends", () => {
+    for (let visible = 30; visible <= 180; visible += 1) {
       const band = walkableBand(GROUND_TOP, visible);
-      const foot = centerFoot(STANDING, band, 160);
+      const rows = visibleRows(band);
 
-      expect(foot.y + STANDING.top).toBeGreaterThanOrEqual(band.top);
-      expect(foot.y + STANDING.bottom).toBeLessThanOrEqual(band.bottom);
+      expect(cellFoot(0, rows - 1, band.top).y).toBeLessThanOrEqual(band.bottom);
+      expect(cellFoot(0, rows, band.top).y).toBeGreaterThan(band.bottom);
     }
   });
 
-  it("pins the head rather than the feet when the band is too short to fit", () => {
-    const band = { top: 9, bottom: 20 };
-    const foot = centerFoot(STANDING, band, 160);
-
-    // Losing the feet reads as standing behind the near edge; losing the head
-    // reads as a decapitation, so the head is what stays.
-    expect(foot.y + STANDING.top).toBe(band.top);
+  it("gives up fewer rows the taller the window is", () => {
+    expect(visibleRows(walkableBand(GROUND_TOP, 100))).toBeLessThan(
+      visibleRows(walkableBand(GROUND_TOP, 180)),
+    );
   });
 
-  it("returns whole pixels, because a half-pixel origin smears the cloud", () => {
-    const foot = centerFoot(STANDING, { top: 9, bottom: 100 }, 160);
-
-    expect(Number.isInteger(foot.x)).toBe(true);
-    expect(Number.isInteger(foot.y)).toBe(true);
+  it("keeps one row for a window too short to hold even that", () => {
+    // The hero then hangs over the near edge, which is honest about the
+    // window; a field of no rows would be nowhere for him to be at all.
+    expect(visibleRows(walkableBand(GROUND_TOP, 4))).toBe(1);
+    expect(visibleRows({ top: 9, bottom: 10 })).toBe(1);
   });
 
-  it("falls back to the band's middle for a cloud with no pixels in it", () => {
-    expect(centerFoot(null, { top: 10, bottom: 20 }, 160)).toEqual({ x: 160, y: 15 });
-  });
+  it("leaves the whole map walkable at the height the scene is drawn for", () => {
+    // 1920x1080 covers the target exactly: nothing is cropped, so nothing the
+    // field draws should be fenced off.
+    const rows = visibleRows(walkableBand(GROUND_TOP, visibleHeight(1080, 6, 180)));
 
-  it("puts the real hero in the middle of the real playfield", () => {
-    // The end-to-end claim: the rig the scene draws, at the split it draws it
-    // at, lands wholly below the horizon and centred on the target.
-    const bounds = cloudBounds(renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose));
-    expect(bounds).not.toBeNull();
-    const band = walkableBand(GROUND_TOP, 180);
-    const foot = centerFoot(bounds, band, 160);
-
-    expect(foot.y + (bounds?.top ?? 0)).toBeGreaterThanOrEqual(band.top);
-    expect(foot.y + (bounds?.bottom ?? 0)).toBeLessThanOrEqual(band.bottom);
-    // Snapping the origin to a whole pixel can leave the silhouette half a
-    // pixel off centre; anything more than that is a placement bug.
-    const middle = foot.x + ((bounds?.left ?? 0) + (bounds?.right ?? 0)) / 2;
-    expect(Math.abs(middle - 160)).toBeLessThanOrEqual(0.5);
+    expect(cellFoot(0, rows - 1, GROUND_TOP).y).toBeLessThanOrEqual(180);
   });
 });

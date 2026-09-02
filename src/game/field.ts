@@ -144,9 +144,10 @@ export function composeGround(
  * A site is anchored to a cell's foot so it moves with the horizon knob like
  * everything else, then nudged off it in logical pixels.
  */
-/** A pool's shape and seed, with no opinion about what it is anchored to. */
-export interface PuddleShape {
+export interface PuddleSite {
   readonly id: string;
+  readonly column: number;
+  readonly row: number;
   /** Half-width in logical pixels; the depth half-axis is foreshortened from it. */
   readonly radius: number;
   readonly seed: number;
@@ -154,15 +155,11 @@ export interface PuddleShape {
   readonly offsetY?: number;
 }
 
-export interface PuddleSite extends PuddleShape {
-  readonly column: number;
-  readonly row: number;
-}
-
 export const PUDDLE_SITES: readonly PuddleSite[] = [
-  // The torch's is pushed *forward* of the foot it belongs to: a reflection
-  // hangs below the thing it reflects, so a puddle centred on the feet would
-  // clip half of it away behind them.
+  // The two that carry a reflection are pushed *forward* of the foot they
+  // belong to: a reflection hangs below the thing it reflects, so a puddle
+  // centred on the feet would clip half of it away behind them.
+  { id: "hero", column: 10, row: 11, radius: 13, seed: 0x9a7e, offsetY: 5 },
   { id: "torch", column: 13, row: 10, radius: 7, seed: 0x51bd, offsetY: 4 },
   { id: "path-far", column: 7, row: 6, radius: 7, seed: 0x2c41, offsetX: 3 },
   { id: "rock-foot", column: 15, row: 5, radius: 6, seed: 0x1e93, offsetY: -2 },
@@ -170,25 +167,6 @@ export const PUDDLE_SITES: readonly PuddleSite[] = [
   { id: "west-verge", column: 3, row: 12, radius: 10, seed: 0xb103, offsetX: 2 },
   { id: "path-near", column: 12, row: 12, radius: 9, seed: 0x3f0a, offsetX: 5 },
 ];
-
-/**
- * The hero's pool, which is anchored to the hero rather than to the map.
- *
- * Every other puddle sits on a cell, because the field decides where water
- * collects. This one exists to carry the hero's reflection, and the hero is
- * placed by the *window* rather than by the map — he stands at the middle of
- * whatever playfield the window still shows (`viewport.ts`). A fixed cell would
- * therefore leave his reflection clipped against water he walked out of the
- * moment someone dragged the window's edge.
- *
- * Same shape and seed as any other site; only its centre comes from elsewhere.
- */
-export const HERO_PUDDLE: PuddleShape = {
-  id: "hero",
-  radius: 13,
-  seed: 0x9a7e,
-  offsetY: 5,
-};
 
 /** Foreground trees are models; this is only where their roots meet the map. */
 export interface TreeSite {
@@ -220,10 +198,9 @@ export function cellFoot(
 /**
  * `cellFoot`'s y, inverted: which row an actor standing at this height is on.
  *
- * Fractional on purpose. An actor placed by the window rather than by the grid
- * (`viewport.ts`) rarely lands on a row boundary, and the only thing this
- * number is for is the painter's-algorithm key — where rounding to a whole row
- * would let a hero half a row in front of the torch sort behind it.
+ * Fractional on purpose, because the scanline handed to it is usually not a row
+ * boundary — it is wherever the window happened to cut the render target. What
+ * reads it is `viewport.ts`, asking how many whole rows survived that cut.
  */
 export function rowAtFoot(footY: number, groundTop: number): number {
   return (footY - groundTop) / TILE_DEPTH - 1;
