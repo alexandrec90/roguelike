@@ -12,7 +12,8 @@
 
 import Phaser from "phaser";
 
-import { ASSET_REGISTRY, assetFrame, findAsset, type AssetCategory } from "../game/asset-registry";
+import { assetFrame, findAsset, type AssetCategory } from "../game/asset-entry";
+import { ASSET_REGISTRY } from "../game/asset-registry";
 import { integerScale, letterbox } from "../game/integer-scale";
 import { TILE_PREVIEW_COLUMNS, TILE_PREVIEW_ROWS } from "../game/textures";
 import { LAB_SIZE, LabScene } from "./lab-scene";
@@ -85,7 +86,7 @@ function need<T extends HTMLElement>(id: string): T {
 }
 
 function currentEntry(): (typeof ASSET_REGISTRY)[number] {
-  const entry = findAsset(state.assetId);
+  const entry = findAsset(state.assetId, ASSET_REGISTRY);
   if (entry === undefined) {
     throw new Error(`Unknown asset '${state.assetId}'`);
   }

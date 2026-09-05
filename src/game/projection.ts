@@ -5,7 +5,7 @@
  * from vertical, so a world square that is `TILE_WIDTH` on a side lands on the
  * screen as a `TILE_WIDTH x TILE_DEPTH` rectangle, and anything with height
  * rises straight up the screen instead of leaning. There is no yaw: rows and
- * columns stay axis-aligned, which is the standard roguelike read — a diamond
+ * columns stay axis-aligned, which is the standard top-down read — a diamond
  * grid would need the camera rotated 45 degrees as well, and would put every
  * tile on a half-pixel diagonal.
  *

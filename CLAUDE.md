@@ -1,6 +1,34 @@
 # Roguelike
 
-2D, pixel art, turn based roguelike rpg
+2D, pixel art, real-time **twin-stick shooter** on an outdoor overworld.
+
+Move with one hand and aim with the other: movement is eight-way, and where the hero
+*points* is meant to be a separate input from where he *goes*. It is not a roguelike
+and not turn based — earlier versions of this file said both, and neither is true any
+more. **Nothing takes turns.** Time runs on the clock for everyone, and an input that
+arrives while the hero is mid-action is queued and spent on the frame he is free,
+never a turn that was skipped.
+
+Three parts of that, so an agent can tell what exists from what is intended:
+
+| Part | State |
+| --- | --- |
+| **Movement** | **Built.** Eight-way, from any two of the four bound directions held at once (`controls.ts` reads one winner per axis and sums them). A press still commits a whole grid cell that runs to completion, and a diagonal is given √2 the time so it is not a 41%-faster shortcut. |
+| **Acting while moving** | **Built.** Locomotion and the swing are **two timers over one skeleton**, aged independently in `player.ts` — an attack never costs a step and a step never delays an attack. Every action added later belongs on its own track for the same reason; the moment two of them share an enum, one of them starts waiting. |
+| **Aim** | **The direction, not yet built.** Facing currently follows movement, out of four drawings — front, its mirror, back, its mirror — so all eight headings read. Aim becomes a second axis pair (right stick, or the mouse) bound in `keybindings.ts` exactly like the first, and the day it lands, facing reads *it* instead of the heading. Nothing outside `player.ts` should assume the two agree. |
+
+**Responsiveness is a contract, not a polish pass.** Three rules hold the feel, and each
+is one an ordinary refactor breaks by accident:
+
+- **Turning is immediate.** Facing is re-read from the intent *every frame*, never at the
+  end of an action, because the turn is what a player reads as the game hearing them.
+- **No input is dropped for being early.** A press that lands mid-action is queued and
+  spent on the frame the track is free (`controls.ts`), and the overshoot past an action's
+  end carries into the next, so a held key gives an even rhythm rather than a stutter.
+- **Two things that could happen at once, do.** The only latency left is the grid step's
+  own commitment: a direction pressed mid-step is acted on when the foot lands, up to
+  `STEP_MS` later. That is the price of the cell grid, and it is the one worth revisiting
+  if the game ever wants free positioning.
 
 ## Tech Stack
 
@@ -74,7 +102,7 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 | Animation | Character actions are **clips**: sparse 3D keyframes over rig bones (`src/game/models.ts`), sampled per channel — a new attack is a handful of direction lines, not a redraw. Facing is front/back only (depth negated, front-only stamps dropped); left/right is a mirror flip. Combine silhouette-changing poses with discrete, grid-quantized translation and squash/stretch. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. Prefer **more terms over more keyframes**: what is on screen is `base pose + clip + secondary motion + reaction`, each a function of time, summed. Breathing, bob, recoil, stagger and wind are terms, not frames. |
 | Effects | Build particles from 1–4 logical-pixel primitives or tiny raster sprites. Pool them, cap their count, and use seeded randomness when reproducibility matters. Motion comes from a field — noise, a flow field, gravity, a curve — never from a drawn path. |
 | World simulation | **The direction, not yet built.** Elemental state belongs to the world rather than to an animation: an **effect field** under the tiles, holding fire, water, ice, electricity, poison and corruption as cell state that spreads and combines — fire + grass spreads, electricity + water arcs, fire + ice steams. Build a new element as a rule over that field once it exists, so interactions fall out of the system instead of being drawn one pairing at a time. |
-| Separation | Keep turn simulation deterministic and independent of the real-time presentation layer. Rendering may exaggerate an event but must not determine its outcome. |
+| Separation | Keep the movement and combat simulation deterministic and independent of the presentation layer. Rendering may exaggerate an event but must not determine its outcome. |
 
 ### The camera, and the band at the top of it
 
@@ -173,9 +201,12 @@ byte-identical pixels on every run: effects step from a seed in fixed 16 ms slic
 
 **To add an asset, add an entry to `ASSET_REGISTRY` (`src/game/asset-registry.ts`).**
 The lab, its texture installation, and its filmstrip are all driven from that array —
-there is no scene to edit. `validateRegistry` is asserted in
-`asset-registry.test.ts`, so a palette-swap token that no longer exists in the sprite
-fails a test rather than silently rendering the authored colour.
+there is no scene to edit. That file is **data and nothing else**; the entry *shape* and
+every operation over it — `AssetEntry`, `findAsset`, `assetFrame`, `textureKey`,
+`validateRegistry` — live in `src/game/asset-entry.ts`, which is the half that needs none
+of the art imports. `validateRegistry` is asserted in `asset-registry.test.ts`, so a
+palette-swap token that no longer exists in the sprite fails a test rather than silently
+rendering the authored colour.
 
 ### Branch previews
 
@@ -193,19 +224,30 @@ and `validateKeybindings` rejects a map that leaves an action unbound or claims 
 twice. Codes rather than `key` values, so the map survives a non-QWERTY layout. No other
 module may name a key.
 
+**A `Direction` is an input; a `Heading` is what all of them add up to.** Four keys make
+eight headings, because this is a twin-stick game and two keys at once mean the diagonal
+between them — so `DIRECTION_AXES` groups the four into the two axes they push, one
+winner is taken per axis (newest press wins *its own* axis, so opposites reverse rather
+than cancel), and the two are summed by `headingOf`. Nothing downstream of `controls.ts`
+should ever see a bare `Direction` again: `player.ts` steps and faces by `Heading`, and a
+diagonal that clips a rock slides along the open axis instead of stopping dead.
+
 Four files, and no fifth place where any of this is decided:
 
 | Module | Owns |
 | --- | --- |
 | `src/game/keybindings.ts` | What an input *means*: the binding table, and the lookups over it. |
-| `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, newest-press-wins for opposing directions, and the one-shot queue that keeps a tap shorter than a frame. |
-| `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free turn simulation over (state, intent, elapsed, world). A press commits a whole cell step that runs to completion; sliding between the two cells is the renderer's business. |
-| `src/game/hero-layer.ts` | The wiring only — DOM events in, a posed rig into a `Graphics`. The single file here that imports Phaser. |
+| `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, one winner per axis summed into a `Heading` (newest-press-wins within an axis), and the one-shot queue that keeps a tap shorter than a frame, two same-frame taps joining into the diagonal they mean. |
+| `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free simulation over (state, intent, elapsed, world). Two tracks — `motion`/`motionMs` for the legs, `attackMs` for the sword arm — aged independently, so he can swing mid-stride. A press commits a whole cell step that runs to completion (√2 as long on a diagonal, so eight-way movement has one speed), and the `ORIENTATION` table is the one place a heading becomes a facing. Sliding between the two cells is the renderer's business. |
+| `src/game/hero-layer.ts` | The wiring only — DOM events in, a posed rig into a `Graphics`. Also the one place the two tracks are put back together: `samplePose(SWING, samplePose(WALK, …), …)` **layers** the clips, because unkeyed channels fall through to the base pose and `SWING` keys nothing below the waist. The single file here that imports Phaser. |
 
 That split is the `Separation` contract above, applied to input: the simulation is
 deterministic and testable without a canvas, and the presentation layer can exaggerate a
 step without being able to change where it lands. **Adding an action is a row in
-`keybindings.ts` and a branch in `player.ts`**, never a key check in a scene.
+`keybindings.ts` and a track in `player.ts`**, never a key check in a scene — and *track*
+is the word on purpose: a new action gets its own timer and its own clip layer unless it
+genuinely cannot coexist with the others, because a shared enum is how an action starts
+silently waiting for an unrelated one to finish.
 
 ## Environment Variables
 

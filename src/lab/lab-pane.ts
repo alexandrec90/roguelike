@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-import { assetFrame, textureKey, type AssetEntry } from "../game/asset-registry";
+import { assetFrame, textureKey, type AssetEntry } from "../game/asset-entry";
 import {
   createEmitter,
   particleAlpha,

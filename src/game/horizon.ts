@@ -2,7 +2,7 @@
  * The strip at the top of the screen where the world rolls over the horizon.
  *
  * The playfield is affine and perfectly flat (see `projection.ts`). That is the
- * right camera for a turn-based grid — a tile reads the same wherever it sits —
+ * right camera for a tile grid — a tile reads the same wherever it sits —
  * but a flat plane that simply stops at the top edge of the screen reads as a
  * cropped floor, not as outdoors. So the top slice of the frame is given over
  * to the world curving away: a few scanlines of ground compressed into nothing,

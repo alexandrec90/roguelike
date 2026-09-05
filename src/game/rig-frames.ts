@@ -21,6 +21,16 @@ export const RIG_FRAME: CloudFrame = { width: 28, height: 28, originX: 14, origi
 
 export interface SampleOptions extends RenderOptions {
   readonly frame?: CloudFrame;
+  /**
+   * A clip to play *underneath* this one, sampled at the same time and used as
+   * the base pose.
+   *
+   * This is clip layering, which `samplePose` gives for free: channels the top
+   * clip does not key fall through to whatever is below. It is how the hero
+   * swings mid-stride in game (`hero-layer.ts`), so it is how the lab has to be
+   * able to show him doing it.
+   */
+  readonly under?: Clip;
   /** Post-process each cloud before it flattens — a transform, a tint pass. */
   readonly mapCloud?: (cloud: PixelCloud, index: number, count: number) => PixelCloud;
 }
@@ -44,7 +54,11 @@ export function sampleClipFrames(
   return Array.from({ length: count }, (_unused, index) => {
     const denominator = clip.loop ? count : Math.max(count - 1, 1);
     const timeMs = (index / denominator) * clip.durationMs;
-    const pose = samplePose(clip, model.basePose, timeMs);
+    const base =
+      options.under === undefined
+        ? model.basePose
+        : samplePose(options.under, model.basePose, timeMs);
+    const pose = samplePose(clip, base, timeMs);
     let cloud = renderModel(model, pose, options);
     if (options.mapCloud !== undefined) {
       cloud = options.mapCloud(cloud, index, count);

@@ -114,3 +114,33 @@ describe("the hero's clips", () => {
     }
   });
 });
+
+describe("swinging while walking", () => {
+  /**
+   * The renderer layers the two clips rather than choosing between them
+   * (`hero-layer.ts`): a walk sample is the *base* the swing is sampled onto,
+   * and unkeyed channels fall through. That works only because `SWING` keys the
+   * sword arm, the sword and the torso and nothing else — this is the test that
+   * fails if a later keyframe quietly puts a leg in it.
+   */
+  const walking = samplePose(WALK, HERO_EQUIPPED.basePose, 0.25 * WALK.durationMs);
+  const both = samplePose(SWING, walking, 0.45 * SWING.durationMs);
+
+  it("keeps the legs on the walk cycle underneath the swing", () => {
+    expect(both.bones["leg-l"]).toEqual(walking.bones["leg-l"]);
+    expect(both.bones["leg-r"]).toEqual(walking.bones["leg-r"]);
+    expect(both.root).toEqual(walking.root);
+  });
+
+  it("still leads the wrist with the blade, exactly as the swing alone does", () => {
+    const swingOnly = samplePose(SWING, HERO_EQUIPPED.basePose, 0.45 * SWING.durationMs);
+    expect(both.bones["arm-r"]).toEqual(swingOnly.bones["arm-r"]);
+    expect(both.bones["sword"]).toEqual(swingOnly.bones["sword"]);
+    expect(both.bones["sword"]?.y).toBeGreaterThan(0);
+  });
+
+  it("leaves the free arm swinging with the stride", () => {
+    expect(both.bones["arm-l"]).toEqual(walking.bones["arm-l"]);
+    expect(both.bones["arm-l"]).not.toEqual(HERO_EQUIPPED.basePose.bones["arm-l"]);
+  });
+});

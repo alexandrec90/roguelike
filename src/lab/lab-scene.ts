@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
-import { assetFrame, findAsset, textureKey, type AssetEntry } from "../game/asset-registry";
+import { assetFrame, findAsset, textureKey, type AssetEntry } from "../game/asset-entry";
+import { ASSET_REGISTRY } from "../game/asset-registry";
 import { integerScale } from "../game/integer-scale";
 import { installAssetTextures, TILE_PREVIEW_COLUMNS, TILE_PREVIEW_ROWS } from "../game/textures";
 import { filmstripCells, splitPanes, type Rect } from "./lab-layout";
@@ -98,7 +99,7 @@ export class LabScene extends Phaser.Scene {
       return;
     }
 
-    const entry = findAsset(next.assetId) ?? this.currentEntry();
+    const entry = findAsset(next.assetId, ASSET_REGISTRY) ?? this.currentEntry();
     this.state = next;
     this.elapsedMs = next.playing ? timeForFrame(next.frame, entry.frameDurationMs) : next.timeMs;
     this.render();
@@ -116,7 +117,7 @@ export class LabScene extends Phaser.Scene {
   }
 
   private currentEntry(): AssetEntry {
-    const entry = findAsset(this.state.assetId);
+    const entry = findAsset(this.state.assetId, ASSET_REGISTRY);
     if (entry === undefined) {
       throw new Error(`The lab was pointed at an unknown asset '${this.state.assetId}'`);
     }
