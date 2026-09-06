@@ -1,11 +1,10 @@
 import Phaser from "phaser";
 
 import { localFoot, localReach, localRow, visibleLocal, type CameraFrame, type LocalBounds } from "./camera";
-import { hexToInt } from "./color";
 import { GroundLayer } from "./ground-layer";
 import { HeroLayer, heroHeight } from "./hero-layer";
 import { DEFAULT_SKY_FRACTION, horizonLayout, type HorizonLayout } from "./horizon";
-import { INK_COLORS } from "./ink";
+import type { MapOverlay } from "./map-overlay";
 import { quantizedWave } from "./pixel-art";
 import {
   DEFAULT_STRAFE_RADIUS,
@@ -23,16 +22,12 @@ import { SceneryLayer } from "./scenery-layer";
 import { VegetationLayer } from "./vegetation-layer";
 import { anchorFoot, walkableBand } from "./viewport";
 import { WaterLayer } from "./water-layer";
-import { createRain, lightningAt, lightningBolt } from "./weather";
+import { WeatherLayer } from "./weather-layer";
 
 const WIDTH = 320;
 const HEIGHT = 180;
 
 const RANK_ACTOR = 8;
-/** Weather draws over the world: rain in front, then the bolt and its flash. */
-const RAIN_DEPTH = 5000;
-const BOLT_DEPTH = 6000;
-
 /**
  * Where on the planet this session opens, and the two landmarks beside it.
  *
@@ -80,16 +75,12 @@ export class DemoScene extends Phaser.Scene {
   private anchor: ScreenPoint = { x: WIDTH / 2, y: HEIGHT / 2 };
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
-  private boltGfx!: Phaser.GameObjects.Graphics;
-  private flash!: Phaser.GameObjects.Rectangle;
   private slime!: Phaser.GameObjects.Image;
   private torch!: Phaser.GameObjects.Image;
   private torchGlow!: Phaser.GameObjects.Graphics;
   private torchFoot: ScreenPoint = { x: -99, y: -99 };
   private sparkImages: Phaser.GameObjects.Image[] = [];
-  private rainImages: Phaser.GameObjects.Image[] = [];
   private emitter!: EmitterState;
-  private rain!: EmitterState;
 
   private readonly hero: HeroLayer;
   private readonly sky = new SkyLayer();
@@ -97,10 +88,13 @@ export class DemoScene extends Phaser.Scene {
   private readonly vegetation = new VegetationLayer();
   private readonly scenery = new SceneryLayer();
   private readonly water = new WaterLayer();
+  private readonly weather = new WeatherLayer(STORM_SEED);
   private elapsedMs = 0;
   /** Scanlines of the render target the window is showing; the rest is clipped. */
   private visible = HEIGHT;
   private built = false;
+  /** The `?map=1` instrument, or null on an ordinary load. */
+  private map: MapOverlay | null = null;
 
   constructor(skyFraction: number = DEFAULT_SKY_FRACTION, radius: number = DEFAULT_STRAFE_RADIUS) {
     super("overworld-field");
@@ -120,8 +114,13 @@ export class DemoScene extends Phaser.Scene {
     this.scenery.create(this, this.bounds);
     this.water.create(this);
     this.createProps();
-    this.createWeather();
+    this.weather.create(this, WIDTH, HEIGHT, this.layout.horizonY);
     this.built = true;
+  }
+
+  /** Hand the scene the debug map to feed, once `main.ts` has attached one. */
+  setMap(map: MapOverlay | null): void {
+    this.map = map;
   }
 
   /**
@@ -154,7 +153,7 @@ export class DemoScene extends Phaser.Scene {
 
     this.updateSparks(delta);
     // Before the water, so a drop that lands this frame rings this frame.
-    this.updateRain(delta, frame);
+    this.weather.animate(delta, this.elapsedMs, HEIGHT, frame, this.water);
     this.water.animate(
       delta,
       this.elapsedMs,
@@ -162,8 +161,32 @@ export class DemoScene extends Phaser.Scene {
       this.torchFoot,
       frame,
     );
-    this.updateLightning();
     this.sky.animate(this.hero.turn(), this.elapsedMs);
+    this.drawMap(frame, pose, delta);
+  }
+
+  /**
+   * Feed the map, if one was asked for.
+   *
+   * It is handed the *same* frame and pose every other layer just drew from,
+   * plus the live state only it may see, so what it reports is what happened
+   * rather than a second simulation that could drift from this one.
+   */
+  private drawMap(frame: CameraFrame, pose: PlanetPose, delta: number): void {
+    if (this.map === null) {
+      return;
+    }
+    const debug = this.hero.debugState();
+    this.map.draw({
+      groundPose: pose,
+      livePose: debug.live,
+      gait: debug.gait,
+      progress: debug.progress,
+      phase: { x: frame.phaseX, y: frame.phaseY },
+      bounds: this.bounds,
+      radius: debug.radius,
+      frameMs: delta,
+    });
   }
 
   /** The one description of where the world has got to, this instant. */
@@ -210,30 +233,6 @@ export class DemoScene extends Phaser.Scene {
     this.sparkImages = this.emitter.particles.map(() =>
       this.add.image(-99, -99, "spark").setVisible(false).setBlendMode(Phaser.BlendModes.ADD),
     );
-  }
-
-  private createWeather(): void {
-    this.rain = createRain(WIDTH);
-    // Bottom-right origin: the streak leans, and its bright head is its
-    // last pixel, so that corner is where the drop actually is. An origin of
-    // 1 keeps the offset a whole number of pixels, which a centred one would
-    // not on an odd-sized texture.
-    this.rainImages = this.rain.particles.map(() =>
-      this.add
-        .image(-10, -10, "rain")
-        .setOrigin(1, 1)
-        .setVisible(false)
-        .setDepth(RAIN_DEPTH)
-        .setAlpha(0.7),
-    );
-
-    this.boltGfx = this.add.graphics().setDepth(BOLT_DEPTH);
-    this.flash = this.add
-      .rectangle(0, 0, WIDTH, HEIGHT, 0xdff2ff, 1)
-      .setOrigin(0, 0)
-      .setDepth(BOLT_DEPTH + 1)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setVisible(false);
   }
 
   /**
@@ -303,59 +302,6 @@ export class DemoScene extends Phaser.Scene {
         .setAlpha(particleAlpha(particle))
         .setVisible(true);
     });
-  }
-
-  /**
-   * The same pooled emitter as the sparks, pointed down and leaned over by the
-   * wind. Drops that reach water land in it rather than falling through.
-   */
-  private updateRain(delta: number, frame: CameraFrame): void {
-    stepEmitter(this.rain, delta);
-    this.water.landRain(this.rain, delta, frame);
-
-    this.rain.particles.forEach((particle, index) => {
-      const image = this.rainImages[index];
-      if (image === undefined) {
-        return;
-      }
-      if (!particle.active || particle.y > HEIGHT) {
-        image.setVisible(false);
-        return;
-      }
-      image
-        .setPosition(Math.round(particle.x), Math.round(particle.y))
-        .setAlpha(0.7 * particleAlpha(particle))
-        .setVisible(true);
-    });
-  }
-
-  /** Bolt and flash are pure functions of time, so a capture is repeatable. */
-  private updateLightning(): void {
-    const strike = lightningAt(this.elapsedMs, STORM_SEED);
-    this.boltGfx.clear();
-    this.flash.setVisible(strike.active);
-    this.water.setStrike(strike.active ? strike.alpha : 0);
-    if (!strike.active) {
-      return;
-    }
-
-    const x = 20 + Math.round(strike.xUnit * (WIDTH - 40));
-    const points = lightningBolt(strike.boltSeed, x, 0, this.layout.horizonY + 2);
-    this.boltGfx.fillStyle(hexToInt(INK_COLORS.bone), Math.min(strike.alpha + 0.3, 1));
-    for (let index = 1; index < points.length; index += 1) {
-      const from = points[index - 1];
-      const to = points[index];
-      if (from === undefined || to === undefined) {
-        continue;
-      }
-      const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y), 1);
-      for (let step = 0; step <= steps; step += 1) {
-        const px = Math.round(from.x + ((to.x - from.x) * step) / steps);
-        const py = Math.round(from.y + ((to.y - from.y) * step) / steps);
-        this.boltGfx.fillRect(px, py, 1, 1);
-      }
-    }
-    this.flash.setAlpha(0.1 * strike.alpha);
   }
 }
 

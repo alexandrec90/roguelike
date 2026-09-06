@@ -37,13 +37,14 @@ import { drawCloud } from "./draw-cloud";
 import type { PixelCloud } from "./ink";
 import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
-import { DEFAULT_STRAFE_RADIUS, type PlanetPose } from "./planet";
+import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPose } from "./planet";
 import {
   advancePlayer,
   createPlayer,
   groundPose,
   livePose,
   scrollPhase,
+  stepProgress,
   walkClipMs,
   type PlayerState,
   type World,
@@ -151,6 +152,29 @@ export class HeroLayer {
   /** The continuous heading, which only the horizon is far enough away to show. */
   turn(): number {
     return livePose(this.player, this.world.radius).turn;
+  }
+
+  /**
+   * The whole of the pose, for the debug map only.
+   *
+   * The scene is deliberately given `groundPose`/`phase`/`turn` and nothing
+   * else, because those three are all a *renderer* may know. The map is not a
+   * renderer — its entire job is to show where those three disagree with the
+   * simulation — so it is the one caller allowed to see the live pose and the
+   * step in flight together.
+   */
+  debugState(): {
+    readonly live: PlanetPose;
+    readonly gait: Gait | undefined;
+    readonly progress: number;
+    readonly radius: number;
+  } {
+    return {
+      live: livePose(this.player, this.world.radius),
+      gait: this.player.motion === "step" ? this.player.gait : undefined,
+      progress: stepProgress(this.player),
+      radius: this.world.radius,
+    };
   }
 
   /** The hero as pixels, for anything that wants to reflect or transform him. */
