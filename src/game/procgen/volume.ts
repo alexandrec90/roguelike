@@ -147,20 +147,51 @@ export function volumeBox(spec: VolumeSpec): Box {
   };
 }
 
-/** The body as lit pixels. `clip` narrows the box — usually to the ground line. */
-export function volumeCloud(spec: VolumeSpec, light: VolumeLight, clip?: Partial<Box>): PixelCloud {
+/** A cloud-space box in screen pixels, rounded outward so nothing is clipped. */
+export function scaleBox(box: Box, scale: number): Box {
+  return {
+    left: Math.floor(box.left * scale),
+    top: Math.floor(box.top * scale),
+    right: Math.ceil(box.right * scale),
+    bottom: Math.ceil(box.bottom * scale),
+  };
+}
+
+/**
+ * The body as lit pixels. `clip` narrows the box — usually to the ground line.
+ *
+ * `scale` is screen pixels per cloud pixel, 1 in the flat field and under 1 on
+ * the horizon roll. A scaled body is **the same field sampled at a different
+ * spacing** — every screen pixel evaluates the description at its own point —
+ * never a rasterised body shrunk afterwards, which would resample and is the
+ * thing the pixel contract forbids. Only the sampling changes: occlusion and
+ * the normal's epsilon stay in cloud units, so a body is lit the same at every
+ * size, and the dither stays locked to the screen pixel it is drawn on.
+ */
+export function volumeCloud(
+  spec: VolumeSpec,
+  light: VolumeLight,
+  clip?: Partial<Box>,
+  scale = 1,
+): PixelCloud {
+  if (!(scale > 0)) {
+    throw new Error("A volume scale must be positive");
+  }
   const box = { ...volumeBox(spec), ...clip };
   if (spec.lobes.length === 0 || box.right < box.left || box.bottom < box.top) {
     return [];
   }
-  return rasterizeSdf(volumeField(spec), {
-    box,
+  const field = volumeField(spec);
+  return rasterizeSdf(scale === 1 ? field : (x, y) => field(x / scale, y / scale), {
+    box: scale === 1 ? box : scaleBox(box, scale),
     ramp: light.ramp,
     light: light.light,
     ambient: light.ambient,
     occlusion: light.occlusion,
     dither: light.dither,
-    normalEpsilon: light.normalEpsilon,
+    // Resolved here rather than left to the rasteriser's default, because the
+    // default is in cloud units and the rasteriser is now walking screen pixels.
+    normalEpsilon: (light.normalEpsilon ?? 0.6) * scale,
     flat: light.flat,
     meter: light.meter,
   });

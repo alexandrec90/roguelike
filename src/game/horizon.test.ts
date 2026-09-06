@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SKY_FRACTION,
+  HORIZON_SCALE,
   horizonLayout,
   MAX_SKY_FRACTION,
   parseSkyFraction,
@@ -9,21 +10,89 @@ import {
   ROLL_ROWS,
   rollBands,
   rollColors,
+  rollLift,
+  rollPlacement,
+  rollScale,
   skyBands,
   SKY_RAMP,
   starField,
 } from "./horizon";
 
+describe("the roll's projection", () => {
+  it("is exactly full size at the seam with the flat field, so nothing pops", () => {
+    expect(rollScale(0)).toBe(1);
+    expect(rollLift(0)).toBe(0);
+    expect(rollPlacement(0)).toEqual({ lift: 0, scale: 1, beyond: false });
+  });
+
+  it("treats a row inside the field as the seam rather than growing past 1", () => {
+    expect(rollScale(-3)).toBe(1);
+    expect(rollLift(-3)).toBe(0);
+  });
+
+  it("reaches the horizon line at exactly HORIZON_SCALE, ROLL_ROWS out", () => {
+    expect(rollScale(ROLL_ROWS)).toBeCloseTo(HORIZON_SCALE, 12);
+    expect(rollLift(ROLL_ROWS)).toBeCloseTo(1, 12);
+    expect(rollPlacement(ROLL_ROWS).beyond).toBe(false);
+    expect(rollPlacement(ROLL_ROWS + 0.01).beyond).toBe(true);
+  });
+
+  it("shrinks and lifts monotonically, and fastest nearest the field", () => {
+    // Perspective: the same step covers more of the screen close up than far
+    // off, which is also what makes a thing read as approaching rather than
+    // sliding.
+    let previousScale = 1;
+    let previousLift = 0;
+    let previousStep = Number.POSITIVE_INFINITY;
+    for (let row = 1; row <= ROLL_ROWS; row += 1) {
+      const scale = rollScale(row);
+      const lift = rollLift(row);
+      expect(scale).toBeLessThan(previousScale);
+      expect(lift).toBeGreaterThan(previousLift);
+      const step = previousScale - scale;
+      expect(step).toBeLessThanOrEqual(previousStep);
+      previousScale = scale;
+      previousLift = lift;
+      previousStep = step;
+    }
+  });
+
+  it("caps the lift at the horizon line for anything past it", () => {
+    expect(rollPlacement(ROLL_ROWS * 3).lift).toBe(1);
+    expect(rollLift(ROLL_ROWS * 3)).toBeGreaterThan(1);
+  });
+
+  it("honours a different horizon distance and floor", () => {
+    expect(rollScale(10, 10, 0.5)).toBeCloseTo(0.5, 12);
+    expect(rollScale(5, 10, 0.5)).toBeGreaterThan(0.5);
+    expect(rollPlacement(11, 10).beyond).toBe(true);
+  });
+});
+
 describe("horizonLayout", () => {
-  it("gives the default 5% of a 180px target to sky and roll", () => {
+  it("gives the default 12% of a 180px target to sky and roll", () => {
     const layout = horizonLayout(180, DEFAULT_SKY_FRACTION);
 
-    expect(layout.bandHeight).toBe(9);
+    expect(layout.bandHeight).toBe(22);
+    expect(layout.skyHeight).toBe(15);
+    expect(layout.rollHeight).toBe(7);
+    expect(layout.horizonY).toBe(15);
+    expect(layout.groundTop).toBe(22);
+    expect(layout.groundHeight).toBe(158);
+  });
+
+  it("splits a 5% band the way the sliver-of-sky version did", () => {
+    const layout = horizonLayout(180, 0.05);
+
     expect(layout.skyHeight).toBe(6);
     expect(layout.rollHeight).toBe(3);
-    expect(layout.horizonY).toBe(6);
-    expect(layout.groundTop).toBe(9);
-    expect(layout.groundHeight).toBe(171);
+  });
+
+  it("leaves room in the default sky for a tree standing on the horizon line", () => {
+    // The reason the default grew: a body on the horizon is HORIZON_SCALE of
+    // its full height, and the chestnut is 58 logical pixels tall.
+    const layout = horizonLayout(180, DEFAULT_SKY_FRACTION);
+    expect(layout.skyHeight).toBeGreaterThanOrEqual(Math.ceil(58 * HORIZON_SCALE));
   });
 
   it("keeps the band and the playfield exactly covering the target", () => {
@@ -94,14 +163,22 @@ describe("parseSkyFraction", () => {
 });
 
 describe("rollBands", () => {
-  it("compresses a dozen world rows into the band's few scanlines", () => {
+  it("compresses the rows out to the horizon into the band's few scanlines", () => {
     const bands = rollBands(3);
 
     expect(bands).toEqual([
-      { row: 0, y: 2, height: 1 },
-      { row: 1, y: 1, height: 1 },
-      { row: 5, y: 0, height: 1 },
+      { row: 1, y: 2, height: 1 },
+      { row: 7, y: 1, height: 1 },
+      { row: 22, y: 0, height: 1 },
     ]);
+  });
+
+  it("puts a scanline's ground where a body standing on it is placed", () => {
+    // One curve for both, so the ground under a far tree and the tree agree
+    // about their distance: a band's top edge is the lift of its far row.
+    for (const band of rollBands(20)) {
+      expect(20 - band.y).toBe(Math.round(20 * rollLift(band.row + 1)));
+    }
   });
 
   it("never draws more scanlines than the band has", () => {

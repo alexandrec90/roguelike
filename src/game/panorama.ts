@@ -26,9 +26,12 @@
  *   1280 columns of *open* noise looks identical on screen and puts a cliff at
  *   one bearing, once a lap - the kind of fault a unit test finds and an
  *   eyeball does not.
- * - **Landmarks are bearings, not screen positions.** A pine lives at a column
- *   of the panorama forever; `landmarkX` says where that lands on screen right
- *   now, or returns something far off the edge when the answer is "behind you".
+ * - **What is up here is a bearing, not a screen position.** A star lives at a
+ *   column of the panorama forever; `landmarkX` says where that lands on screen
+ *   right now, or returns something far off the edge when the answer is "behind
+ *   you". Only things too far to ever reach belong here - the ridge, the stars.
+ *   A tree on the horizon is a planet feature on the roll (`camera.ts`), not a
+ *   bearing, because the hero can walk to it.
  */
 
 import { ridgeProfile, type RidgeOptions } from "./horizon";
@@ -70,24 +73,6 @@ export function panoramaColumn(screenX: number, offset: number): number {
 export function landmarkX(at: number, offset: number): number {
   const raw = wrapPanorama(at - offset);
   return raw > PANORAMA_WIDTH / 2 ? raw - PANORAMA_WIDTH : raw;
-}
-
-/**
- * Evenly spread bearings, jittered - a ring of distant things.
- *
- * One per equal slice rather than `count` free hashes, because free hashes
- * clump: half a lap of empty horizon next to three pines in a huddle reads as a
- * bug in the scroll rather than as scenery.
- */
-export function landmarkRing(count: number, seed: number): readonly number[] {
-  const slice = PANORAMA_WIDTH / Math.max(count, 1);
-  return Array.from({ length: Math.max(count, 0) }, (_unused, index) => {
-    let h = Math.imul(index ^ seed, 0x27d4eb2d);
-    h ^= h >>> 15;
-    h = Math.imul(h, 0x85ebca6b);
-    h ^= h >>> 13;
-    return Math.round(slice * (index + ((h >>> 0) / 0x100000000) * 0.8 + 0.1));
-  });
 }
 
 /** One turn of ridge, seamless by construction. */

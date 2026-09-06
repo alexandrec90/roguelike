@@ -23,6 +23,12 @@
  * the screen's grid - which it may be, precisely because it is one body with a
  * foot and not a tile that has to meet its neighbours.
  *
+ * **The horizon is part of the reach.** A body is asked for out to `ROLL_ROWS`
+ * past the field's far edge, and `localPlacement` says where on the roll it
+ * stands and how small it is; the shader then samples the same field at that
+ * scale. A tree first seen as a speck on the horizon line is the tree the hero
+ * later walks past, and nothing is swapped in between.
+ *
  * Which is what the pool below is for. There are unboundedly many trees on a
  * round planet and a fixed number of shader objects, so a slot is *lent* to
  * whichever tree is in reach, keyed by the planet point it stands on: a tree
@@ -32,21 +38,36 @@
 
 import Phaser from "phaser";
 
-import { localFoot, localRow, localReach, type CameraFrame, type LocalBounds } from "./camera";
+import {
+  localPlacement,
+  localReach,
+  localRow,
+  type CameraFrame,
+  type LocalBounds,
+  type Placement,
+} from "./camera";
 import { drawCloud } from "./draw-cloud";
 import { volumeShaderConfig, type Quad } from "./gpu/volume-phaser";
 import { MAX_SHADOW_REACH } from "./gpu/volume-uniforms";
+import { ROLL_ROWS } from "./horizon";
+import type { PixelCloud } from "./ink";
 import { detailFor } from "./lod";
 import { toLocal, type PlanetPose } from "./planet";
+import { volumeCloud } from "./procgen/volume";
 import { RANK, TILE_WIDTH } from "./projection";
 import type { SceneryEnv, SceneryInstance, VolumePart } from "./scenery";
-import { keyOf, lendSlots } from "./scenery-slots";
+import { bodiesInView, keyOf, lendSlots } from "./scenery-slots";
 import { treesNear, type Feature } from "./terrain";
 import { stageTree } from "./trees";
+import { castShadow } from "./trees/foliage";
 import { SDF_CROWN } from "./trees/sdf-crown";
 
-/** Bodies on screen at once. Tree density puts about twenty within reach. */
-const SCENERY_POOL = 24;
+/**
+ * Bodies on screen at once. Tree density puts about twenty within the field
+ * and roughly as many again on the roll, where they converge toward the centre
+ * of the screen and so a wider swathe of planet fits across it.
+ */
+const SCENERY_POOL = 48;
 
 /** One lent slot: the shader objects, and whichever tree currently holds them. */
 interface Slot {
@@ -56,6 +77,8 @@ interface Slot {
   instance: SceneryInstance;
   /** The pose this frame, read by every shader object's uniform callback. */
   parts: readonly VolumePart[];
+  /** Screen pixels per cloud pixel this frame - under 1 on the horizon roll. */
+  scale: number;
   objects: readonly Phaser.GameObjects.Shader[];
   /** Only on the fallback path. */
   gfx?: Phaser.GameObjects.Graphics;
@@ -79,11 +102,20 @@ const DEFAULTS: SceneryOptions = {
 export class SceneryLayer {
   private slots: Slot[] = [];
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  private width = 0;
   private options: SceneryOptions = DEFAULTS;
   private onGpu = false;
+  /** The pose the candidates were swept for; they only change when it does. */
+  private swept: PlanetPose | undefined;
+  private candidates: readonly Feature[] = [];
 
-  create(scene: Phaser.Scene, bounds: LocalBounds, options: Partial<SceneryOptions> = {}): void {
-    this.bounds = bounds;
+  create(
+    scene: Phaser.Scene,
+    bounds: LocalBounds,
+    width: number,
+    options: Partial<SceneryOptions> = {},
+  ): void {
+    this.layout(bounds, width);
     this.options = { ...DEFAULTS, ...options };
     // Narrowed rather than assumed: the renderer is a union, and a canvas
     // fallback has no context at all.
@@ -96,6 +128,7 @@ export class SceneryLayer {
         feature: null,
         instance: SDF_CROWN.create(index),
         parts: [],
+        scale: 1,
         objects: [],
       };
       if (this.onGpu) {
@@ -109,12 +142,14 @@ export class SceneryLayer {
   }
 
   /** Re-cut the reach after a resize changed how much playfield there is. */
-  layout(bounds: LocalBounds): void {
+  layout(bounds: LocalBounds, width: number): void {
     this.bounds = bounds;
+    this.width = width;
+    this.swept = undefined;
   }
 
   animate(frame: CameraFrame, pose: PlanetPose, deltaMs: number, elapsedMs: number): void {
-    this.lend(pose);
+    this.lend(frame, pose);
 
     for (const slot of this.slots) {
       const feature = slot.feature;
@@ -122,7 +157,7 @@ export class SceneryLayer {
         continue;
       }
       const local = toLocal(pose, feature);
-      const foot = localFoot(frame, local);
+      const placed = localPlacement(frame, local);
       const env = this.envFor(feature, local.y, elapsedMs);
 
       slot.instance.step?.(deltaMs, env);
@@ -130,27 +165,33 @@ export class SceneryLayer {
       // callback asks for it and rebuilding the pose per object would let the
       // shadow disagree with the body it belongs to.
       slot.parts = slot.instance.volumes?.(env) ?? [];
+      slot.scale = placed.scale;
 
+      // The affine row, even on the roll: it keeps decreasing with distance
+      // where the roll's few scanlines would tie, so far bodies still sort.
       const depth = Math.round(localRow(frame, local)) * TILE_WIDTH;
-      this.place(slot, foot, depth);
+      this.place(slot, placed, depth);
       if (!this.onGpu) {
-        this.drawFallback(slot, env, foot);
+        this.drawFallback(slot, env, placed);
       }
     }
   }
 
   /**
-   * Lend each slot to a tree in reach, preferring the one it already held.
+   * Lend each slot to a tree in view, preferring the one it already held.
    *
    * The choosing is `scenery-slots.ts`, which is pure and tested; what is left
    * here is applying its answer to the Phaser objects. A kept slot is left
    * entirely alone - that is the point of it - so the body inside keeps the sway
    * it had built up rather than snapping upright as the scan order changes.
    */
-  private lend(pose: PlanetPose): void {
-    const wanted = treesNear(pose, localReach(this.bounds)).filter((feature) =>
-      this.inReach(toLocal(pose, feature)),
-    );
+  private lend(frame: CameraFrame, pose: PlanetPose): void {
+    const wanted = bodiesInView(this.sweep(pose), pose, {
+      frame,
+      bounds: this.bounds,
+      width: this.width,
+      footprintWidth: SDF_CROWN.footprint.width,
+    });
 
     const plans = lendSlots(
       this.slots.map((slot) => slot.key),
@@ -183,19 +224,20 @@ export class SceneryLayer {
   }
 
   /**
-   * Is this local point close enough to be worth a slot?
+   * Every tree that could be in view, out to the horizon.
    *
-   * A cell of margin on every side, for the same reason the grid has one: the
-   * phase slides the whole world by up to a tile, and a body that scrolls on has
-   * to already be standing there.
+   * Swept once per pose rather than once per frame: the pose the world is
+   * sampled from is frozen for the length of a stride (`player.ts`), and the
+   * sweep is a square of planet cells wide enough to reach the horizon in any
+   * direction, which is a few thousand hashes - cheap once a step, wasteful
+   * sixty times a second.
    */
-  private inReach(local: { readonly x: number; readonly y: number }): boolean {
-    return (
-      local.x >= this.bounds.minX - 1 &&
-      local.x <= this.bounds.maxX + 1 &&
-      local.y >= this.bounds.minY - 1 &&
-      local.y <= this.bounds.maxY + 1
-    );
+  private sweep(pose: PlanetPose): readonly Feature[] {
+    if (this.swept !== pose) {
+      this.candidates = treesNear(pose, localReach(this.bounds) + ROLL_ROWS);
+      this.swept = pose;
+    }
+    return this.candidates;
   }
 
   private buildShaders(
@@ -204,6 +246,9 @@ export class SceneryLayer {
     index: number,
   ): readonly Phaser.GameObjects.Shader[] {
     const { footprint } = SDF_CROWN;
+    // The quads are the full-size footprint whatever the scale: a body on the
+    // roll is smaller than its quad and the shader discards the rest, which
+    // costs nothing next to resizing a game object per frame.
     const bodyQuad: Quad = {
       originX: -footprint.originX,
       originY: -footprint.originY,
@@ -222,12 +267,14 @@ export class SceneryLayer {
     const objects: Phaser.GameObjects.Shader[] = [];
     for (let part = 0; part < this.options.maxParts; part += 1) {
       const read = (): VolumePart | null => slot.parts[part] ?? null;
+      const scale = (): number => slot.scale;
       objects.push(
         this.addQuad(scene, shadowQuad, `shadow-${index}-${part}`, RANK.shadow, {
           part: read,
+          scale,
           shadow: () => ({ light: this.options.light, elevation: this.options.elevation }),
         }),
-        this.addQuad(scene, bodyQuad, `body-${index}-${part}`, RANK.body, { part: read }),
+        this.addQuad(scene, bodyQuad, `body-${index}-${part}`, RANK.body, { part: read, scale }),
       );
     }
     return objects;
@@ -278,17 +325,24 @@ export class SceneryLayer {
     slot.gfx?.clear().setVisible(false);
   }
 
-  private drawFallback(slot: Slot, env: SceneryEnv, foot: { x: number; y: number }): void {
+  /**
+   * The CPU path: the staged body at full size, or on the roll the same parts
+   * rasterised at the placement's scale - the species' own cache only knows
+   * full-size poses, and a far body is cheap enough to draw fresh.
+   */
+  private drawFallback(slot: Slot, env: SceneryEnv, placed: Placement): void {
     if (slot.gfx === undefined) {
       return;
     }
+    const elevation = this.options.elevation;
+    const body: PixelCloud =
+      placed.scale === 1
+        ? stageTree(slot.instance, env, { shadow: true, elevation })
+        : slot.parts.flatMap((part) => volumeCloud(part.spec, part.light, part.clip, placed.scale));
+    const cloud: PixelCloud =
+      placed.scale === 1 ? body : [...castShadow(body, { light: env.light, elevation }), ...body];
     slot.gfx.clear();
-    drawCloud(
-      slot.gfx,
-      stageTree(slot.instance, env, { shadow: true, elevation: this.options.elevation }),
-      foot.x,
-      foot.y,
-    );
+    drawCloud(slot.gfx, cloud, placed.x, placed.y);
   }
 
   /**
@@ -310,10 +364,12 @@ export class SceneryLayer {
       // Distance costs a body detail, never a different model. The thresholds
       // are fractions of the visible depth rather than fixed row counts:
       // `lod.ts`'s defaults assume a deeper world than this scene has, and with
-      // them every tree but the nearest rendered flat.
+      // them every tree but the nearest rendered flat. Nothing in view is ever
+      // culled by distance - the horizon decides that, in `localPlacement`.
       detail: detailFor(distance, {
         nearRows: Math.max(2, Math.round(depth / 3)),
         midRows: Math.max(4, Math.round((depth * 2) / 3)),
+        cullRows: depth + ROLL_ROWS + 1,
       }),
     };
   }

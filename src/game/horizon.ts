@@ -21,16 +21,30 @@
  *     +---------------------------+  y = height
  *
  * `bandHeight = skyHeight + rollHeight` is the fraction of the screen that is
- * *not* flat. At the default 0.05 on a 180px target that is 9 pixels: 6 of sky
- * and 3 of roll. Nothing in the playfield changes when it moves, which is the
+ * *not* flat. At the default 0.12 on a 180px target that is 22 pixels: 15 of
+ * sky and 7 of roll. Nothing in the playfield changes when it moves, which is the
  * point — the split is a framing decision, not a projection one, and it is
  * meant to be retuned by eye.
+ *
+ * The band is a *place*, not a backdrop. Anything standing in the field is
+ * drawn over it, so a tree on the far row keeps its crown against the sky, and
+ * the world past the field is projected onto the roll by `rollPlacement`:
+ * `ROLL_ROWS` rows of it, each a little higher and a little smaller, until the
+ * horizon line, past which it has curved out of sight. What is on the horizon
+ * is therefore real — walk toward it and it grows and comes down onto the field.
  */
 
 import { mixHex, sampleRamp } from "./color";
 
-/** Share of the screen height given to sky plus roll. */
-export const DEFAULT_SKY_FRACTION = 0.05;
+/**
+ * Share of the screen height given to sky plus roll.
+ *
+ * Twelve percent rather than the five the sliver-of-sky version had, because
+ * the sky now has things standing in it: a tree on the horizon line is drawn
+ * at `HORIZON_SCALE` of its height, and needed more headroom than six
+ * scanlines to keep its crown on screen. Retune it by eye with `?horizon=`.
+ */
+export const DEFAULT_SKY_FRACTION = 0.12;
 
 /**
  * Past this the "flat playfield with a sliver of sky" read is gone and it is a
@@ -41,8 +55,81 @@ export const MAX_SKY_FRACTION = 0.5;
 /** How much of the band is ground curving away rather than open sky. */
 export const ROLL_SHARE = 1 / 3;
 
-/** World rows folded into the roll. They compress, so most land on no pixel. */
-export const ROLL_ROWS = 12;
+/**
+ * World rows beyond the flat field before the ground has curved out of sight.
+ *
+ * This is the distance to the horizon, and the horizon is *real*: a tree this
+ * many rows past the field's far edge stands on the horizon line, one row
+ * nearer stands a fraction of a scanline below it and a fraction larger, and a
+ * row further is gone over the curve. Walk toward it and it grows and comes
+ * down the roll onto the flat field. The ground folds the same rows into the
+ * roll's few scanlines (`rollBands`), so what a body stands on and where it is
+ * drawn come from one curve.
+ */
+export const ROLL_ROWS = 48;
+
+/**
+ * How large a thing standing on the horizon line is drawn, as a share of its
+ * full size. Sets how hard the far end of the roll shrinks; the near end is
+ * always 1 so the seam with the flat field is invisible.
+ */
+export const HORIZON_SCALE = 0.18;
+
+/**
+ * Size of a body `rowsBeyond` rows past the field's far edge, 0..1.
+ *
+ * Perspective's own `1 / distance`, with the constant chosen so the curve is
+ * exactly 1 at the seam and exactly `horizonScale` at the horizon. Nothing in
+ * the flat field shrinks — it is affine on purpose — so this is the one place
+ * the projection is allowed to make a thing smaller for being far away.
+ */
+export function rollScale(
+  rowsBeyond: number,
+  rows: number = ROLL_ROWS,
+  horizonScale: number = HORIZON_SCALE,
+): number {
+  if (rowsBeyond <= 0 || rows <= 0) {
+    return 1;
+  }
+  const steepness = (1 / horizonScale - 1) / rows;
+  return 1 / (1 + steepness * rowsBeyond);
+}
+
+/**
+ * How far up the roll a row `rowsBeyond` the field lands, 0 at the seam and 1
+ * at the horizon line.
+ *
+ * Derived from `rollScale` rather than drawn separately, so the ground under a
+ * body and the body's size shrink together: steep at the near edge, flat at the
+ * horizon, which is what a surface curving away looks like and why a dozen
+ * world rows land on three scanlines rather than three rows on one each.
+ */
+export function rollLift(
+  rowsBeyond: number,
+  rows: number = ROLL_ROWS,
+  horizonScale: number = HORIZON_SCALE,
+): number {
+  return (1 - rollScale(rowsBeyond, rows, horizonScale)) / (1 - horizonScale);
+}
+
+export interface RollPlacement {
+  /** Fraction of the roll's height above the field's far edge, 0..1. */
+  readonly lift: number;
+  /** Size relative to a body in the flat field, `HORIZON_SCALE`..1. */
+  readonly scale: number;
+  /** Past the horizon: over the curve and out of sight. */
+  readonly beyond: boolean;
+}
+
+/** Where a row past the field's far edge lands on the roll, and how large. */
+export function rollPlacement(rowsBeyond: number, rows: number = ROLL_ROWS): RollPlacement {
+  const beyond = rowsBeyond > rows;
+  return {
+    lift: Math.min(rollLift(rowsBeyond, rows), 1),
+    scale: rollScale(rowsBeyond, rows),
+    beyond,
+  };
+}
 
 export interface HorizonLayout {
   /** Logical height of the whole render target. */
@@ -138,22 +225,17 @@ export interface RollBand {
 /**
  * The scanlines of the roll, near-first.
  *
- * Distance above the playfield follows a circular ease, `sqrt(1 - (1 - u)^2)`:
- * steep at the near edge, flat at the horizon. That is the profile of a surface
- * curving away from you, and it is why a dozen world rows land on three
- * scanlines rather than three rows landing on one each. Rows that round to zero
- * height are dropped instead of being clamped to one, so the band never draws
- * more scanlines than it has.
+ * Distance above the playfield is `rollLift` — the same curve that places a
+ * body standing out there, so the ground under a tree and the tree agree about
+ * how far away they are. Rows that round to zero height are dropped instead of
+ * being clamped to one, so the band never draws more scanlines than it has.
  */
 export function rollBands(rollHeight: number, rows: number = ROLL_ROWS): readonly RollBand[] {
   if (rollHeight <= 0 || rows <= 0) {
     return [];
   }
 
-  const edge = (index: number): number => {
-    const u = index / rows;
-    return Math.round(rollHeight * Math.sqrt(1 - (1 - u) ** 2));
-  };
+  const edge = (index: number): number => Math.round(rollHeight * rollLift(index, rows));
 
   const bands: RollBand[] = [];
   for (let row = 0; row < rows; row += 1) {

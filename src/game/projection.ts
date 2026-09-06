@@ -177,3 +177,29 @@ export const RANK = {
    */
   actor: 8,
 } as const;
+
+/**
+ * Depth of the horizon band: over the ground and everything lying on it, under
+ * everything that stands. The flat layers sit below it (ground at -1000, water
+ * at -900); the deepest standing body - a tree on the horizon roll, sorted by
+ * its affine row - stays above it by a margin `sky-layer.ts` spells out.
+ */
+export const HORIZON_DEPTH = -880;
+
+/**
+ * Painter's key for a thing *rooted in the ground* on a screen row - grass, a
+ * puddle's ring - rather than standing on it.
+ *
+ * On the field it sorts like anything else, `row * TILE_WIDTH + rank`, so a
+ * tuft one row nearer than the hero covers his feet. Past the seam it goes
+ * under the horizon band with the ground it grows from: a screen row below 0
+ * is the row whose tile hangs above `groundTop`, and its tufts would otherwise
+ * float in the sky over ground that has gone over the hill. Rows still sort
+ * among themselves down there, above the ground and below the water.
+ */
+export function rootedDepth(screenRow: number, rank: number): number {
+  if (screenRow >= 0) {
+    return screenRow * TILE_WIDTH + rank;
+  }
+  return HORIZON_DEPTH - TILE_WIDTH * 3 + screenRow * TILE_WIDTH + rank;
+}

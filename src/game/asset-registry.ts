@@ -24,7 +24,7 @@ import { sampleRippleFrames } from "./ripples";
 import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
-import { FAR_PINE_FRAMES, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
+import { SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { DIRT_PATH, GRASS, WALL_FACE, WALL_SHELF, WALL_TOP } from "./tiles";
 import { TREE_ASSETS } from "./tree-assets";
 import { sampleGrassFrames, sampleTreeFrames } from "./vegetation";
@@ -303,32 +303,6 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
         label: "Sandstone",
         overrides: { f: "#000000", F: "#1c1710", m: "#e8c25a" },
       },
-    ],
-  },
-  {
-    id: "far-pine",
-    label: "Distant — pine",
-    category: "prop",
-    frames: FAR_PINE_FRAMES,
-    frameDurationMs: 600,
-    notes:
-      "A six-pixel procedural silhouette rooted on the horizon. The crown bends one logical " +
-      "pixel through the same wind cycle as the foreground vegetation.",
-    variants: [
-      AUTHORED,
-      { id: "night", label: "Night", overrides: { d: INK_COLORS.steel } },
-    ],
-  },
-  {
-    id: "far-tower",
-    label: "Distant — tower",
-    category: "prop",
-    frames: [FAR_TOWER],
-    frameDurationMs: 200,
-    notes: "The one landmark past the horizon. Its lit window is the only warm pixel up there.",
-    variants: [
-      AUTHORED,
-      { id: "dark", label: "Unlit", overrides: { q: "#2a3542" } },
     ],
   },
   {

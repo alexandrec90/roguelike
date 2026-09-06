@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { cloudBounds } from "../ink";
 import { INK_RAMPS } from "../shading";
 import {
   lobeMound,
   lobeRing,
+  scaleBox,
   volumeBox,
   volumeCloud,
   volumeCost,
@@ -164,5 +166,51 @@ describe("lobe arrangements", () => {
     const lobes = lobeMound(1, 10, 8, 1);
     expect(lobes).toHaveLength(1);
     expect(Number.isFinite(lobes[0]?.x ?? Number.NaN)).toBe(true);
+  });
+});
+
+describe("rendering a volume at a scale", () => {
+  const span = (cloud: ReturnType<typeof volumeCloud>): { width: number; height: number } => {
+    const bounds = cloudBounds(cloud);
+    if (bounds === null) {
+      throw new Error("empty cloud");
+    }
+    return { width: bounds.right - bounds.left + 1, height: bounds.bottom - bounds.top + 1 };
+  };
+
+  it("is the ordinary render at scale 1", () => {
+    expect(volumeCloud(BALL, LIT, undefined, 1)).toEqual(volumeCloud(BALL, LIT));
+  });
+
+  it("samples the same field at a wider spacing, so the body shrinks with it", () => {
+    const full = span(volumeCloud(PAIR, LIT));
+    const half = span(volumeCloud(PAIR, LIT, undefined, 0.5));
+
+    expect(half.width).toBeLessThan(full.width);
+    expect(half.width).toBeGreaterThanOrEqual(Math.floor(full.width / 2) - 1);
+    expect(half.width).toBeLessThanOrEqual(Math.ceil(full.width / 2) + 1);
+    expect(half.height).toBeLessThanOrEqual(Math.ceil(full.height / 2) + 1);
+  });
+
+  it("keeps the clip in cloud units, so a ground line still cuts at the foot", () => {
+    const clipped = volumeCloud(BALL, LIT, { bottom: 0 }, 0.5);
+    expect(clipped.length).toBeGreaterThan(0);
+    for (const pixel of clipped) {
+      expect(pixel.y).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it("rounds a box outward rather than clipping a pixel off the edge", () => {
+    expect(scaleBox({ left: -7, top: -9, right: 7, bottom: 3 }, 0.5)).toEqual({
+      left: -4,
+      top: -5,
+      right: 4,
+      bottom: 2,
+    });
+  });
+
+  it("refuses a scale that is not positive", () => {
+    expect(() => volumeCloud(BALL, LIT, undefined, 0)).toThrow(/positive/);
+    expect(() => volumeCloud(BALL, LIT, undefined, -1)).toThrow(/positive/);
   });
 });

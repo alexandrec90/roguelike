@@ -53,6 +53,11 @@ export interface VolumeShaderSource {
   readonly part: () => VolumePart | null;
   /** When present, the object draws the body's shadow instead of the body. */
   readonly shadow?: () => VolumeShadow | null;
+  /**
+   * Screen pixels per cloud pixel, 1 when absent. Read per render like the
+   * part, because a body walking in over the horizon changes size every step.
+   */
+  readonly scale?: () => number;
 }
 
 /**
@@ -103,5 +108,6 @@ function uniformsFor(
   return withQuad(
     volumeUniforms(part.spec, part.light, box, shadow ?? undefined, burn),
     quad,
+    source.scale?.() ?? 1,
   ) as unknown as Record<string, unknown>;
 }

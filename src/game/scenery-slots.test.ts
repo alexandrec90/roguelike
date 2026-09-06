@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { keyOf, lendSlots } from "./scenery-slots";
+import { visibleLocal, type CameraFrame } from "./camera";
+import { ROLL_ROWS } from "./horizon";
+import { TILE_DEPTH } from "./projection";
+import { bodiesInView, keyOf, lendSlots, type SlotView } from "./scenery-slots";
 
 interface Tree {
   readonly x: number;
@@ -126,5 +129,53 @@ describe("lendSlots", () => {
       held = nextHeld(plans);
     }
     expect(held.filter((key) => key !== null)).toHaveLength(3);
+  });
+});
+
+describe("bodiesInView", () => {
+  const frame: CameraFrame = {
+    groundTop: 9,
+    rollHeight: 3,
+    footX: 160,
+    footY: 100,
+    phaseX: 0,
+    phaseY: 0,
+  };
+  const bounds = visibleLocal(frame, 320, 180);
+  const view: SlotView = { frame, bounds, width: 320, footprintWidth: 74 };
+  /** Facing planet north, so local (x, y) is planet (128 + x, 128 + y). */
+  const pose = { x: 128, y: 128, turn: 0 };
+  const at = (x: number, y: number): Tree => tree(128 + x, 128 + y);
+  const farEdge = (frame.footY - frame.groundTop) / TILE_DEPTH;
+
+  it("keeps what stands in the field", () => {
+    expect(bodiesInView([at(0, 3), at(-4, -2)], pose, view)).toHaveLength(2);
+  });
+
+  it("keeps a body on the roll all the way out to the horizon, and drops one past it", () => {
+    const onRoll = at(0, farEdge + ROLL_ROWS - 1);
+    const gone = at(0, farEdge + ROLL_ROWS + 2);
+    expect(bodiesInView([onRoll, gone], pose, view)).toEqual([onRoll]);
+  });
+
+  it("judges the edge where a body is drawn, not by a box in tiles", () => {
+    // Thirty tiles to the side is far outside the field's grid but, forty rows
+    // out, converges to well inside the screen.
+    const wide = at(30, farEdge + 40);
+    const wideAndNear = at(30, 2);
+    expect(bodiesInView([wide, wideAndNear], pose, view)).toEqual([wide]);
+  });
+
+  it("drops what is behind the hero, with a cell of margin", () => {
+    const justBehind = at(0, bounds.minY - 0.5);
+    const wellBehind = at(0, bounds.minY - 3);
+    expect(bodiesInView([justBehind, wellBehind], pose, view)).toEqual([justBehind]);
+  });
+
+  it("puts the nearest first, so an over-subscribed pool drops the specks", () => {
+    const near = at(1, 1);
+    const mid = at(1, farEdge + 5);
+    const far = at(1, farEdge + 30);
+    expect(bodiesInView([far, near, mid], pose, view)).toEqual([near, mid, far]);
   });
 });
