@@ -56,8 +56,19 @@ head_bytes = 2000
 # `.devkit-structure.txt`, which is committed and may only shrink; the limits below
 # are the script's `DEFAULT_LIMITS` and are shown so a project can see what it holds
 # to. Every key is optional; an unknown limit or rule name is a configuration error.
-#[structure]
-#paths = ["roguelike/", "scripts/"]       # defaults to the app tree, scripts/ and the frontend src
+# `src/worktreePort.ts` is imported by exactly one file, `vite.config.ts`, which sits
+# OUTSIDE every scanned tree -- so the import graph carries none of its edges and the
+# orphan rule reported the module as dead ("delete it, or import it from the code that
+# should be using it"). The rule is right about what it can see.
+#
+# The clean fix would be to scan the importer, and `paths` looks like where you would
+# say so. It is not: `structure_check.source_files` skips any entry that is not a
+# directory, so a file named there is dropped in silence -- reported to devkit. Until
+# that lands, `entrypoints` is the seam that exists for "the orphan rule must not see
+# this", and the reason here is a near neighbour of the one it was written for: the
+# module has a real importer, in a file the scan does not reach.
+[structure]
+entrypoints = ["src/worktreePort.ts"]
 #exclude = ["roguelike/migrations/"]      # generated code the project does not answer for
 #entrypoints = ["roguelike/plugins/"]     # loaded by name, so the orphan rule must not see them
 #disabled = []                               # e.g. ["orphan"] for a library whose modules are its API
