@@ -7,12 +7,9 @@
  * is centre-cropped and vertical overflow is clipped off the *near* edge, so
  * the horizon stays pinned to the top of the screen whatever the window does.
  *
- * That contract keeps the sky on screen at the price of the near rows, and the
- * player is the one thing on the field that can walk into them. So the window,
- * not the map, has the last word on how big the field is: the *walkable band*
- * is the strip between the foot of the horizon roll and the last scanline the
- * window still shows, and only the rows whose feet land inside it exist as far
- * as the simulation is concerned.
+ * That contract keeps the sky on screen at the price of the near rows. The
+ * *walkable band* is what is left: the strip between the foot of the horizon
+ * roll and the last scanline the window still shows.
  *
  *     y = 0            +-----------------+  sky, always visible
  *     y = groundTop    +=================+  \
@@ -23,6 +20,14 @@
  *                      :  clipped away   :
  *     y = 180          + - - - - - - - - +
  *
+ * What the band is *for* changed when the world became round. It used to fence
+ * a map: the near rows were ground the crop had taken away, so the hero had to
+ * be counted out of them and clamped back inside. There is no map now and no
+ * near edge - the hero is pinned to one pixel and the planet slides under him
+ * (`camera.ts`) - so the band's only remaining job is to say which pixel that
+ * is. The window still decides how much world you can see; it can no longer
+ * decide how much of it exists.
+ *
  * Horizontally there is nothing to derive: cover scaling centre-crops, so every
  * column the target has is a column the screen shows.
  *
@@ -30,7 +35,7 @@
  * eyeballed against a resized browser window.
  */
 
-import { rowAtFoot } from "./field";
+import type { ScreenPoint } from "./projection";
 
 /** A vertical strip of the screen, in logical scanlines. `bottom` is exclusive. */
 export interface Band {
@@ -68,18 +73,28 @@ export function walkableBand(groundTop: number, visible: number): Band {
 }
 
 /**
- * How many field rows the band has room for.
+ * The logical pixel the hero's feet stand on - and, because the camera is bolted
+ * to him, the point the whole world is drawn around.
  *
- * A row counts only when its *foot* — the scanline an actor standing on it
- * touches, and the one `cellFoot` returns — is still inside the band. Half a
- * row of ground with nothing able to stand on it is scenery, not playfield:
- * fencing the player at the last whole row is what stops him walking off the
- * near edge of a short window into ground the crop has already taken away.
+ * On a round planet the window can no longer take ground away from him: there is
+ * no edge to be carried off, and walking is the world sliding rather than the
+ * hero crossing a map. So this is the whole of the viewport's remaining say over
+ * the simulation, and it is a framing decision - put the *silhouette* in the
+ * middle of the band, not the origin, or a tall hero sits low in a short window
+ * while a short one floats.
  *
- * The floor is one row. A window too short for even that leaves the hero
- * hanging over the near edge, which is honest about the window, rather than
- * leaving him nowhere to be at all.
+ * Horizontal centring is free: cover scaling centre-crops, so the middle of the
+ * target is the middle of the screen at every width.
+ *
+ * When the band is shorter than he is tall there is no centre to find, and the
+ * choice is which end to lose. The head stays: a hero cropped at the ankles
+ * still reads as a hero, and one cropped at the neck reads as a bug.
  */
-export function visibleRows(band: Band): number {
-  return Math.max(Math.floor(rowAtFoot(band.bottom, band.top)) + 1, 1);
+export function anchorFoot(band: Band, width: number, heroHeight: number): ScreenPoint {
+  const span = band.bottom - band.top;
+  const y =
+    span >= heroHeight
+      ? band.top + Math.round((span + heroHeight) / 2)
+      : band.top + Math.round(heroHeight);
+  return { x: Math.round(width / 2), y: Math.max(y, band.top + 1) };
 }

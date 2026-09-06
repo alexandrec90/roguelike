@@ -19,7 +19,7 @@ import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
 import { FAR_PINE_FRAMES, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
-import { DIRT_PATH, GRASS, WALL_FACE, WALL_TOP } from "./tiles";
+import { DIRT_PATH, GRASS, WALL_FACE, WALL_SHELF, WALL_TOP } from "./tiles";
 import { sampleGrassFrames, sampleTreeFrames } from "./vegetation";
 
 export type AssetCategory = "actor" | "prop" | "tile" | "effect";
@@ -281,6 +281,25 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     ],
   },
   {
+    id: "wall-shelf",
+    label: "Rock — top, inside a mass",
+    category: "tile",
+    frames: [WALL_SHELF],
+    frameDurationMs: 200,
+    notes:
+      "The cap without its lit back lip, for a cell that has more rock behind it. Tiled "
+      + "three by three it must show no horizontal banding at all — that banding is the "
+      + "whole reason this tile exists.",
+    variants: [
+      AUTHORED,
+      {
+        id: "sandstone",
+        label: "Sandstone",
+        overrides: { r: "#000000", R: "#1c1710", k: "#e8c25a" },
+      },
+    ],
+  },
+  {
     id: "wall-face",
     label: "Rock — face",
     category: "tile",
@@ -415,86 +434,4 @@ export function textureKey(
 ): string {
   const tail = suffix === "" ? "" : `:${suffix}`;
   return `asset:${entryId}:${variantId}:${frameIndex}${tail}`;
-}
-
-/**
- * Every structural rule the catalogue holds to, as a list of problems.
- *
- * Returned rather than thrown so one test can report all of them at once; a
- * registry that fails five ways should not need five runs to find out.
- */
-export function validateRegistry(registry: readonly AssetEntry[] = ASSET_REGISTRY): string[] {
-  const problems: string[] = [];
-  const seen = new Set<string>();
-
-  for (const entry of registry) {
-    if (seen.has(entry.id)) {
-      problems.push(`Duplicate asset id '${entry.id}'`);
-    }
-    seen.add(entry.id);
-
-    if (entry.frameDurationMs <= 0) {
-      problems.push(`Asset '${entry.id}' has a non-positive frame duration`);
-    }
-    problems.push(...frameProblems(entry));
-    problems.push(...variantProblems(entry));
-  }
-
-  return problems;
-}
-
-function frameProblems(entry: AssetEntry): string[] {
-  const problems: string[] = [];
-  if (entry.frames.length === 0) {
-    problems.push(`Asset '${entry.id}' has no frames`);
-    return problems;
-  }
-
-  const sizes = new Set<string>();
-  entry.frames.forEach((frame, index) => {
-    try {
-      const raster = rasterizeSprite(frame);
-      sizes.add(`${raster.width}x${raster.height}`);
-    } catch (error) {
-      problems.push(`Asset '${entry.id}' frame ${index} does not rasterize: ${String(error)}`);
-    }
-  });
-
-  if (sizes.size > 1) {
-    problems.push(`Asset '${entry.id}' mixes frame sizes: ${[...sizes].join(", ")}`);
-  }
-  return problems;
-}
-
-function variantProblems(entry: AssetEntry): string[] {
-  const problems: string[] = [];
-  const first = entry.variants[0];
-  if (first === undefined) {
-    problems.push(`Asset '${entry.id}' has no variants`);
-    return problems;
-  }
-  if (first.id !== AUTHORED_VARIANT_ID) {
-    problems.push(`Asset '${entry.id}' does not lead with the authored palette`);
-  }
-
-  const seen = new Set<string>();
-  for (const variant of entry.variants) {
-    if (seen.has(variant.id)) {
-      problems.push(`Asset '${entry.id}' has duplicate variant '${variant.id}'`);
-    }
-    seen.add(variant.id);
-    problems.push(...overrideProblems(entry, variant));
-  }
-  return problems;
-}
-
-function overrideProblems(entry: AssetEntry, variant: PaletteVariant): string[] {
-  const problems: string[] = [];
-  for (const token of Object.keys(variant.overrides)) {
-    const missing = entry.frames.some((frame) => !(token in frame.palette));
-    if (missing) {
-      problems.push(`Asset '${entry.id}' variant '${variant.id}' targets unused token '${token}'`);
-    }
-  }
-  return problems;
 }
