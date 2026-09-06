@@ -11,10 +11,9 @@ import Phaser from "phaser";
 
 import { drawCloud } from "./draw-cloud";
 import { cellFoot, terrainAt } from "./field";
-import { TILE_WIDTH } from "./projection";
+import { RANK, TILE_WIDTH } from "./projection";
 import { grassTuftCloud } from "./vegetation";
 
-const RANK_GRASS = 3;
 
 /** One depth-sorted graphics object per field row. */
 export class VegetationLayer {
@@ -28,7 +27,7 @@ export class VegetationLayer {
     this.columns = columns;
     this.rows = rows;
     this.grassRows = Array.from({ length: rows }, (_, row) =>
-      scene.add.graphics().setDepth(row * TILE_WIDTH + RANK_GRASS),
+      scene.add.graphics().setDepth(row * TILE_WIDTH + RANK.grass),
     );
   }
 

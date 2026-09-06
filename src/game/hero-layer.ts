@@ -39,12 +39,11 @@ import {
   type PlayerState,
   type World,
 } from "./player";
-import { TILE_WIDTH } from "./projection";
+import { TILE_WIDTH, RANK } from "./projection";
 import { renderModel, samplePose, type RigPose } from "./rig";
 import { MAX_STEP_MS } from "./spark-emitter";
 
 /** Rank within a row, on the scene's shared `row * TILE_WIDTH + rank` order. */
-const RANK_ACTOR = 8;
 
 export interface Foot {
   readonly x: number;
@@ -146,7 +145,7 @@ export class HeroLayer {
       flipX: this.player.flipX,
     });
 
-    this.gfx.setDepth(Math.round(position.row) * TILE_WIDTH + RANK_ACTOR);
+    this.gfx.setDepth(Math.round(position.row) * TILE_WIDTH + RANK.actor);
     this.gfx.clear();
     drawCloud(this.gfx, this.cloud, this.foot.x, this.foot.y);
   }

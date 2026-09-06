@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
 import { hexToInt } from "./color";
-import { cellFoot, composeGround, faceCells, rockCells, rowAtFoot } from "./field";
+import { cellFoot, composeGround, faceCells, rockCells } from "./field";
 import {
   DEFAULT_SKY_FRACTION,
   horizonLayout,
@@ -18,6 +18,7 @@ import { quantizedWave } from "./pixel-art";
 import {
   cellOrigin,
   columnsAcross,
+  RANK,
   rowsDown,
   TILE_WIDTH,
   wallCapY,
@@ -39,9 +40,6 @@ const HEIGHT = 180;
 /** Depths are `row * TILE_WIDTH + rank`; the ground sits below every row. */
 const GROUND_DEPTH = -1000;
 const BAND_DEPTH = -2000;
-const RANK_CAP = 0;
-const RANK_FACE = 1;
-const RANK_ACTOR = 8;
 /** Weather draws over the world: rain in front, then the bolt and its flash. */
 const RAIN_DEPTH = 5000;
 const BOLT_DEPTH = 6000;
@@ -128,14 +126,14 @@ function drawWorld(
     scene.add
       .image(origin.x, wallCapY(origin.y), "wall-top")
       .setOrigin(0, 0)
-      .setDepth(cell.row * TILE_WIDTH + RANK_CAP);
+      .setDepth(cell.row * TILE_WIDTH + RANK.cap);
   }
   for (const cell of faceCells(columns, rows)) {
     const origin = cellOrigin(cell.column, cell.row, layout.groundTop);
     scene.add
       .image(origin.x, wallFaceY(origin.y), "wall-face")
       .setOrigin(0, 0)
-      .setDepth(cell.row * TILE_WIDTH + RANK_FACE);
+      .setDepth(cell.row * TILE_WIDTH + RANK.face);
   }
   return pines;
 }
@@ -187,7 +185,7 @@ export class DemoScene extends Phaser.Scene {
     installSceneTextures(this, this.columns, this.rows);
     this.distantPines = drawWorld(this, this.layout, this.columns, this.rows);
     this.vegetation.create(this, this.layout.groundTop, this.columns, this.rows);
-    this.scenery.create(this, this.layout.groundTop, this.rows, { width: WIDTH, height: HEIGHT });
+    this.scenery.create(this, this.layout.groundTop, this.rows);
     this.water.create(this, this.layout.groundTop);
     this.hero.create(this, this.layout.groundTop, this.columns, this.walkableRows());
     this.createSlime();
@@ -227,13 +225,7 @@ export class DemoScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     this.elapsedMs += Math.min(delta, 40);
     this.vegetation.animate(this.elapsedMs);
-    // After the hero has been asked where it is, so the scenery knows which
-    // bodies to draw over it.
-    this.scenery.animate(
-      delta,
-      this.elapsedMs,
-      rowAtFoot(this.hero.footNow().y, this.layout.groundTop),
-    );
+    this.scenery.animate(delta, this.elapsedMs);
     this.animateDistantPines();
     this.hero.animate(delta, this.elapsedMs);
     this.animateSlime();
@@ -255,12 +247,12 @@ export class DemoScene extends Phaser.Scene {
     this.slime = this.add
       .image(foot.x, foot.y, "slime-0")
       .setOrigin(0.5, 1)
-      .setDepth(SLIME_CELL.row * TILE_WIDTH + RANK_ACTOR);
+      .setDepth(SLIME_CELL.row * TILE_WIDTH + RANK.actor);
   }
 
   private createTorch(): void {
     const foot = cellFoot(TORCH_CELL.column, TORCH_CELL.row, this.layout.groundTop);
-    const depth = TORCH_CELL.row * TILE_WIDTH + RANK_ACTOR;
+    const depth = TORCH_CELL.row * TILE_WIDTH + RANK.actor;
     const flameY = foot.y - 9;
 
     this.torchGlow = this.add.graphics().setDepth(depth - 2);

@@ -116,3 +116,33 @@ export function rowsDown(groundHeight: number): number {
 export function depthOf(point: WorldPoint): number {
   return point.y * TILE_WIDTH + (point.z ?? 0);
 }
+
+/**
+ * What sits above what *within one row*, as one table.
+ *
+ * The rank is the second half of `depthOf`: rows sort the world front to back,
+ * and this sorts everything standing on the same row. It belongs here because
+ * this module already owns the draw order, and because the alternative is what
+ * was actually happening — `RANK_ACTOR = 8` written out in two files and the
+ * scenery layer inventing two more beside them, so the question "does a tree
+ * draw over the hero" was answered by four constants that only agreed by
+ * memory.
+ *
+ * Every value must stay under `TILE_WIDTH`, or a rank leaks into the next row.
+ */
+export const RANK = {
+  /** The top of a wall: flat on the ground, so nothing is behind it. */
+  cap: 0,
+  /** A wall's standing face. */
+  face: 1,
+  /** Cast shadows: on the ground, under everything that casts them. */
+  shadow: 2,
+  grass: 3,
+  /** Trees, rocks, props — anything with height that is not an actor. */
+  body: 7,
+  /**
+   * The hero and other actors, above the scenery on their own row. A body one
+   * row nearer the camera still covers them, which is what the row term is for.
+   */
+  actor: 8,
+} as const;

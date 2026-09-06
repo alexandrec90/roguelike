@@ -151,6 +151,15 @@ function applyUniforms(renderer: VolumeGl, uniforms: VolumeUniforms): void {
 
   set("u_boxOrigin", (l) => gl.uniform2f(l, uniforms.u_boxOrigin[0], uniforms.u_boxOrigin[1]));
   set("u_viewport", (l) => gl.uniform2f(l, uniforms.u_viewport[0], uniforms.u_viewport[1]));
+  set("u_clipRect", (l) =>
+    gl.uniform4f(
+      l,
+      uniforms.u_clipRect[0],
+      uniforms.u_clipRect[1],
+      uniforms.u_clipRect[2],
+      uniforms.u_clipRect[3],
+    ),
+  );
   set("u_lobes", (l) => gl.uniform3fv(l, uniforms.u_lobes));
   set("u_lobeEnds", (l) => gl.uniform3fv(l, uniforms.u_lobeEnds));
   set("u_lobeCount", (l) => gl.uniform1i(l, uniforms.u_lobeCount));

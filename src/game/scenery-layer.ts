@@ -1,91 +1,75 @@
 /**
- * The game's scenery, drawn by the shader and handed to Phaser as a texture.
+ * The game's scenery, drawn by the shader inside Phaser's own renderer.
  *
- * Phaser 4.2 is a WebGL1 renderer and the volume shader needs WebGL2 (see
- * `gpu/volume-shader.ts` for why the hash cannot be ported down), so the two do
- * not share a context. They do not need to: this layer keeps its own WebGL2
- * canvas, blits each finished body onto a plain 2D canvas the size of the render
- * target, and registers that canvas as a Phaser texture. Phaser draws one image.
+ * Each body is a handful of `GameObjects.Shader` quads — one per volume part,
+ * plus one for its shadow — positioned at the body's foot and depth-sorted like
+ * any other game object. That last point is the whole reason this file is as
+ * short as it is: an earlier version rendered into a second WebGL2 context and
+ * handed Phaser a texture, which meant one depth for all the scenery and a
+ * hand-rolled behind/in-front split around the hero. Bodies that are ordinary
+ * game objects interleave with the hero for nothing.
  *
- * **The pixels never leave the GPU on the way to the screen.** No `readPixels`
- * anywhere — that call alone costs twenty times what rendering a body does. The
- * only CPU work per frame is one `drawImage` per body and one texture refresh.
+ * The context is WebGL2 because `main.ts` hands Phaser one (`game.config.context`).
+ * Phaser is happy on it, and its shader path compiles the `#version 300 es`
+ * volume shader unchanged — same hash, same noise, same tree as the CPU.
  *
- * ## Depth, with one texture
- *
- * A tree has a row, the hero has a row, and whichever is nearer the camera is
- * drawn on top. One texture has one depth, so this keeps **two**: bodies behind
- * the hero and bodies in front of it, with the images' depths bracketing the
- * hero's own. Two draw calls buy correct occlusion without a texture per tree.
- *
- * ## Falling back
- *
- * A machine with no WebGL2 gets `null` from `createVolumeGl`, and every body
- * renders through the CPU path into ordinary `Graphics` objects — slower, and
- * pixel-for-pixel the same picture, which is the point of the port being a port.
+ * A machine without WebGL2 gets Phaser's own WebGL1 context, `webgl2Available`
+ * is false, and every body renders through the CPU path into a `Graphics` —
+ * slower, and pixel-for-pixel the same picture.
  */
 
 import Phaser from "phaser";
 
 import { drawCloud } from "./draw-cloud";
 import { cellFoot, TREE_SITES, type TreeSite } from "./field";
-import { createVolumeGl, drawVolume, drawVolumeShadow, type VolumeGl } from "./gpu/volume-gl";
+import { MAX_SHADOW_REACH } from "./gpu/volume-uniforms";
+import { volumeShaderConfig, type Quad } from "./gpu/volume-phaser";
 import { detailFor } from "./lod";
-import { TILE_WIDTH } from "./projection";
+import { RANK, TILE_WIDTH } from "./projection";
 import { stageTree } from "./trees";
 import { SDF_CROWN } from "./trees/sdf-crown";
-import type { SceneryEnv, SceneryInstance } from "./scenery";
-
-/** Matches `hero-layer.ts`, so the brackets land either side of the hero. */
-const RANK_ACTOR = 8;
+import type { SceneryEnv, SceneryInstance, VolumePart } from "./scenery";
 
 interface Planted {
   readonly site: TreeSite;
   readonly instance: SceneryInstance;
   readonly foot: { readonly x: number; readonly y: number };
-  /** Only used on the fallback path; one graphics object per body. */
+  /** The pose this frame, read by every shader object's uniform callback. */
+  parts: readonly VolumePart[];
+  /** Only on the fallback path. */
   gfx?: Phaser.GameObjects.Graphics;
-}
-
-interface Surface {
-  readonly canvas: HTMLCanvasElement;
-  readonly context: CanvasRenderingContext2D;
-  readonly texture: Phaser.Textures.CanvasTexture;
-  readonly image: Phaser.GameObjects.Image;
 }
 
 export interface SceneryOptions {
   readonly light: { readonly x: number; readonly y: number };
   readonly elevation: number;
   readonly windStrength: number;
+  /** How many volume parts a species may have. One shader object per slot. */
+  readonly maxParts: number;
 }
 
 const DEFAULTS: SceneryOptions = {
   light: { x: -0.6, y: -0.8 },
   elevation: 0.7,
   windStrength: 1,
+  maxParts: 2,
 };
 
 export class SceneryLayer {
-  private gl: VolumeGl | null = null;
-  private behind: Surface | null = null;
-  private front: Surface | null = null;
   private planted: Planted[] = [];
   private groundTop = 0;
   private rows = 0;
   private options: SceneryOptions = DEFAULTS;
+  private onGpu = false;
 
-  create(
-    scene: Phaser.Scene,
-    groundTop: number,
-    rows: number,
-    size: { readonly width: number; readonly height: number },
-    options: Partial<SceneryOptions> = {},
-  ): void {
+  create(scene: Phaser.Scene, groundTop: number, rows: number, options: Partial<SceneryOptions> = {}): void {
     this.groundTop = groundTop;
     this.rows = rows;
     this.options = { ...DEFAULTS, ...options };
-    this.gl = createVolumeGl();
+    // Narrowed rather than assumed: the renderer is a union, and a canvas
+    // fallback has no context at all.
+    const renderer = scene.game.renderer;
+    this.onGpu = "gl" in renderer && renderer.gl instanceof WebGL2RenderingContext;
 
     this.planted = TREE_SITES.filter((site) => site.row < rows).map((site) => {
       const foot = cellFoot(site.column, site.row, groundTop);
@@ -93,84 +77,92 @@ export class SceneryLayer {
         site,
         instance: SDF_CROWN.create(site.seed),
         foot: { x: foot.x + (site.offsetX ?? 0), y: foot.y },
+        parts: [],
       };
     });
 
-    if (this.gl === null) {
-      for (const body of this.planted) {
-        body.gfx = scene.add.graphics().setDepth(body.site.row * TILE_WIDTH + RANK_ACTOR - 1);
-      }
-      return;
-    }
-    this.behind = surface(scene, "scenery-behind", size);
-    this.front = surface(scene, "scenery-front", size);
-  }
-
-  /** `heroRow` decides which bodies are drawn over the hero and which under. */
-  animate(deltaMs: number, elapsedMs: number, heroRow: number): void {
     for (const body of this.planted) {
-      body.instance.step?.(deltaMs, this.envFor(body, elapsedMs));
-    }
-    if (this.gl === null || this.behind === null || this.front === null) {
-      this.drawFallback(elapsedMs);
-      return;
-    }
-
-    clear(this.behind);
-    clear(this.front);
-    for (const body of this.planted) {
-      const target = body.site.row < heroRow ? this.behind : this.front;
-      this.blit(target, body, elapsedMs);
-    }
-    this.behind.texture.refresh();
-    this.front.texture.refresh();
-    // Bracketing the hero's own depth is what makes a single texture per side
-    // enough: everything in one is behind the hero, everything in the other is
-    // in front, and nothing needs to interleave.
-    const heroDepth = Math.round(heroRow) * TILE_WIDTH + RANK_ACTOR;
-    this.behind.image.setDepth(heroDepth - 1);
-    this.front.image.setDepth(heroDepth + 1);
-  }
-
-  private blit(target: Surface, body: Planted, elapsedMs: number): void {
-    const env = this.envFor(body, elapsedMs);
-    const parts = body.instance.volumes?.(env) ?? [];
-    for (const part of parts) {
-      if (this.gl === null) {
-        return;
+      if (this.onGpu) {
+        this.attachShaders(scene, body);
+      } else {
+        body.gfx = scene.add.graphics().setDepth(body.site.row * TILE_WIDTH + RANK.body);
       }
-      const shadow = drawVolumeShadow(this.gl, part.spec, part.light, {
-        light: this.options.light,
-        elevation: this.options.elevation,
-      });
-      target.context.drawImage(
-        this.gl.canvas,
-        body.foot.x + shadow.box.left,
-        body.foot.y + shadow.box.top,
-      );
-      const drawn = drawVolume(this.gl, part.spec, part.light, part.clip);
-      target.context.drawImage(
-        this.gl.canvas,
-        body.foot.x + drawn.box.left,
-        body.foot.y + drawn.box.top,
-      );
     }
   }
 
-  private drawFallback(elapsedMs: number): void {
+  animate(deltaMs: number, elapsedMs: number): void {
     for (const body of this.planted) {
-      if (body.gfx === undefined) {
-        continue;
-      }
-      body.gfx.clear();
       const env = this.envFor(body, elapsedMs);
-      drawCloud(
-        body.gfx,
-        stageTree(body.instance, env, { shadow: true, elevation: this.options.elevation }),
-        body.foot.x,
-        body.foot.y,
+      body.instance.step?.(deltaMs, env);
+      // Read once per frame and held, because every shader object's uniform
+      // callback asks for it and rebuilding the pose per object would let the
+      // shadow disagree with the body it belongs to.
+      body.parts = body.instance.volumes?.(env) ?? [];
+      if (!this.onGpu) {
+        this.drawFallback(body, env);
+      }
+    }
+  }
+
+  private attachShaders(scene: Phaser.Scene, body: Planted): void {
+    const { footprint } = SDF_CROWN;
+    const bodyQuad: Quad = {
+      originX: -footprint.originX,
+      originY: -footprint.originY,
+      width: footprint.width,
+      height: footprint.height,
+    };
+    // The ground a shadow can reach: the body's own width, plus the cap on how
+    // far a shadow may rake either side of it.
+    const shadowQuad: Quad = {
+      originX: -footprint.originX - MAX_SHADOW_REACH,
+      originY: 0,
+      width: footprint.width + MAX_SHADOW_REACH * 2,
+      height: MAX_SHADOW_REACH + 1,
+    };
+    const depth = body.site.row * TILE_WIDTH;
+
+    for (let slot = 0; slot < this.options.maxParts; slot += 1) {
+      const part = (): VolumePart | null => body.parts[slot] ?? null;
+      this.addQuad(scene, body, shadowQuad, `shadow-${body.site.seed}-${slot}`, {
+        part,
+        shadow: () => ({ light: this.options.light, elevation: this.options.elevation }),
+      }).setDepth(depth + RANK.shadow);
+      this.addQuad(scene, body, bodyQuad, `body-${body.site.seed}-${slot}`, { part }).setDepth(
+        depth + RANK.body,
       );
     }
+  }
+
+  private addQuad(
+    scene: Phaser.Scene,
+    body: Planted,
+    quad: Quad,
+    name: string,
+    source: Parameters<typeof volumeShaderConfig>[2],
+  ): Phaser.GameObjects.Shader {
+    return scene.add
+      .shader(
+        volumeShaderConfig(name, quad, source),
+        body.foot.x + quad.originX,
+        body.foot.y + quad.originY,
+        quad.width,
+        quad.height,
+      )
+      .setOrigin(0, 0);
+  }
+
+  private drawFallback(body: Planted, env: SceneryEnv): void {
+    if (body.gfx === undefined) {
+      return;
+    }
+    body.gfx.clear();
+    drawCloud(
+      body.gfx,
+      stageTree(body.instance, env, { shadow: true, elevation: this.options.elevation }),
+      body.foot.x,
+      body.foot.y,
+    );
   }
 
   private envFor(body: Planted, elapsedMs: number): SceneryEnv {
@@ -193,32 +185,4 @@ export class SceneryLayer {
       }),
     };
   }
-}
-
-function surface(
-  scene: Phaser.Scene,
-  key: string,
-  size: { readonly width: number; readonly height: number },
-): Surface | null {
-  const canvas = document.createElement("canvas");
-  canvas.width = size.width;
-  canvas.height = size.height;
-  const context = canvas.getContext("2d");
-  if (context === null) {
-    return null;
-  }
-  context.imageSmoothingEnabled = false;
-  // A key already in the cache belongs to a previous run of this scene; reuse
-  // rather than add, or a restart leaks a texture per scene creation.
-  scene.textures.remove(key);
-  const texture = scene.textures.addCanvas(key, canvas);
-  if (texture === null) {
-    return null;
-  }
-  const image = scene.add.image(0, 0, key).setOrigin(0, 0);
-  return { canvas, context, texture, image };
-}
-
-function clear(target: Surface): void {
-  target.context.clearRect(0, 0, target.canvas.width, target.canvas.height);
 }

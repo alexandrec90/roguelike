@@ -24,6 +24,8 @@ import { MAX_LOBES, MAX_OCTAVES, MAX_RAMP } from "./volume-shader";
 export interface VolumeUniforms {
   readonly u_boxOrigin: readonly [number, number];
   readonly u_viewport: readonly [number, number];
+  /** The body's own box: left, top, right, bottom, inclusive. */
+  readonly u_clipRect: readonly [number, number, number, number];
   /** `MAX_LOBES` triples of (x, y, radius); unused slots are zero. */
   readonly u_lobes: Float32Array;
   /** `MAX_LOBES` triples of (toX, toY, isCapsule); a disc's third is zero. */
@@ -172,7 +174,7 @@ export interface VolumeShadow {
 
 /** The foreshortening `castShadow` applies, kept in one place on both paths. */
 export const SHADOW_SQUASH = (TILE_DEPTH / TILE_WIDTH) * 0.45;
-const MAX_SHADOW_REACH = 26;
+export const MAX_SHADOW_REACH = 26;
 
 type ShadowUniforms = Pick<
   VolumeUniforms,
@@ -250,6 +252,46 @@ type BurnUniforms = Pick<
 /** The texture unit the heat grid is bound to. Only one sampler exists. */
 export const HEAT_TEXTURE_UNIT = 0;
 
+/**
+ * The uniforms WebGL reports under an indexed name.
+ *
+ * Our own renderer resolves `getUniformLocation("u_lobes")` happily, but Phaser
+ * matches against the *active uniform* list, where an array is reported as
+ * `u_lobes[0]`. Sending the bare name there is silently ignored — the body then
+ * has lobes of radius zero and draws nothing at all, with no error anywhere.
+ * That cost two rounds of debugging; the set lives here so both hosts agree.
+ */
+export const ARRAY_UNIFORMS: ReadonlySet<string> = new Set([
+  "u_lobes",
+  "u_lobeEnds",
+  "u_ramp",
+  "u_emberRamp",
+]);
+
+/** The name a host must use when setting a uniform by its active name. */
+export function activeUniformName(name: string): string {
+  return ARRAY_UNIFORMS.has(name) ? `${name}[0]` : name;
+}
+
+/**
+ * Re-aim the uniforms at a quad that is not the body's own box.
+ *
+ * Only two of them describe the rectangle being rasterised; every other uniform
+ * — including `u_clipRect`, which is what actually decides where the body is
+ * and how it is lit — is unchanged. That separation is what lets a fixed-size
+ * game object draw a body whose box moves with the wind.
+ */
+export function withQuad(
+  uniforms: VolumeUniforms,
+  quad: { readonly originX: number; readonly originY: number; readonly width: number; readonly height: number },
+): VolumeUniforms {
+  return {
+    ...uniforms,
+    u_boxOrigin: [quad.originX, quad.originY],
+    u_viewport: [quad.width, quad.height],
+  };
+}
+
 function charColor(): [number, number, number] {
   const { r, g, b } = hexToRgb(INK_COLORS.deep);
   return [r / 255, g / 255, b / 255];
@@ -299,6 +341,7 @@ export function volumeUniforms(
   return {
     u_boxOrigin: [box.left, box.top],
     u_viewport: [width, height],
+    u_clipRect: [box.left, box.top, box.right, box.bottom],
     u_lobes: packed.lobes,
     u_lobeEnds: packed.ends,
     u_lobeCount: spec.lobes.length,

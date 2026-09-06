@@ -47,11 +47,45 @@ export const MAX_LOBES = 12;
 export const MAX_RAMP = 6;
 export const MAX_OCTAVES = 4;
 
-/** A full-viewport triangle pair. The vertex stage has nothing else to do. */
+/**
+ * Two vertex shaders, one per host, and both have exactly one job: deliver
+ * `outTexCoord` with (0, 0) at the **top-left of the quad**.
+ *
+ * The fragment stage derives its cloud coordinate from that, so it does not
+ * care whether it is being drawn by our own full-screen quad or by Phaser's
+ * positioned one. Getting the orientation wrong here renders the body upside
+ * down and nowhere else — which is why it is stated twice rather than inferred.
+ */
 export const VOLUME_VERTEX_SHADER = `#version 300 es
 in vec2 a_clip;
+out vec2 outTexCoord;
 void main() {
   gl_Position = vec4(a_clip, 0.0, 1.0);
+  // Clip space has +1 at the top; the cloud has row 0 there.
+  outTexCoord = vec2(a_clip.x * 0.5 + 0.5, 0.5 - a_clip.y * 0.5);
+}
+`;
+
+/**
+ * The same, for a Phaser `GameObjects.Shader` quad.
+ *
+ * Phaser supplies `inPosition` in quad space and expects it through
+ * `uProjectionMatrix`, and hands the texture coordinate over as `inTexCoord`.
+ * Matching those three names is the whole contract.
+ */
+export const VOLUME_PHASER_VERTEX_SHADER = `#version 300 es
+uniform mat4 uProjectionMatrix;
+in vec2 inPosition;
+in vec2 inTexCoord;
+out vec2 outTexCoord;
+void main() {
+  gl_Position = uProjectionMatrix * vec4(inPosition, 1.0, 1.0);
+  // Flipped: Phaser hands over a texture coordinate with y=0 at the BOTTOM,
+  // and a pixel cloud counts rows from the top. Without this every body renders
+  // upside down — canopy under trunk — which is the one failure mode of this
+  // whole migration that compiles, runs, reports no error, and is instantly
+  // obvious on screen.
+  outTexCoord = vec2(inTexCoord.x, 1.0 - inTexCoord.y);
 }
 `;
 
@@ -59,11 +93,21 @@ export const VOLUME_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
 
+in vec2 outTexCoord;
 out vec4 fragColor;
 
-// Cloud-space coordinate of the pixel at gl_FragCoord (0.5, 0.5).
+// The QUAD: where its top-left pixel sits in cloud space, and how many pixels
+// across it is. These describe the rectangle being rasterised, which for a
+// Phaser game object is a fixed footprint and for our own renderer is the
+// body's tight box.
 uniform vec2 u_boxOrigin;
 uniform vec2 u_viewport;
+
+// The BODY's own box: everything outside is discarded, and the flat light
+// normalises across it. Separate from the quad because a fixed-size game object
+// must still light and clip exactly as the CPU's tight box does, or the two
+// renderers disagree the moment a body is drawn at a distance.
+uniform vec4 u_clipRect;
 
 uniform vec3 u_lobes[${MAX_LOBES}];      // x, y, radius
 uniform vec3 u_lobeEnds[${MAX_LOBES}];   // toX, toY, 1 when a capsule
@@ -266,8 +310,8 @@ vec3 burnt(vec3 colour, vec2 at, int x, int y) {
 // The flat path: directionalLevel over the box, exactly as shading.ts computes it.
 float acrossBox(vec2 at) {
   vec2 unit = length(u_light) == 0.0 ? vec2(0.0) : normalize(u_light);
-  vec2 lo = u_boxOrigin;
-  vec2 hi = u_boxOrigin + u_viewport - vec2(1.0);
+  vec2 lo = u_clipRect.xy;
+  vec2 hi = u_clipRect.zw;
   float a = unit.x * lo.x + unit.y * lo.y;
   float b = unit.x * hi.x + unit.y * lo.y;
   float c = unit.x * lo.x + unit.y * hi.y;
@@ -327,14 +371,13 @@ void castShadow(vec2 ground) {
 }
 
 void main() {
-  // WebGL measures gl_FragCoord.y from the BOTTOM and a pixel cloud measures y
-  // from the top, so the row is flipped here rather than left to the caller.
-  // Doing it in the shader is what makes the canvas itself correct-way-up and
-  // therefore usable directly as a texture; readVolume then flips back to get
-  // cloud order. Leaving both unflipped happens to read back correctly and
-  // renders every body upside down, which is the trap this comment exists for.
-  float row = u_viewport.y - 1.0 - floor(gl_FragCoord.y);
-  vec2 at = u_boxOrigin + vec2(floor(gl_FragCoord.x), row);
+  // From the quad's own texture coordinate rather than gl_FragCoord, so the
+  // body does not care where on screen it was placed — which is what lets a
+  // Phaser game object draw it anywhere in the world.
+  vec2 at = u_boxOrigin + floor(outTexCoord * u_viewport);
+  if (at.x < u_clipRect.x || at.y < u_clipRect.y || at.x > u_clipRect.z || at.y > u_clipRect.w) {
+    discard;
+  }
 
   if (u_shadowOn == 1) {
     castShadow(at);

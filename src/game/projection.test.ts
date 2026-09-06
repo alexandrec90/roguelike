@@ -5,6 +5,7 @@ import {
   columnsAcross,
   depthOf,
   DEPTH_RATIO,
+  RANK,
   project,
   rowsDown,
   TILE_DEPTH,
@@ -81,5 +82,32 @@ describe("the pitched-back camera", () => {
     expect(depthOf({ x: 0, y: 3 })).toBeLessThan(depthOf({ x: 0, y: 4 }));
     expect(depthOf({ x: 0, y: 3 })).toBeLessThan(depthOf({ x: 0, y: 3, z: 8 }));
     expect(depthOf({ x: 0, y: 3, z: 8 })).toBeLessThan(depthOf({ x: 0, y: 4 }));
+  });
+});
+
+describe("the rank table", () => {
+  it("stacks a row the way a painter would", () => {
+    // Read as a sentence: a cast shadow lies under the grass, which lies under
+    // a tree, which the hero standing on the same row walks in front of.
+    expect(RANK.cap).toBeLessThan(RANK.face);
+    expect(RANK.face).toBeLessThan(RANK.shadow);
+    expect(RANK.shadow).toBeLessThan(RANK.grass);
+    expect(RANK.grass).toBeLessThan(RANK.body);
+    expect(RANK.body).toBeLessThan(RANK.actor);
+  });
+
+  it("keeps every rank inside its own row", () => {
+    // A rank at or above TILE_WIDTH would sort into the next row and put a
+    // tree in front of a hero standing a row nearer the camera.
+    for (const [name, rank] of Object.entries(RANK)) {
+      expect(rank, name).toBeGreaterThanOrEqual(0);
+      expect(rank, name).toBeLessThan(TILE_WIDTH);
+    }
+  });
+
+  it("lets a nearer row win over any rank on the row behind it", () => {
+    const behind = depthOf({ x: 0, y: 4, z: RANK.actor });
+    const infront = depthOf({ x: 0, y: 5, z: RANK.cap });
+    expect(infront).toBeGreaterThan(behind);
   });
 });
