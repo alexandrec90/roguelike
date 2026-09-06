@@ -21,7 +21,7 @@
 
 import { cloudBounds, type CloudBounds, type InkId, type InkPixel, type PixelCloud } from "./ink";
 
-export type RampId = "bone" | "ember" | "arcane" | "verdant" | "tide";
+export type RampId = "bone" | "ember" | "arcane" | "verdant" | "tide" | "canopy";
 
 /**
  * The ramps, darkest first. Every entry is an ink that already exists in
@@ -38,6 +38,12 @@ export const INK_RAMPS: Readonly<Record<RampId, readonly InkId[]>> = {
   arcane: ["deep", "violet", "magenta", "ice"],
   verdant: ["deep", "steel", "neon-green", "bone"],
   tide: ["deep", "steel", "cyan", "ice"],
+  // Foliage, and the reason it is not `verdant`: with `steel` in the middle,
+  // half of a four-step ramp is blue-grey, and a canopy whose body lands on the
+  // middle steps reads blue rather than green. Dropping the step puts the mass
+  // on `neon-green` and keeps `deep` for the shaded underside and `bone` for
+  // the handful of leaves catching the sky.
+  canopy: ["deep", "neon-green", "bone"],
 };
 
 /**

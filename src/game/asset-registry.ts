@@ -9,51 +9,28 @@
  * failing test instead of a puzzling screenshot.
  */
 
+import {
+  AUTHORED,
+  AUTHORED_VARIANT_ID,
+  type AssetEntry,
+  type PaletteVariant,
+} from "./asset-types";
 import { INK_COLORS } from "./ink";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
-import type { Palette, PixelSpriteSource } from "./pixel-art";
-import { rasterizeSprite } from "./pixel-art";
+import type { PixelSpriteSource } from "./pixel-art";
 import { samplePuddleFrames } from "./puddles";
+import { validateRegistry as checkRegistry } from "./registry-validation";
 import { sampleRippleFrames } from "./ripples";
 import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
 import { FAR_PINE_FRAMES, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { DIRT_PATH, GRASS, WALL_FACE, WALL_TOP } from "./tiles";
+import { TREE_ASSETS } from "./tree-assets";
 import { sampleGrassFrames, sampleTreeFrames } from "./vegetation";
 
-export type AssetCategory = "actor" | "prop" | "tile" | "effect";
-
-/** Effects are simulated rather than played frame by frame. */
-export type EffectId = "sparks";
-
-export interface PaletteVariant {
-  readonly id: string;
-  readonly label: string;
-  /** Empty for the authored colours; otherwise token -> colour. */
-  readonly overrides: Palette;
-}
-
-export interface AssetEntry {
-  readonly id: string;
-  readonly label: string;
-  readonly category: AssetCategory;
-  readonly frames: readonly PixelSpriteSource[];
-  /** How long one frame holds when the clip plays. */
-  readonly frameDurationMs: number;
-  /** Always at least one; the first is the authored palette. */
-  readonly variants: readonly PaletteVariant[];
-  readonly effect?: EffectId;
-  readonly notes?: string;
-}
-
-export const AUTHORED_VARIANT_ID = "authored";
-
-const AUTHORED: PaletteVariant = {
-  id: AUTHORED_VARIANT_ID,
-  label: "Authored",
-  overrides: {},
-};
+export type { AssetCategory, AssetEntry, EffectId, PaletteVariant } from "./asset-types";
+export { AUTHORED, AUTHORED_VARIANT_ID } from "./asset-types";
 
 /** One swap shared by every rig entry: the bone ink re-inked to ice. */
 const FROST: PaletteVariant = { id: "frost", label: "Frozen", overrides: { w: "#a8ecff" } };
@@ -368,6 +345,7 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
       { id: "arcane", label: "Arcane", overrides: { x: "#8fe0ff" } },
     ],
   },
+  ...TREE_ASSETS,
 ];
 
 export function findAsset(
@@ -418,83 +396,10 @@ export function textureKey(
 }
 
 /**
- * Every structural rule the catalogue holds to, as a list of problems.
+ * Check the catalogue against the structural rules in `registry-validation.ts`.
  *
- * Returned rather than thrown so one test can report all of them at once; a
- * registry that fails five ways should not need five runs to find out.
+ * Defaulted to this registry so a test can simply ask "is the catalogue sound".
  */
 export function validateRegistry(registry: readonly AssetEntry[] = ASSET_REGISTRY): string[] {
-  const problems: string[] = [];
-  const seen = new Set<string>();
-
-  for (const entry of registry) {
-    if (seen.has(entry.id)) {
-      problems.push(`Duplicate asset id '${entry.id}'`);
-    }
-    seen.add(entry.id);
-
-    if (entry.frameDurationMs <= 0) {
-      problems.push(`Asset '${entry.id}' has a non-positive frame duration`);
-    }
-    problems.push(...frameProblems(entry));
-    problems.push(...variantProblems(entry));
-  }
-
-  return problems;
-}
-
-function frameProblems(entry: AssetEntry): string[] {
-  const problems: string[] = [];
-  if (entry.frames.length === 0) {
-    problems.push(`Asset '${entry.id}' has no frames`);
-    return problems;
-  }
-
-  const sizes = new Set<string>();
-  entry.frames.forEach((frame, index) => {
-    try {
-      const raster = rasterizeSprite(frame);
-      sizes.add(`${raster.width}x${raster.height}`);
-    } catch (error) {
-      problems.push(`Asset '${entry.id}' frame ${index} does not rasterize: ${String(error)}`);
-    }
-  });
-
-  if (sizes.size > 1) {
-    problems.push(`Asset '${entry.id}' mixes frame sizes: ${[...sizes].join(", ")}`);
-  }
-  return problems;
-}
-
-function variantProblems(entry: AssetEntry): string[] {
-  const problems: string[] = [];
-  const first = entry.variants[0];
-  if (first === undefined) {
-    problems.push(`Asset '${entry.id}' has no variants`);
-    return problems;
-  }
-  if (first.id !== AUTHORED_VARIANT_ID) {
-    problems.push(`Asset '${entry.id}' does not lead with the authored palette`);
-  }
-
-  const seen = new Set<string>();
-  for (const variant of entry.variants) {
-    if (seen.has(variant.id)) {
-      problems.push(`Asset '${entry.id}' has duplicate variant '${variant.id}'`);
-    }
-    seen.add(variant.id);
-    problems.push(...overrideProblems(entry, variant));
-  }
-  return problems;
-}
-
-function overrideProblems(entry: AssetEntry, variant: PaletteVariant): string[] {
-  const problems: string[] = [];
-  for (const token of Object.keys(variant.overrides)) {
-    const missing = entry.frames.some((frame) => !(token in frame.palette));
-    if (missing) {
-      problems.push(`Asset '${entry.id}' variant '${variant.id}' targets unused token '${token}'`);
-    }
-  }
-  return problems;
+  return checkRegistry(registry);
 }
