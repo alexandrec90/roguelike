@@ -301,18 +301,25 @@ branch its own Git worktree and dev-server port, and compare branches by switchi
 browser tabs. Vite hot replacement is for edits within one worktree, not for mixing two
 branches in one running module graph.
 
-**Every checkout gets its own port, from its own `.env`.** `vite.config.ts` reads
-`VITE_PORT` and `VITE_PREVIEW_PORT` (see `.env.example`) and runs `strictPort: true`, so
-a collision is a startup error rather than a silent slide onto the next free number.
-That matters more than it sounds: it used to slide, and opening `localhost:4100` out of
-habit then showed you *the other branch's game* — close enough to yours to be believed,
-with every conclusion drawn from it about code you did not write. The tell was a change
-you had just made not being there.
+**Every checkout gets its own port, and a worktree needs no `.env` to get one.**
+`src/worktreePort.ts` derives an offset from the checkout's own directory name, so the
+static checkout keeps 4100/5100 and a worktree serves on 4100+n/5100+n the first time
+anyone runs `npm run dev`. It is derived rather than assigned because two of the three
+ways a worktree is cut here — `claude --worktree`, and Remote Control spawning one — run
+no project code at the time, so nothing can seed a file for them; that module carries the
+full reasoning. An explicit `VITE_PORT`/`VITE_PREVIEW_PORT` still wins.
 
-Vite watches `.env` and restarts itself on a change, so editing the port moves the
-running server rather than needing a fresh `npm run dev` — and a second `npm run dev`
-against a server that is already up now fails on the port instead of quietly starting a
-rival.
+`vite.config.ts` also runs `strictPort: true`, so a collision is a startup error rather
+than a silent slide onto the next free number. That still matters, because the offset is
+a hash and two worktrees can land on one: it used to slide, and opening `localhost:4100`
+out of habit then showed you *the other branch's game* — close enough to yours to be
+believed, with every conclusion drawn from it about code you did not write. The tell was
+a change you had just made not being there. On a collision, pin one of them with
+`VITE_PORT=4107 npm run dev`.
+
+Vite watches `.env` and restarts itself on a change, so pinning a port moves the running
+server rather than needing a fresh `npm run dev` — and a second `npm run dev` against a
+server that is already up fails on the port instead of quietly starting a rival.
 
 ## Controls
 

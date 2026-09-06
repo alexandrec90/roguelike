@@ -56,6 +56,23 @@ describe("the dev server config", () => {
     expect(config).toContain('portFrom(env, "VITE_PREVIEW_PORT"');
   });
 
+  it("adds the derived worktree offset to both bases", () => {
+    // The half that makes a worktree work with NO `.env`, which is the only thing
+    // that holds across all three ways one is cut here. Without the offset the
+    // fallbacks are bare constants again and two worktrees both take 4100 -- now a
+    // startup error rather than a silent slide, but still two servers that cannot run.
+    expect(config).toContain("portOffset(import.meta.dirname)");
+    expect(config).toContain("DEV_PORT + offset");
+    expect(config).toContain("PREVIEW_PORT + offset");
+  });
+
+  it("keeps the dev and preview pair on one offset", () => {
+    // `5103` has to be the preview for `4103`. Two independent derivations would
+    // drift the moment either base or the span changed.
+    expect(config.match(/\+ offset/g)).toHaveLength(2);
+    expect(config.match(/const offset = /g)).toHaveLength(1);
+  });
+
   it("documents both keys in the committed env template", () => {
     // `.env` is gitignored, so the template is the only place a new checkout
     // can learn that these keys exist at all.
