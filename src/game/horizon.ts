@@ -227,6 +227,16 @@ export interface RidgeOptions {
   readonly wavelength?: number;
   /** Nothing may poke out of the top of the sky band. */
   readonly maxHeight?: number;
+  /**
+   * Columns after which the profile repeats exactly, or 0 for an open one.
+   *
+   * The horizon of a round world is a loop: `panorama.ts` generates one turn of
+   * ridge and scrolls it as the hero swings, so column `period` has to be
+   * column 0 down to the pixel or the seam is a cliff that comes round once a
+   * lap. Setting it folds the noise lattice modulo its own cell count, which is
+   * the only place a seamless profile can come from.
+   */
+  readonly period?: number;
 }
 
 function hashUnit(cell: number, seed: number): number {
@@ -237,11 +247,29 @@ function hashUnit(cell: number, seed: number): number {
   return (h >>> 0) / 0xffffffff;
 }
 
-function smoothNoise(x: number, seed: number): number {
+function smoothNoise(x: number, seed: number, cells = 0): number {
   const cell = Math.floor(x);
   const f = x - cell;
   const s = f * f * (3 - 2 * f);
-  return hashUnit(cell, seed) * (1 - s) + hashUnit(cell + 1, seed) * s;
+  const at = (index: number): number =>
+    hashUnit(cells > 0 ? ((index % cells) + cells) % cells : index, seed);
+  return at(cell) * (1 - s) + at(cell + 1) * s;
+}
+
+/**
+ * One octave of the ridge, folded into a loop when `period` asks for one.
+ *
+ * The lattice is re-expressed as a whole number of cells per period rather than
+ * as a wavelength, because only a whole number closes. The wavelength is
+ * therefore a request, honoured to within half a cell - which at ridge
+ * wavelengths is a couple of pixels and invisible.
+ */
+function ridgeOctave(x: number, wavelength: number, seed: number, period: number): number {
+  if (period <= 0) {
+    return smoothNoise(x / wavelength, seed);
+  }
+  const cells = Math.max(1, Math.round(period / wavelength));
+  return smoothNoise((x / period) * cells, seed, cells);
 }
 
 /**
@@ -260,6 +288,7 @@ export function ridgeProfile(width: number, options: RidgeOptions = {}): readonl
     amplitude = 3,
     wavelength = 34,
     maxHeight = Number.POSITIVE_INFINITY,
+    period = 0,
   } = options;
 
   if (width < 0) {
@@ -270,8 +299,8 @@ export function ridgeProfile(width: number, options: RidgeOptions = {}): readonl
   }
 
   return Array.from({ length: width }, (_unused, x) => {
-    const coarse = smoothNoise(x / wavelength, seed);
-    const fine = smoothNoise((x / wavelength) * 2.7, seed + 1);
+    const coarse = ridgeOctave(x, wavelength, seed, period);
+    const fine = ridgeOctave(x, wavelength / 2.7, seed + 1, period);
     const raw = base + amplitude * (0.68 * coarse + 0.32 * fine);
     return Math.max(0, Math.min(Math.round(raw), maxHeight));
   });

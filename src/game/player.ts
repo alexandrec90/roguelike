@@ -1,22 +1,45 @@
 /**
- * The player as turn simulation: which cell, which way, and what it is busy
- * doing.
+ * The player as turn simulation: where on the planet, facing which way, and
+ * what he is busy doing.
  *
- * Deterministic and Phaser-free by design — `advancePlayer` is a pure function
+ * Deterministic and Phaser-free by design - `advancePlayer` is a pure function
  * of (state, intent, elapsed, world), so the whole feel of the controls is
  * testable without a canvas, and the presentation layer can exaggerate a step
  * without being able to change where it lands.
  *
- * The grid is the unit. A press does not nudge the hero some number of pixels;
- * it commits a whole cell step that runs to completion, which is what keeps a
- * turn-based actor on the tile grid the whole world is drawn on. Sliding
- * between the two cells is the *renderer's* business (`playerPosition`), and
- * nothing here knows how many pixels a cell is.
+ * The unit is still a whole step: a press does not nudge the hero some number
+ * of pixels, it commits one tile of walking that runs to completion. What
+ * changed when the world became round is what a step *is*. There is no grid to
+ * step across any more and no map edge to be fenced by - there is a pose, and
+ * four presses that move it two ways (`planet.ts`):
+ *
+ * | Press | Stride            | Heading                          |
+ * | ----- | ----------------- | -------------------------------- |
+ * | north | forward  +1 tile  | unchanged                        |
+ * | south | forward  -1 tile  | unchanged                        |
+ * | east  | strafe   +1 tile  | turns right by `1 / radius` rad  |
+ * | west  | strafe   -1 tile  | turns left  by `1 / radius` rad  |
+ *
+ * So walking sideways is the only thing that turns the world, and it turns it
+ * whether the hero wanted to or not - that is the shape of the planet, not a
+ * control decision.
+ *
+ * Three views of the pose come out of here, and the renderer needs all three
+ * for the reason `camera.ts` explains: `groundPose` is the pose the world is
+ * *sampled* from (frozen for the length of a step), `scrollPhase` is the
+ * sub-tile offset the picture is *drawn* at, and `livePose` is the continuous
+ * truth, which only the horizon is far enough away to show.
  */
 
-import type { Cell } from "./field";
 import type { Direction } from "./keybindings";
 import { SWING } from "./models";
+import {
+  applyStride,
+  DEFAULT_STRAFE_RADIUS,
+  type PlanetPoint,
+  type PlanetPose,
+  type Stride,
+} from "./planet";
 import type { Facing } from "./rig";
 
 /** One cell step, in ms. Short enough to feel like input, long enough to read. */
@@ -27,17 +50,21 @@ export const ATTACK_MS = SWING.durationMs;
 
 export type Activity = "idle" | "step" | "attack";
 
-/** Row 0 is the far edge of the field, so north is a row *decrease*. */
-const STEP_DELTA: Readonly<Record<Direction, { readonly dx: number; readonly dy: number }>> = {
-  north: { dx: 0, dy: -1 },
-  south: { dx: 0, dy: 1 },
-  west: { dx: -1, dy: 0 },
-  east: { dx: 1, dy: 0 },
+const STRIDE: Readonly<Record<Direction, Stride>> = {
+  north: { gait: "forward", distance: 1 },
+  south: { gait: "forward", distance: -1 },
+  west: { gait: "strafe", distance: -1 },
+  east: { gait: "strafe", distance: 1 },
 };
 
 /**
  * The rig has a front and a back and no third drawing, so east and west are the
- * front view and its mirror — which is the whole of `flipX`'s job here.
+ * front view and its mirror - which is the whole of `flipX`'s job here.
+ *
+ * Facing is about the *sprite*, not the pose: the camera is bolted to the
+ * heading, so the hero is drawn stepping sideways out of a frame that is itself
+ * swinging round. The two are allowed to disagree, and a hero who turned his
+ * shoulders to walk right would fight a camera that had already turned.
  */
 const ORIENTATION: Readonly<Record<Direction, { readonly facing: Facing; readonly flipX: boolean }>> =
   {
@@ -48,10 +75,12 @@ const ORIENTATION: Readonly<Record<Direction, { readonly facing: Facing; readonl
   };
 
 export interface PlayerState {
-  /** Where the player is, or is arriving at while `activity` is `step`. */
-  readonly cell: Cell;
-  /** Where the current step began; equal to `cell` whenever one is not running. */
-  readonly from: Cell;
+  /** Where the current step lands; equal to `from` whenever one is not running. */
+  readonly pose: PlanetPose;
+  /** Where the current step began - and the pose the world is drawn from. */
+  readonly from: PlanetPose;
+  /** What the running step is doing; absent whenever one is not running. */
+  readonly stride?: Stride;
   readonly facing: Facing;
   readonly flipX: boolean;
   readonly activity: Activity;
@@ -63,9 +92,9 @@ export interface PlayerState {
 
 /** What the player may walk on, as the simulation sees it. */
 export interface World {
-  readonly columns: number;
-  readonly rows: number;
-  readonly blocked: (column: number, row: number) => boolean;
+  /** Radius of the sideways circle, in tiles. */
+  readonly radius: number;
+  readonly blocked: (point: PlanetPoint) => boolean;
 }
 
 export interface Intent {
@@ -83,46 +112,22 @@ export interface PlayerTick {
   /** True on the frame an attack actually started. */
   readonly attacked: boolean;
   /**
-   * True on the frame the direction was acted on — by stepping, or by turning
+   * True on the frame the direction was acted on - by stepping, or by turning
    * to face the rock that refused the step. Both spend the press: walking into
    * a wall is an answer, not a request still waiting to be granted.
    */
   readonly usedDirection: boolean;
 }
 
-export function createPlayer(cell: Cell): PlayerState {
+export function createPlayer(pose: PlanetPose): PlayerState {
   return {
-    cell,
-    from: cell,
+    pose,
+    from: pose,
     facing: "front",
     flipX: false,
     activity: "idle",
     activityMs: 0,
     steps: 0,
-  };
-}
-
-/**
- * Pull the player back inside a field that just got shorter.
- *
- * The window decides how many rows exist (`viewport.ts`), so dragging its
- * bottom edge up can leave the hero standing on ground the crop has taken away.
- * This clamps rather than re-centres on purpose: the player put him where he
- * is, and a resize is not a reason to move him one row further than it must.
- *
- * A step in flight is clamped at both ends — the cell he is arriving at *and*
- * the one he left — because a slide that starts off the field would carry him
- * back out of view for the rest of its `STEP_MS`.
- */
-export function clampToRows(player: PlayerState, rows: number): PlayerState {
-  const last = Math.max(rows - 1, 0);
-  if (player.cell.row <= last && player.from.row <= last) {
-    return player;
-  }
-  return {
-    ...player,
-    cell: { ...player.cell, row: Math.min(player.cell.row, last) },
-    from: { ...player.from, row: Math.min(player.from.row, last) },
   };
 }
 
@@ -142,25 +147,54 @@ export function stepProgress(player: PlayerState): number {
 }
 
 /**
- * The fractional cell the player occupies — the one number the renderer needs.
+ * The pose the ground is sampled from: frozen for the length of a step.
  *
- * A step slides from `from` to `cell` over `STEP_MS`; between steps the two are
- * the same cell and this is exactly integral.
+ * Frozen on purpose. Sampling from the live pose would flip a tile's terrain
+ * the instant the hero crossed the half-tile that rounds to the next sample,
+ * which is a pop in the middle of a stride; freezing it and carrying the motion
+ * in `scrollPhase` instead means the sample advances by exactly one cell at the
+ * same instant the drawn offset resets by exactly one cell, and the two cancel.
  */
-export function playerPosition(player: PlayerState): {
-  readonly column: number;
-  readonly row: number;
-} {
-  const t = stepProgress(player);
-  return {
-    column: player.from.column + (player.cell.column - player.from.column) * t,
-    row: player.from.row + (player.cell.row - player.from.row) * t,
-  };
+export function groundPose(player: PlayerState): PlanetPose {
+  return player.from;
+}
+
+/**
+ * How far the world has slid out from under the hero, in tiles.
+ *
+ * Zero between steps, and exactly one tile on the axis being walked at the
+ * moment a step completes - which is the instant `groundPose` advances by one
+ * cell and takes the offset back to zero.
+ */
+export function scrollPhase(player: PlayerState): { readonly x: number; readonly y: number } {
+  const stride = player.stride;
+  if (stride === undefined || player.activity !== "step") {
+    return { x: 0, y: 0 };
+  }
+  const walked = stride.distance * stepProgress(player);
+  return stride.gait === "forward" ? { x: 0, y: walked } : { x: walked, y: 0 };
+}
+
+/**
+ * Where the hero actually is, mid-stride and all.
+ *
+ * Only the horizon reads this. Everything standing on the ground is drawn from
+ * `groundPose` plus `scrollPhase` so that it all moves as one rigid picture; the
+ * horizon is infinitely far away, has no grid to be quantised onto, and so gets
+ * to show the turn continuously.
+ */
+export function livePose(player: PlayerState, radius: number = DEFAULT_STRAFE_RADIUS): PlanetPose {
+  const stride = player.stride;
+  if (stride === undefined || player.activity !== "step") {
+    return player.pose;
+  }
+  const walked = { ...stride, distance: stride.distance * stepProgress(player) };
+  return applyStride(player.from, walked, radius);
 }
 
 /**
  * Where in the walk cycle to sample, so the second stride leads with the other
- * leg instead of replaying the first — a whole clip's worth of variety for one
+ * leg instead of replaying the first - a whole clip's worth of variety for one
  * counter, rather than a second clip.
  */
 export function walkClipMs(player: PlayerState, cycleMs: number): number {
@@ -168,11 +202,8 @@ export function walkClipMs(player: PlayerState, cycleMs: number): number {
   return (player.steps % 2) * half + stepProgress(player) * half;
 }
 
-export function passable(world: World, column: number, row: number): boolean {
-  if (column < 0 || row < 0 || column >= world.columns || row >= world.rows) {
-    return false;
-  }
-  return !world.blocked(column, row);
+export function passable(world: World, point: PlanetPoint): boolean {
+  return !world.blocked(point);
 }
 
 /**
@@ -197,7 +228,8 @@ export function advancePlayer(
 
   const settled: PlayerState = {
     ...player,
-    from: player.cell,
+    from: player.pose,
+    stride: undefined,
     activity: "idle",
     activityMs: 0,
     steps: player.steps + (player.activity === "step" ? 1 : 0),
@@ -207,12 +239,7 @@ export function advancePlayer(
 }
 
 /** What an idle player does with the intent it is handed. */
-function begin(
-  player: PlayerState,
-  intent: Intent,
-  carry: number,
-  world: World,
-): PlayerTick {
+function begin(player: PlayerState, intent: Intent, carry: number, world: World): PlayerTick {
   const oriented =
     intent.direction === undefined ? player : { ...player, ...ORIENTATION[intent.direction] };
 
@@ -227,18 +254,23 @@ function begin(
     return { player, attacked: false, usedDirection: false };
   }
 
-  const delta = STEP_DELTA[intent.direction];
-  const target: Cell = {
-    column: player.cell.column + delta.dx,
-    row: player.cell.row + delta.dy,
-  };
-  if (!passable(world, target.column, target.row)) {
-    // Walked into rock or off the field: turn to face it and stay put, rather
-    // than marching on the spot against something that will never give.
+  const stride = STRIDE[intent.direction];
+  const target = applyStride(player.pose, stride, world.radius);
+  if (!passable(world, target)) {
+    // Walked into rock: turn to face it and stay put, rather than marching on
+    // the spot against something that will never give. There is no second case
+    // any more - a round planet has no edge to walk off.
     return { player: oriented, attacked: false, usedDirection: true };
   }
   return {
-    player: { ...oriented, from: player.cell, cell: target, activity: "step", activityMs: carry },
+    player: {
+      ...oriented,
+      from: player.pose,
+      pose: target,
+      stride,
+      activity: "step",
+      activityMs: carry,
+    },
     attacked: false,
     usedDirection: true,
   };

@@ -1,16 +1,24 @@
 /**
  * The played character: input in, pixels out.
  *
- * The split this file defends is the one `CLAUDE.md` asks for — the turn
+ * The split this file defends is the one `CLAUDE.md` asks for - the turn
  * simulation is deterministic and knows nothing about the presentation. So the
- * three interesting parts live elsewhere and none of them import Phaser:
+ * four interesting parts live elsewhere and none of them import Phaser:
  * `keybindings.ts` says what an input means, `controls.ts` says what is held,
- * and `player.ts` says what the hero does about it. What is left here is the
- * wiring: DOM events into the control state, and a posed rig into a `Graphics`.
+ * `planet.ts` says what a step does to a pose on a round world, and `player.ts`
+ * says what the hero does about it. What is left here is the wiring: DOM events
+ * into the control state, and a posed rig into a `Graphics`.
+ *
+ * One thing did change shape when the world went round. The hero no longer moves
+ * across the screen - he *is* the screen's origin, nailed to `footX, footY`
+ * while the planet slides and swings beneath him. So this layer is also the
+ * place the rest of the scene comes to ask where the world has got to: it holds
+ * the pose, and hands out the three views of it (`groundPose`, `phase`, `turn`)
+ * that `camera.ts` and `panorama.ts` need.
  */
 
 // `Phaser` is an ambient *type* namespace, so annotations alone compile without
-// this import — but `Phaser.Core.Events.BLUR` below is a value read at runtime.
+// this import - but `Phaser.Core.Events.BLUR` below is a value read at runtime.
 import Phaser from "phaser";
 
 import {
@@ -26,22 +34,24 @@ import {
   wantsAttack,
 } from "./controls";
 import { drawCloud } from "./draw-cloud";
-import { cellFoot, isRock, type Cell } from "./field";
 import type { PixelCloud } from "./ink";
 import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
+import { DEFAULT_STRAFE_RADIUS, type PlanetPose } from "./planet";
 import {
   advancePlayer,
-  clampToRows,
   createPlayer,
-  playerPosition,
+  groundPose,
+  livePose,
+  scrollPhase,
   walkClipMs,
   type PlayerState,
   type World,
 } from "./player";
-import { TILE_WIDTH } from "./projection";
+import { rowAtFoot, TILE_WIDTH } from "./projection";
 import { renderModel, samplePose, type RigPose } from "./rig";
 import { MAX_STEP_MS } from "./spark-emitter";
+import { isRockAt } from "./terrain";
 
 /** Rank within a row, on the scene's shared `row * TILE_WIDTH + rank` order. */
 const RANK_ACTOR = 8;
@@ -51,61 +61,66 @@ export interface Foot {
   readonly y: number;
 }
 
+/**
+ * How tall the hero's silhouette is, in logical pixels.
+ *
+ * Measured off the base pose rather than written down, so re-proportioning the
+ * rig in `models.ts` moves where a short window centres him instead of leaving a
+ * stale number to disagree with the drawing.
+ */
+export function heroHeight(): number {
+  const cloud = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, {
+    facing: "front",
+    flipX: false,
+  });
+  return cloud.reduce((tallest, pixel) => Math.max(tallest, -pixel.y), 0) + 1;
+}
+
 export class HeroLayer {
   private readonly controls = createControls();
   private player: PlayerState;
-  private world: World = { columns: 0, rows: 0, blocked: () => false };
-  private columns = 0;
+  private world: World;
   private groundTop = 0;
+  private foot: Foot = { x: 0, y: 0 };
   private gfx!: Phaser.GameObjects.Graphics;
   private cloud: PixelCloud = [];
-  private foot: Foot = { x: 0, y: 0 };
   /** Kept so a resize can redraw the idle pose it was already holding. */
   private lastElapsedMs = 0;
 
-  constructor(start: Cell) {
+  constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
     this.player = createPlayer(start);
+    this.world = { radius, blocked: isRockAt };
   }
 
-  create(scene: Phaser.Scene, groundTop: number, columns: number, rows: number): void {
+  create(scene: Phaser.Scene, groundTop: number, foot: Foot): void {
     this.groundTop = groundTop;
-    this.columns = columns;
-    this.setRows(rows);
+    this.foot = foot;
     this.gfx = scene.add.graphics();
     this.bindInput(scene);
     this.redraw(0);
   }
 
   /**
-   * Re-fence the field after the window changed how much of it is on screen.
+   * Move the anchor after the window changed how much playfield there is.
    *
-   * The scene calls this on every resize. Walking off the near edge and being
-   * *carried* off it by a dragged window are the same bug, so both ends are
-   * handled in one place: the world shrinks, and a hero already standing past
-   * the new edge is clamped back inside it.
+   * This is the whole of the resize story now. There is no field to be fenced
+   * out of and no near edge to be carried over - a round planet has neither - so
+   * a shorter window re-centres the hero rather than clamping him back inside
+   * something.
    */
-  setVisibleRows(rows: number): void {
-    if (rows === this.world.rows) {
+  setAnchor(foot: Foot): void {
+    if (foot.x === this.foot.x && foot.y === this.foot.y) {
       return;
     }
-    this.setRows(rows);
-    this.player = clampToRows(this.player, rows);
+    this.foot = foot;
     this.redraw(this.lastElapsedMs);
-  }
-
-  private setRows(rows: number): void {
-    this.world = {
-      columns: this.columns,
-      rows,
-      blocked: (column, row) => isRock(column, row),
-    };
   }
 
   /**
    * One frame: read what is held, let the simulation commit to an action, then
    * draw whatever pose that leaves.
    *
-   * The delta is clamped for the same reason an emitter's is — a backgrounded
+   * The delta is clamped for the same reason an emitter's is - a backgrounded
    * tab must not resolve four seconds of walking in a single step.
    */
   animate(delta: number, elapsedMs: number): void {
@@ -126,27 +141,39 @@ export class HeroLayer {
     this.redraw(elapsedMs);
   }
 
+  /** The pose the world is sampled from - frozen for the length of a step. */
+  groundPose(): PlanetPose {
+    return groundPose(this.player);
+  }
+
+  /** How far the world has slid out from under him, in tiles. */
+  phase(): { readonly x: number; readonly y: number } {
+    return scrollPhase(this.player);
+  }
+
+  /** The continuous heading, which only the horizon is far enough away to show. */
+  turn(): number {
+    return livePose(this.player, this.world.radius).turn;
+  }
+
   /** The hero as pixels, for anything that wants to reflect or transform him. */
   cloudNow(): PixelCloud {
     return this.cloud;
   }
 
-  /** Where his feet are this frame — the anchor his cloud is drawn from. */
+  /** Where his feet are - fixed, because everything else is what moves. */
   footNow(): Foot {
     return this.foot;
   }
 
   private redraw(elapsedMs: number): void {
     this.lastElapsedMs = elapsedMs;
-    const position = playerPosition(this.player);
-    const anchor = cellFoot(position.column, position.row, this.groundTop);
-    this.foot = { x: Math.round(anchor.x), y: Math.round(anchor.y) };
     this.cloud = renderModel(HERO_EQUIPPED, this.pose(elapsedMs), {
       facing: this.player.facing,
       flipX: this.player.flipX,
     });
 
-    this.gfx.setDepth(Math.round(position.row) * TILE_WIDTH + RANK_ACTOR);
+    this.gfx.setDepth(Math.round(rowAtFoot(this.foot.y, this.groundTop)) * TILE_WIDTH + RANK_ACTOR);
     this.gfx.clear();
     drawCloud(this.gfx, this.cloud, this.foot.x, this.foot.y);
   }
@@ -167,7 +194,7 @@ export class HeroLayer {
   }
 
   /**
-   * Raw DOM events, translated and nothing more — every decision about what an
+   * Raw DOM events, translated and nothing more - every decision about what an
    * input *means* was already made in `keybindings.ts`.
    *
    * A bound key is prevented from doing its browser job (space scrolls the

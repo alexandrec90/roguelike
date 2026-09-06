@@ -97,7 +97,7 @@ of the game should go, and because an agent asked for "fire that spreads" should
 a piece of it rather than an animation of it.
 
 Under the tiles, one grid of cell state — fire, water, ice, electricity, poison,
-corruption — stepped as an automaton beside `src/game/field.ts`, with combination rules
+corruption — stepped as an automaton beside `src/game/terrain.ts`, with combination rules
 rather than bespoke pairings:
 
 | Combination | Result |

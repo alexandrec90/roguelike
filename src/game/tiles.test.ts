@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { rasterizeSprite } from "./pixel-art";
+import { rasterizeSprite, type PixelSpriteSource } from "./pixel-art";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "./projection";
 import {
   ALL_TILES,
@@ -10,8 +10,27 @@ import {
   STANDING_TILES,
   TERRAIN_PALETTE,
   WALL_FACE,
+  WALL_SHELF,
   WALL_TOP,
 } from "./tiles";
+
+/** Total light each scanline of a tile emits, top row first. */
+function rowLight(tile: PixelSpriteSource): number[] {
+  const raster = rasterizeSprite(tile);
+  return Array.from({ length: raster.height }, (_unused, y) => {
+    let sum = 0;
+    for (let x = 0; x < raster.width; x += 1) {
+      const at = (y * raster.width + x) * 4;
+      sum += (raster.rgba[at] ?? 0) + (raster.rgba[at + 1] ?? 0) + (raster.rgba[at + 2] ?? 0);
+    }
+    return sum;
+  });
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+}
 
 describe("terrain tiles", () => {
   it("authors ground art already foreshortened, so nothing is scaled at draw time", () => {
@@ -78,7 +97,7 @@ describe("terrain tiles", () => {
   });
 
   it("keeps the seam on one edge only, so a tiled field has single mortar lines", () => {
-    for (const tile of [GRASS, DIRT_PATH, WALL_TOP]) {
+    for (const tile of [GRASS, DIRT_PATH, WALL_TOP, WALL_SHELF]) {
       expect(tile.rows[0]).not.toBe(tile.rows[TILE_DEPTH - 1]);
     }
   });
@@ -95,6 +114,31 @@ describe("terrain tiles", () => {
 
   it("darkens the back edge of the wall cap", () => {
     expect(WALL_TOP.rows[0]).toBe("k".repeat(TILE_WIDTH));
+  });
+
+  it("takes that lip off the shelf, so the inside of a mass has no bands", () => {
+    // The fault this tile exists to prevent: stack `WALL_TOP` down a twenty-cell
+    // outcrop and it draws a bright line every twelve pixels. Counting tokens
+    // is not enough to catch it - the first attempt at this tile dropped the lit
+    // row and kept the near-solid shadow row under it, which still banded and
+    // still passed. So measure what the eye measures: how much light each
+    // scanline emits, and refuse any that stands out from its neighbours.
+    const shelf = rowLight(WALL_SHELF);
+    expect(Math.max(...shelf)).toBeLessThanOrEqual(median(shelf) * 3);
+  });
+
+  it("would not pass that test with the lip still on, which is the point", () => {
+    // A test that both tiles pass is asserting nothing. `WALL_TOP` is right to
+    // band - its lip is the far edge of an outcrop - so it is the control.
+    const cap = rowLight(WALL_TOP);
+    expect(Math.max(...cap)).toBeGreaterThan(median(cap) * 8);
+  });
+
+  it("keeps the shelf's body identical to the cap it replaces", () => {
+    // Only the lip and its shadow differ. If the bodies ever drift apart, the
+    // join between the rear row of a mass and the row in front becomes visible.
+    expect(WALL_SHELF.rows.slice(2)).toEqual(WALL_TOP.rows.slice(2));
+    expect(WALL_SHELF.palette).toBe(WALL_TOP.palette);
   });
 
   it("keeps the cap free of vertical lines, so it reads as a top and not as brickwork", () => {

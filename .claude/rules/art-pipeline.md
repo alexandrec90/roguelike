@@ -65,7 +65,7 @@ other module; the API table below covers the calls.
 | Smoke, fog, a swarm, spreading fire | a field over particles — see `procedural-effects.md` | `src/game/spark-emitter.ts` |
 | A puddle, a pool, water on the ground | a seeded outline plus its surface layers | `src/game/puddles.ts` |
 | A ring spreading from an impact | a pooled `Ripple`, aged by a clock | `src/game/ripples.ts` |
-| Where the water *is* in the sample scene | a `PuddleSite`, one line of data | `src/game/field.ts` |
+| Where the water, trees and rock *are* | a seeded field over planet coordinates | `src/game/terrain.ts` |
 | A recolour of anything at all | a `PaletteVariant` | `src/game/asset-registry.ts` |
 | A new creature | reuse `HUMANOID_SKELETON` if it is bipedal; else a new `SkeletonDef` | `src/game/models.ts` |
 | A rock, a tree, a tile — it never moves | an authored mask | `src/game/sprites.ts`, `src/game/tiles.ts` |
@@ -156,10 +156,14 @@ loses the three pixels that said which character it was. Pass it through
 exactly that, and not one shaded frame was drawn. `dither: false` gives flat cel bands
 instead of a gradient, which is what a shield or a rune usually wants.
 
-**A puddle.** A line in `PUDDLE_SITES` (`field.ts`) — a cell, a radius, a seed. Nothing is
-drawn: `createPuddle` grows a foreshortened outline with seeded lobes in it, and the four
-layers over it are `puddleSurface` (stamp once), `puddleGlints`, `puddleReflection` and
-`rippleCloud`. Two of them are pure functions of time, so a capture at *t* is repeatable.
+**A puddle.** Nothing is placed and nothing is drawn. Water is a *point feature* of the
+planet — `puddlesNear` in `terrain.ts` hashes one out of a planet cell with a jitter, a
+seed and a radius — and `createPuddle` grows a foreshortened outline with seeded lobes in
+it. The four layers over it are `puddleSurface` (stamped once per pose), `puddleGlints`,
+`puddleReflection` and `rippleCloud`. Two of them are pure functions of time, so a capture
+at *t* is repeatable. To change how much water a world has, change a density in
+`terrain.ts`; there is no list of sites to add a line to, because the planet is bigger
+than any list.
 What makes water read on pitch black is the lit rim, the glints and what it gives back —
 never a darker fill, which on this background is a hole.
 

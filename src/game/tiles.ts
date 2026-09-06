@@ -97,8 +97,12 @@ export const DIRT_PATH: PixelSpriteSource = {
  * the vertical mortar lines are the tell, because a top surface seen from a
  * pitched-back camera has no verticals in it at all. What it has is a dark back
  * lip where the step behind it occludes the light, a catch-light on that lip,
- * and mottling with no alignment to anything. Rock cells tile in both axes, so
- * the lip repeats every `TILE_DEPTH` down an outcrop and reads as strata.
+ * and mottling with no alignment to anything.
+ *
+ * The lip is therefore a property of the *edge* of a mass, not of a cell: drawn
+ * on every cell it repeats every `TILE_DEPTH` down an outcrop, which reads as
+ * strata on a three-cell block and as scaffolding on a twenty-cell one.
+ * `WALL_SHELF` below is this tile without it, for the cells inside.
  */
 export const WALL_TOP: PixelSpriteSource = {
   palette: TERRAIN_PALETTE,
@@ -116,6 +120,29 @@ export const WALL_TOP: PixelSpriteSource = {
     "rrrrRrrRrrrrkrRr",
     "rrRrrrrrrrrRrrrr",
   ],
+};
+
+/**
+ * The same cap with its lit lip taken off: the *inside* of a rock mass.
+ *
+ * `WALL_TOP`'s back lip is a catch-light on the step behind it, and inside a
+ * flat-topped outcrop there is no step - so a mass tiled entirely out of
+ * `WALL_TOP` draws a lit line every twelve pixels and reads as scaffolding
+ * rather than as rock. The rule is the exact mirror of the one `faceCells`
+ * applies at the front: **a cap shows its lip only where the cell behind it is
+ * not rock**, which puts one lit rim along the far edge of the whole mass and
+ * none across its middle.
+ *
+ * This did not matter while outcrops were three cells square and hand-placed.
+ * It matters now that they are generated and can run for twenty.
+ */
+export const WALL_SHELF: PixelSpriteSource = {
+  palette: TERRAIN_PALETTE,
+  // Two rows come off, not one. The lit lip is the obvious half; the near-solid
+  // `R` row beneath it is the shadow the lip casts, and on its own it bands just
+  // as visibly - fainter, so it survives a glance at 1x and shows up the moment
+  // the lab tiles it three by three.
+  rows: ["rrRrrrrrrRrrrrRr", "rRrrrRrrrrrRrrrr", ...WALL_TOP.rows.slice(2)],
 };
 
 /**
@@ -149,7 +176,7 @@ export const WALL_FACE: PixelSpriteSource = {
 };
 
 /** Tiles that lie on the ground plane: 16 x TILE_DEPTH. */
-export const GROUND_TILES: readonly PixelSpriteSource[] = [GRASS, DIRT_PATH, WALL_TOP];
+export const GROUND_TILES: readonly PixelSpriteSource[] = [GRASS, DIRT_PATH, WALL_TOP, WALL_SHELF];
 
 /** Tiles that stand up the screen: 16 x WALL_RISE. */
 export const STANDING_TILES: readonly PixelSpriteSource[] = [WALL_FACE];
