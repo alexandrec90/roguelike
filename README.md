@@ -1,8 +1,13 @@
 # Roguelike
 
-2D, pixel-art, turn-based roguelike RPG. The current proof of concept is a small
-animated dungeon scene built with Phaser: a bouncy adventurer, an idle slime, and a
-flickering torch with pooled sparks.
+2D, pixel-art, real-time twin-stick shooter. Movement is eight-way — two directions
+held at once make the diagonal between them — and the hero faces where he is going,
+front, back, or either of those mirrored. The current proof of concept is a small
+animated outdoor scene built with Phaser: a rigged hero under a rolled-over horizon,
+rain, lightning, and a puddle that takes the rings.
+
+It is **not** a roguelike and **not** turn based, whatever the repository name and the
+Python package still say — see `CLAUDE.md` for what is built and what is intended.
 
 Generated from [devkit](https://github.com/alexandrec90/devkit)'s project
 template. The agent harness in `scripts/hooks/` is vendored from there — see

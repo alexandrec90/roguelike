@@ -65,7 +65,7 @@ other module; the API table below covers the calls.
 | Smoke, fog, a swarm, spreading fire | a field over particles — see `procedural-effects.md` | `src/game/spark-emitter.ts` |
 | A puddle, a pool, water on the ground | a seeded outline plus its surface layers | `src/game/puddles.ts` |
 | A ring spreading from an impact | a pooled `Ripple`, aged by a clock | `src/game/ripples.ts` |
-| Where the water *is* in the sample scene | a `PuddleSite`, one line of data | `src/game/field.ts` |
+| Where the water, trees and rock *are* | a seeded field over planet coordinates | `src/game/terrain.ts` |
 | A recolour of anything at all | a `PaletteVariant` | `src/game/asset-registry.ts` |
 | A new creature | reuse `HUMANOID_SKELETON` if it is bipedal; else a new `SkeletonDef` | `src/game/models.ts` |
 | A rock, a tree, a tile — it never moves | an authored mask | `src/game/sprites.ts`, `src/game/tiles.ts` |
@@ -156,10 +156,14 @@ loses the three pixels that said which character it was. Pass it through
 exactly that, and not one shaded frame was drawn. `dither: false` gives flat cel bands
 instead of a gradient, which is what a shield or a rune usually wants.
 
-**A puddle.** A line in `PUDDLE_SITES` (`field.ts`) — a cell, a radius, a seed. Nothing is
-drawn: `createPuddle` grows a foreshortened outline with seeded lobes in it, and the four
-layers over it are `puddleSurface` (stamp once), `puddleGlints`, `puddleReflection` and
-`rippleCloud`. Two of them are pure functions of time, so a capture at *t* is repeatable.
+**A puddle.** Nothing is placed and nothing is drawn. Water is a *point feature* of the
+planet — `puddlesNear` in `terrain.ts` hashes one out of a planet cell with a jitter, a
+seed and a radius — and `createPuddle` grows a foreshortened outline with seeded lobes in
+it. The four layers over it are `puddleSurface` (stamped once per pose), `puddleGlints`,
+`puddleReflection` and `rippleCloud`. Two of them are pure functions of time, so a capture
+at *t* is repeatable. To change how much water a world has, change a density in
+`terrain.ts`; there is no list of sites to add a line to, because the planet is bigger
+than any list.
 What makes water read on pitch black is the lit rim, the glints and what it gives back —
 never a darker fill, which on this background is a hole.
 
@@ -197,10 +201,19 @@ Reach for a **new term** before a new keyframe, and certainly before a new drawi
 | Recoil, stagger, knockback | a decaying offset added to the root | a stagger clip |
 | Wind, water, nerves, a flame's wander | seeded noise sampled at *t* | jitter frames |
 | Impact | hit stop, a camera impulse, and a burst — all three | a bigger explosion sprite |
+| Two actions at once — swinging while walking | **layer the clips**: `samplePose(SWING, samplePose(WALK, base, t), s)` | a combined walk-attack clip |
 
 Every term is a pure function of `(t, seed)`, so it composes with every other term, and
 a capture at a fixed `t` reproduces byte for byte. Anything that reads `Math.random()`
 breaks both properties at once.
+
+**Two clips at once are a term, not a third clip.** `samplePose(clip, base, ms)` falls
+through to `base` for every channel the clip does not key, so passing one sample in as
+another's base *layers* them: the hero swinging mid-stride is
+`samplePose(SWING, samplePose(WALK, base, walkMs), swingMs)` — legs and root from the
+walk, sword arm and torso from the swing, one line. The cost is a constraint worth
+knowing before you author: **a clip should key only the bones its action actually owns**,
+because every extra bone is one another clip can no longer play underneath it.
 
 ## Non-negotiable
 

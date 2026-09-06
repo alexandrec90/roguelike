@@ -2,16 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   createControls,
-  heldDirection,
+  heldHeading,
   isHeld,
-  nextDirection,
+  nextHeading,
   pressButton,
   pressKey,
   releaseAll,
   releaseButton,
   releaseKey,
   spendAttack,
-  spendDirection,
+  spendHeading,
   wantsAttack,
 } from "./controls";
 import { DEFAULT_KEYBINDINGS, type Keybindings } from "./keybindings";
@@ -20,15 +20,15 @@ describe("holding a direction", () => {
   it("holds it until it is released", () => {
     const controls = createControls();
     pressKey(controls, "KeyD");
-    expect(heldDirection(controls)).toBe("east");
+    expect(heldHeading(controls)).toBe("east");
     releaseKey(controls, "KeyD");
-    expect(heldDirection(controls)).toBeUndefined();
+    expect(heldHeading(controls)).toBeUndefined();
   });
 
   it("reads an arrow key as the same action as its letter", () => {
     const controls = createControls();
     pressKey(controls, "ArrowLeft");
-    expect(heldDirection(controls)).toBe("west");
+    expect(heldHeading(controls)).toBe("west");
   });
 
   it("does not release an action a second source is still holding", () => {
@@ -36,18 +36,18 @@ describe("holding a direction", () => {
     pressKey(controls, "KeyA");
     pressKey(controls, "ArrowLeft");
     releaseKey(controls, "KeyA");
-    expect(heldDirection(controls)).toBe("west");
+    expect(heldHeading(controls)).toBe("west");
     releaseKey(controls, "ArrowLeft");
-    expect(heldDirection(controls)).toBeUndefined();
+    expect(heldHeading(controls)).toBeUndefined();
   });
 
-  it("gives the newest press the field, and hands it back on release", () => {
+  it("adds a second axis to the first rather than taking the field from it", () => {
     const controls = createControls();
     pressKey(controls, "KeyD");
     pressKey(controls, "KeyW");
-    expect(heldDirection(controls)).toBe("north");
+    expect(heldHeading(controls)).toBe("northeast");
     releaseKey(controls, "KeyW");
-    expect(heldDirection(controls)).toBe("east");
+    expect(heldHeading(controls)).toBe("east");
   });
 
   it("ignores the keyboard's auto-repeat: a held key is one press", () => {
@@ -55,7 +55,7 @@ describe("holding a direction", () => {
     pressKey(controls, "KeyD");
     pressKey(controls, "KeyW");
     pressKey(controls, "KeyD"); // OS repeat, not a new press
-    expect(heldDirection(controls)).toBe("north");
+    expect(heldHeading(controls)).toBe("northeast");
   });
 
   it("says whether it took the input, so an unbound key keeps its browser job", () => {
@@ -66,22 +66,80 @@ describe("holding a direction", () => {
   });
 });
 
+describe("two directions at once", () => {
+  it("reads up and right as one diagonal, whichever went down first", () => {
+    const first = createControls();
+    pressKey(first, "KeyW");
+    pressKey(first, "KeyD");
+    expect(heldHeading(first)).toBe("northeast");
+
+    const second = createControls();
+    pressKey(second, "ArrowRight");
+    pressKey(second, "ArrowUp");
+    expect(heldHeading(second)).toBe("northeast");
+  });
+
+  it("covers all four diagonals", () => {
+    const corners: readonly (readonly [string, string, string])[] = [
+      ["KeyW", "KeyD", "northeast"],
+      ["KeyW", "KeyA", "northwest"],
+      ["KeyS", "KeyD", "southeast"],
+      ["KeyS", "KeyA", "southwest"],
+    ];
+    for (const [vertical, horizontal, heading] of corners) {
+      const controls = createControls();
+      pressKey(controls, vertical);
+      pressKey(controls, horizontal);
+      expect(heldHeading(controls)).toBe(heading);
+    }
+  });
+
+  it("keeps newest-wins within one axis, so opposites do not cancel", () => {
+    const controls = createControls();
+    pressKey(controls, "KeyD");
+    pressKey(controls, "KeyA");
+    expect(heldHeading(controls)).toBe("west");
+    releaseKey(controls, "KeyA");
+    expect(heldHeading(controls)).toBe("east");
+  });
+
+  it("resolves each axis on its own when three keys are down", () => {
+    const controls = createControls();
+    pressKey(controls, "KeyW");
+    pressKey(controls, "KeyD");
+    pressKey(controls, "KeyA");
+    // North is unopposed; west is the newer of the two horizontals.
+    expect(heldHeading(controls)).toBe("northwest");
+  });
+
+  it("falls back to the surviving cardinal when one axis is released", () => {
+    const controls = createControls();
+    pressKey(controls, "ArrowDown");
+    pressKey(controls, "ArrowLeft");
+    expect(heldHeading(controls)).toBe("southwest");
+    releaseKey(controls, "ArrowDown");
+    expect(heldHeading(controls)).toBe("west");
+    releaseKey(controls, "ArrowLeft");
+    expect(heldHeading(controls)).toBeUndefined();
+  });
+});
+
 describe("a direction tapped faster than a frame", () => {
   it("still owes a step after the key is already back up", () => {
     const controls = createControls();
     pressKey(controls, "KeyW");
     releaseKey(controls, "KeyW");
     // Both events landed between two `update` calls: nothing is held now.
-    expect(heldDirection(controls)).toBeUndefined();
-    expect(nextDirection(controls)).toBe("north");
+    expect(heldHeading(controls)).toBeUndefined();
+    expect(nextHeading(controls)).toBe("north");
   });
 
   it("is owed exactly once — the frame that walks it clears the debt", () => {
     const controls = createControls();
     pressKey(controls, "KeyD");
     releaseKey(controls, "KeyD");
-    spendDirection(controls);
-    expect(nextDirection(controls)).toBeUndefined();
+    spendHeading(controls);
+    expect(nextHeading(controls)).toBeUndefined();
   });
 
   it("never overrides the key the player is leaning on", () => {
@@ -89,9 +147,9 @@ describe("a direction tapped faster than a frame", () => {
     pressKey(controls, "KeyW");
     releaseKey(controls, "KeyW");
     pressKey(controls, "KeyS");
-    expect(nextDirection(controls)).toBe("south");
+    expect(nextHeading(controls)).toBe("south");
     releaseKey(controls, "KeyS");
-    expect(nextDirection(controls)).toBe("south");
+    expect(nextHeading(controls)).toBe("south");
   });
 
   it("is dropped by a lost focus, like everything else held", () => {
@@ -99,13 +157,33 @@ describe("a direction tapped faster than a frame", () => {
     pressKey(controls, "ArrowUp");
     releaseKey(controls, "ArrowUp");
     releaseAll(controls);
-    expect(nextDirection(controls)).toBeUndefined();
+    expect(nextHeading(controls)).toBeUndefined();
+  });
+
+  it("joins two taps in the same frame into the diagonal they mean", () => {
+    const controls = createControls();
+    pressKey(controls, "KeyW");
+    pressKey(controls, "KeyD");
+    releaseKey(controls, "KeyW");
+    releaseKey(controls, "KeyD");
+    expect(heldHeading(controls)).toBeUndefined();
+    expect(nextHeading(controls)).toBe("northeast");
+  });
+
+  it("lets a later tap reverse the axis it shares, and leave the other alone", () => {
+    const controls = createControls();
+    for (const code of ["KeyW", "KeyD", "KeyS"]) {
+      pressKey(controls, code);
+      releaseKey(controls, code);
+    }
+    // North was owed, then east joined it, then south took the vertical back.
+    expect(nextHeading(controls)).toBe("southeast");
   });
 
   it("is not created by the attack key", () => {
     const controls = createControls();
     pressKey(controls, "Space");
-    expect(nextDirection(controls)).toBeUndefined();
+    expect(nextHeading(controls)).toBeUndefined();
   });
 });
 
@@ -154,7 +232,7 @@ describe("losing focus", () => {
     pressKey(controls, "KeyW");
     pressButton(controls, "left");
     releaseAll(controls);
-    expect(heldDirection(controls)).toBeUndefined();
+    expect(heldHeading(controls)).toBeUndefined();
     expect(isHeld(controls, "attack")).toBe(false);
     expect(wantsAttack(controls)).toBe(false);
   });
@@ -170,9 +248,9 @@ describe("a rebound control map", () => {
     const controls = createControls(vim);
 
     pressKey(controls, "KeyW");
-    expect(heldDirection(controls)).toBeUndefined();
+    expect(heldHeading(controls)).toBeUndefined();
     pressKey(controls, "KeyK");
-    expect(heldDirection(controls)).toBe("north");
+    expect(heldHeading(controls)).toBe("north");
 
     pressButton(controls, "middle");
     expect(wantsAttack(controls)).toBe(true);

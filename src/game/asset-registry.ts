@@ -25,7 +25,7 @@ import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
 import { FAR_PINE_FRAMES, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
-import { DIRT_PATH, GRASS, WALL_FACE, WALL_TOP } from "./tiles";
+import { DIRT_PATH, GRASS, WALL_FACE, WALL_SHELF, WALL_TOP } from "./tiles";
 import { TREE_ASSETS } from "./tree-assets";
 import { sampleGrassFrames, sampleTreeFrames } from "./vegetation";
 
@@ -96,6 +96,17 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     frames: sampleClipFrames(HERO_EQUIPPED, SWING, 8),
     frameDurationMs: 65,
     notes: "Anticipation behind the head, contact across the front, overshoot, settle — all keyed in 3D.",
+    variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-swing-walk",
+    label: "Hero — swing while walking (rig)",
+    category: "actor",
+    frames: sampleClipFrames(HERO_EQUIPPED, SWING, 8, { under: WALK }),
+    frameDurationMs: 65,
+    notes:
+      "Two tracks, one skeleton: SWING sampled onto a WALK sample. No combined clip was "
+      + "authored — the legs stride because SWING keys nothing below the waist.",
     variants: [AUTHORED, FROST],
   },
   {
@@ -248,6 +259,25 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     frames: [WALL_TOP],
     frameDurationMs: 200,
     notes: "What the pitched-back camera sees of the top of a rock block. 16x12, like the ground.",
+    variants: [
+      AUTHORED,
+      {
+        id: "sandstone",
+        label: "Sandstone",
+        overrides: { r: "#000000", R: "#1c1710", k: "#e8c25a" },
+      },
+    ],
+  },
+  {
+    id: "wall-shelf",
+    label: "Rock — top, inside a mass",
+    category: "tile",
+    frames: [WALL_SHELF],
+    frameDurationMs: 200,
+    notes:
+      "The cap without its lit back lip, for a cell that has more rock behind it. Tiled "
+      + "three by three it must show no horizontal banding at all — that banding is the "
+      + "whole reason this tile exists.",
     variants: [
       AUTHORED,
       {

@@ -5,7 +5,7 @@
  * from vertical, so a world square that is `TILE_WIDTH` on a side lands on the
  * screen as a `TILE_WIDTH x TILE_DEPTH` rectangle, and anything with height
  * rises straight up the screen instead of leaning. There is no yaw: rows and
- * columns stay axis-aligned, which is the standard roguelike read — a diamond
+ * columns stay axis-aligned, which is the standard top-down read — a diamond
  * grid would need the camera rotated 45 degrees as well, and would put every
  * tile on a half-pixel diagonal.
  *
@@ -97,6 +97,37 @@ export function wallCapY(cellTop: number, height = 1): number {
  */
 export function wallFaceY(cellTop: number, height = 1): number {
   return cellTop + TILE_DEPTH - WALL_RISE * height;
+}
+
+/** A cell of the screen's tile grid. Row 0 is the furthest from the camera. */
+export interface Cell {
+  readonly column: number;
+  readonly row: number;
+}
+
+/** Screen position of a cell's near edge, centred - where an actor's feet go. */
+export function cellFoot(
+  column: number,
+  row: number,
+  groundTop: number,
+): ScreenPoint {
+  return {
+    x: column * TILE_WIDTH + Math.floor(TILE_WIDTH / 2),
+    y: groundTop + (row + 1) * TILE_DEPTH,
+  };
+}
+
+/**
+ * `cellFoot`'s y, inverted: which row an actor standing at this height is on.
+ *
+ * Fractional on purpose, because the scanline handed to it is usually not a row
+ * boundary - it is wherever the window happened to cut the render target, or
+ * wherever the scroll has left a thing standing between two rows. What reads it
+ * is `viewport.ts`, asking how many whole rows survived the cut, and every layer
+ * that needs a painter's-algorithm depth for something off the lattice.
+ */
+export function rowAtFoot(footY: number, groundTop: number): number {
+  return (footY - groundTop) / TILE_DEPTH - 1;
 }
 
 /** How many whole columns cover `width` logical pixels. */

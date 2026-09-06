@@ -7,9 +7,9 @@ import {
   findAsset,
   findVariant,
   textureKey,
-  validateRegistry,
   type AssetEntry,
 } from "./asset-registry";
+import { validateRegistry } from "./asset-registry";
 
 const TWO_FRAMES: AssetEntry = {
   id: "probe",

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import { assetFrame, findAsset, textureKey, type AssetEntry } from "../game/asset-registry";
+import { validateRegistry } from "../game/asset-registry";
 import { integerScale } from "../game/integer-scale";
 import { installAssetTextures, TILE_PREVIEW_COLUMNS, TILE_PREVIEW_ROWS } from "../game/textures";
 import { filmstripCells, splitPanes, type Rect } from "./lab-layout";
@@ -44,6 +45,16 @@ export class LabScene extends Phaser.Scene {
   }
 
   create(): void {
+    // The lab is what a broken catalogue actually breaks, and every fault
+    // `validateRegistry` finds is one the screen cannot show you: a swap aimed
+    // at a token the sprite no longer uses just renders in the authored colour.
+    // CI fails on these; saying so here too means the agent holding the browser
+    // open finds out in the same second rather than on the next push.
+    const problems = validateRegistry();
+    if (problems.length > 0) {
+      console.warn(`Asset registry: ${problems.length} problem(s)`, problems);
+    }
+
     installAssetTextures(this.textures);
     this.cameras.main.setBackgroundColor(CHROME);
 

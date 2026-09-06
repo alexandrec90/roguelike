@@ -4,8 +4,13 @@ import {
   actionForButton,
   actionForKey,
   DEFAULT_KEYBINDINGS,
+  DIRECTION_AXES,
   DIRECTIONS,
   GAME_ACTIONS,
+  HEADING_VECTOR,
+  HEADINGS,
+  headingOf,
+  isDiagonal,
   mouseButtonOf,
   validateKeybindings,
   type Keybindings,
@@ -82,5 +87,50 @@ describe("validating a rebinding", () => {
     const vim: Keybindings = { ...DEFAULT_KEYBINDINGS, north: { keys: ["KeyK"] } };
     expect(actionForKey("KeyK", vim)).toBe("north");
     expect(actionForKey("KeyW", vim)).toBeUndefined();
+  });
+});
+
+describe("headings", () => {
+  it("is eight of them: four cardinals and the four diagonals", () => {
+    expect(HEADINGS).toHaveLength(8);
+    expect(HEADINGS.filter(isDiagonal)).toHaveLength(4);
+    for (const direction of DIRECTIONS) {
+      expect(HEADINGS).toContain(direction);
+      expect(isDiagonal(direction)).toBe(false);
+    }
+  });
+
+  it("adds two axis pushes into the diagonal between them", () => {
+    expect(headingOf(1, -1)).toBe("northeast");
+    expect(headingOf(-1, -1)).toBe("northwest");
+    expect(headingOf(1, 1)).toBe("southeast");
+    expect(headingOf(-1, 1)).toBe("southwest");
+  });
+
+  it("gives a single push back unchanged, and nothing for no push at all", () => {
+    expect(headingOf(0, -1)).toBe("north");
+    expect(headingOf(-1, 0)).toBe("west");
+    expect(headingOf(0, 0)).toBeUndefined();
+  });
+
+  it("reads only the sign, so an unnormalized push still resolves", () => {
+    expect(headingOf(4, -9)).toBe("northeast");
+  });
+
+  it("round-trips every heading through its own vector", () => {
+    for (const heading of HEADINGS) {
+      const { dx, dy } = HEADING_VECTOR[heading];
+      expect(headingOf(dx, dy)).toBe(heading);
+    }
+  });
+
+  it("groups the directions into two axes, opposites together", () => {
+    expect(DIRECTION_AXES.flat().slice().sort()).toEqual(DIRECTIONS.slice().sort());
+    for (const axis of DIRECTION_AXES) {
+      expect(axis).toHaveLength(2);
+      const pushes = axis.map((direction) => HEADING_VECTOR[direction]);
+      expect(pushes.reduce((total, push) => total + push.dx, 0)).toBe(0);
+      expect(pushes.reduce((total, push) => total + push.dy, 0)).toBe(0);
+    }
   });
 });

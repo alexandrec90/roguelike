@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { cellFoot } from "./field";
-import { horizonLayout, DEFAULT_SKY_FRACTION } from "./horizon";
-import { visibleHeight, visibleRows, walkableBand } from "./viewport";
+import { DEFAULT_SKY_FRACTION, horizonLayout } from "./horizon";
+import { anchorFoot, visibleHeight, walkableBand } from "./viewport";
 
 const GROUND_TOP = horizonLayout(180, DEFAULT_SKY_FRACTION).groundTop;
+const HERO = 26;
 
 describe("visibleHeight", () => {
   it("is the whole target when the window is exactly covered", () => {
@@ -13,7 +13,7 @@ describe("visibleHeight", () => {
 
   it("is what survives the crop when the window is shorter than the canvas", () => {
     // 1920x600: the cover factor is still 6 because the width demands it, so
-    // the 1080px-tall canvas loses its bottom 480px — 80 logical scanlines.
+    // the 1080px-tall canvas loses its bottom 480px - 80 logical scanlines.
     expect(visibleHeight(600, 6, 180)).toBe(100);
   });
 
@@ -43,42 +43,48 @@ describe("walkableBand", () => {
   });
 });
 
-describe("visibleRows", () => {
-  it("counts only the rows whose feet the band still holds", () => {
-    // A row's foot is the last of its 12 scanlines, so a band 24 deep holds
-    // exactly two rows and a band one scanline short of that holds one.
-    expect(visibleRows({ top: 9, bottom: 33 })).toBe(2);
-    expect(visibleRows({ top: 9, bottom: 32 })).toBe(1);
+describe("anchorFoot", () => {
+  it("centres the silhouette in the band, not the origin", () => {
+    // Feet at the middle would hang the whole body above it; the middle of the
+    // *drawing* is what the eye reads as centred.
+    const band = walkableBand(GROUND_TOP, 180);
+    const foot = anchorFoot(band, 320, HERO);
+    const head = foot.y - HERO;
+
+    // Within a pixel: a band and a hero of opposite parity cannot split evenly.
+    expect(Math.abs(head - band.top - (band.bottom - foot.y))).toBeLessThanOrEqual(1);
   });
 
-  it("agrees with cellFoot about where the last row it counted ends", () => {
-    for (let visible = 30; visible <= 180; visible += 1) {
-      const band = walkableBand(GROUND_TOP, visible);
-      const rows = visibleRows(band);
+  it("sits on whole pixels at the middle column", () => {
+    const foot = anchorFoot(walkableBand(GROUND_TOP, 180), 320, HERO);
+    expect(foot.x).toBe(160);
+    expect(Number.isInteger(foot.y)).toBe(true);
+  });
 
-      expect(cellFoot(0, rows - 1, band.top).y).toBeLessThanOrEqual(band.bottom);
-      expect(cellFoot(0, rows, band.top).y).toBeGreaterThan(band.bottom);
+  it("keeps the whole hero inside the band at every window height", () => {
+    for (let visible = 40; visible <= 180; visible += 1) {
+      const band = walkableBand(GROUND_TOP, visible);
+      const foot = anchorFoot(band, 320, HERO);
+
+      expect(foot.y).toBeGreaterThan(band.top);
+      expect(foot.y).toBeLessThanOrEqual(band.bottom);
+      expect(foot.y - HERO).toBeGreaterThanOrEqual(band.top);
     }
   });
 
-  it("gives up fewer rows the taller the window is", () => {
-    expect(visibleRows(walkableBand(GROUND_TOP, 100))).toBeLessThan(
-      visibleRows(walkableBand(GROUND_TOP, 180)),
-    );
+  it("rises as the window shortens, rather than following the vanished rows", () => {
+    const tall = anchorFoot(walkableBand(GROUND_TOP, 180), 320, HERO);
+    const short = anchorFoot(walkableBand(GROUND_TOP, 100), 320, HERO);
+    expect(short.y).toBeLessThan(tall.y);
   });
 
-  it("keeps one row for a window too short to hold even that", () => {
-    // The hero then hangs over the near edge, which is honest about the
-    // window; a field of no rows would be nowhere for him to be at all.
-    expect(visibleRows(walkableBand(GROUND_TOP, 4))).toBe(1);
-    expect(visibleRows({ top: 9, bottom: 10 })).toBe(1);
-  });
+  it("keeps the head when the band is too short to hold him", () => {
+    // A hero cropped at the ankles still reads as a hero; one cropped at the
+    // neck reads as a bug. So the feet go under the edge, not the head over it.
+    const band = walkableBand(GROUND_TOP, GROUND_TOP + 10);
+    const foot = anchorFoot(band, 320, HERO);
 
-  it("leaves the whole map walkable at the height the scene is drawn for", () => {
-    // 1920x1080 covers the target exactly: nothing is cropped, so nothing the
-    // field draws should be fenced off.
-    const rows = visibleRows(walkableBand(GROUND_TOP, visibleHeight(1080, 6, 180)));
-
-    expect(cellFoot(0, rows - 1, GROUND_TOP).y).toBeLessThanOrEqual(180);
+    expect(foot.y - HERO).toBe(band.top);
+    expect(foot.y).toBeGreaterThan(band.bottom);
   });
 });

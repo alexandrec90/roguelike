@@ -177,6 +177,28 @@ describe("ridgeProfile", () => {
     expect(() => ridgeProfile(10, { wavelength: 0 })).toThrow(/wavelength/);
     expect(() => ridgeProfile(-1)).toThrow(/negative/);
   });
+
+  it("leaves an unwrapped profile exactly as it was", () => {
+    // `period` is opt-in: the open profile is what every non-panorama caller
+    // still gets, and it must not shift because a new option exists.
+    expect(ridgeProfile(320, { seed: 7, period: 0 })).toEqual(ridgeProfile(320, { seed: 7 }));
+  });
+
+  it("closes on itself when given a period, at both octaves", () => {
+    // A ridge that scrolls round a full turn has to meet itself. Open noise
+    // looks identical on screen and hides a cliff at one bearing, once a lap.
+    const period = 640;
+    const profile = ridgeProfile(period * 2, { seed: 7, wavelength: 55, period });
+
+    for (let x = 0; x < period; x += 1) {
+      expect(profile[x + period]).toBe(profile[x]);
+    }
+  });
+
+  it("still varies once it has been folded into a loop", () => {
+    const profile = ridgeProfile(640, { seed: 11, wavelength: 55, period: 640 });
+    expect(new Set(profile).size).toBeGreaterThan(1);
+  });
 });
 
 describe("starField", () => {
