@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { textureKey, type AssetEntry } from "./asset-entry";
-import { ASSET_REGISTRY } from "./asset-registry";
+import { ASSET_REGISTRY, textureKey, type AssetEntry } from "./asset-registry";
 import type { PixelSpriteSource } from "./pixel-art";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import {

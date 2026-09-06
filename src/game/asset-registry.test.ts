@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASSET_REGISTRY,
   AUTHORED_VARIANT_ID,
   assetFrame,
   findAsset,
   findVariant,
   textureKey,
-  validateRegistry,
   type AssetEntry,
-} from "./asset-entry";
-import { ASSET_REGISTRY } from "./asset-registry";
+} from "./asset-registry";
+import { validateRegistry } from "./asset-rules";
 
 const TWO_FRAMES: AssetEntry = {
   id: "probe",
@@ -46,8 +46,8 @@ describe("ASSET_REGISTRY", () => {
 
 describe("findAsset / findVariant", () => {
   it("looks entries up by id", () => {
-    expect(findAsset("hero", ASSET_REGISTRY)?.category).toBe("actor");
-    expect(findAsset("nope", ASSET_REGISTRY)).toBeUndefined();
+    expect(findAsset("hero")?.category).toBe("actor");
+    expect(findAsset("nope")).toBeUndefined();
   });
 
   it("looks variants up within an entry", () => {

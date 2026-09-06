@@ -7,8 +7,7 @@
  * with a dozen lines.
  */
 
-import { assetFrame, textureKey, type AssetEntry } from "./asset-entry";
-import { ASSET_REGISTRY } from "./asset-registry";
+import { ASSET_REGISTRY, assetFrame, textureKey, type AssetEntry } from "./asset-registry";
 import { rasterizeSprite, type PixelSpriteSource } from "./pixel-art";
 import { repeatSprite } from "./sprite-ops";
 

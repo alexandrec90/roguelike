@@ -4,26 +4,38 @@
  *
  * This used to be six methods and seven fields on `DemoScene`, which made that
  * class two jobs wearing one name: the overworld, and the pond in it. The seam
- * is clean — nothing here reads the hero, the slime, the sky or the storm
- * except through arguments — so it is a layer the scene owns rather than a
+ * is clean - nothing here reads the hero, the slime, the sky or the storm
+ * except through arguments - so it is a layer the scene owns rather than a
  * concern spread through it. `structure_check` is what noticed; the split is
  * worth having on its own merits.
  *
  * The shapes and the maths all belong to `puddles.ts`. What lives here is only
  * the Phaser side of it: which `Graphics` object each layer lands on, in what
  * order, and at what alpha.
+ *
+ * **Two coordinate systems meet here, and mixing them is the bug to watch for.**
+ * Water is part of the ground, so every puddle, ripple and reflection is built
+ * on the *zero-phase* grid and the whole set of layers is then slid by
+ * `scrollOffset` - one `setPosition` per layer, and nothing can drift against
+ * the tile it is lying on. But the hero and the rain are drawn in *screen*
+ * coordinates, because neither of them scrolls: the hero is the anchor and the
+ * rain falls in front of the world. So anything crossing from one to the other
+ * - where a drop went in, where the hero's reflection hangs - has the offset
+ * taken off it on the way, and that subtraction is the whole of the trick.
  */
 
 // `Phaser` is an ambient *type* namespace, so the annotations below compile
-// without it — but `Phaser.BlendModes.ADD` is a value read at runtime, and
+// without it - but `Phaser.BlendModes.ADD` is a value read at runtime, and
 // without this import the scene dies on the first frame with `Phaser is not
 // defined`. `tsc` cannot see it; the browser can.
 import Phaser from "phaser";
 
+import { localFoot, scrollOffset, type CameraFrame } from "./camera";
 import { drawCloud } from "./draw-cloud";
-import { cellFoot, PUDDLE_SITES } from "./field";
 import type { PixelCloud } from "./ink";
 import { quantizedWave } from "./pixel-art";
+import { toLocal, type PlanetPose } from "./planet";
+import type { ScreenPoint } from "./projection";
 import {
   clipToPuddle,
   createPuddle,
@@ -43,6 +55,7 @@ import {
   type RippleField,
 } from "./ripples";
 import { MAX_STEP_MS, type EmitterState } from "./spark-emitter";
+import { puddlesNear } from "./terrain";
 
 /**
  * Under everything that stands on the ground: water is *in* the ground, and a
@@ -63,7 +76,7 @@ const TORCH_REFLECTION_ROWS = 14;
 /** Lightning lights water harder than it lights grass. */
 const LIGHTNING_WATER_GAIN = 0.55;
 
-/** A foot position on the ground — where a thing stands, so where it reflects. */
+/** A foot position on the ground - where a thing stands, so where it reflects. */
 export interface Foot {
   readonly x: number;
   readonly y: number;
@@ -72,6 +85,7 @@ export interface Foot {
 export class WaterLayer {
   private puddles: Puddle[] = [];
   private ripples!: RippleField;
+  private sampled: PlanetPose | undefined;
 
   private bodyGfx!: Phaser.GameObjects.Graphics;
   private glintGfx!: Phaser.GameObjects.Graphics;
@@ -79,50 +93,66 @@ export class WaterLayer {
   private rippleGfx!: Phaser.GameObjects.Graphics;
   private flashGfx!: Phaser.GameObjects.Graphics;
 
-  /**
-   * One generated puddle per site, and the five layers drawn over them.
-   *
-   * The bodies never change, so they are stamped once here; only the glints,
-   * the reflections and the rings are redrawn per frame.
-   */
-  create(scene: Phaser.Scene, groundTop: number): void {
-    this.puddles = PUDDLE_SITES.map((site) => {
-      const foot = cellFoot(site.column, site.row, groundTop);
-      return createPuddle({
-        id: site.id,
-        centerX: foot.x + (site.offsetX ?? 0),
-        centerY: foot.y + (site.offsetY ?? 0),
-        radius: site.radius,
-        seed: site.seed,
-      });
-    });
-
+  /** The five layers. What is on them arrives with the first `relocate`. */
+  create(scene: Phaser.Scene): void {
     this.bodyGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH);
-    for (const puddle of this.puddles) {
-      drawCloud(this.bodyGfx, puddleSurface(puddle), 0, 0);
-    }
-
     this.glintGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 1);
     this.reflectionGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 2);
     this.rippleGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 3);
 
-    // Stamped once at full strength and then held at alpha 0; a strike only
-    // turns it up, so a flash costs one property set rather than a redraw.
+    // Stamped at full strength and then held at alpha 0; a strike only turns it
+    // up, so a flash costs one property set rather than a redraw.
     this.flashGfx = scene.add
       .graphics()
       .setDepth(PUDDLE_DEPTH + 4)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setAlpha(0);
-    for (const puddle of this.puddles) {
-      const lit: PixelCloud = puddle.water.map((pixel) => ({ ...pixel, ink: "deep" }));
-      drawCloud(this.flashGfx, lit, 0, 0);
-    }
 
     this.ripples = createRippleField();
   }
 
-  puddleFor(id: string): Puddle | undefined {
-    return this.puddles.find((puddle) => puddle.id === id);
+  /**
+   * Re-grow the puddles in reach, on the zero-phase grid.
+   *
+   * Only when the pose the world is sampled from has actually moved on, which
+   * is once per step rather than once per frame: a puddle outline is a seeded
+   * walk round a rim, and it must not be re-rolled sixty times a second under a
+   * hero who has not finished a stride.
+   */
+  relocate(frame: CameraFrame, pose: PlanetPose, reach: number): void {
+    if (this.sampled === pose) {
+      return;
+    }
+    this.sampled = pose;
+    const flat: CameraFrame = { ...frame, phaseX: 0, phaseY: 0 };
+
+    this.puddles = puddlesNear(pose, reach).map((site) => {
+      const foot = localFoot(flat, toLocal(pose, site));
+      return {
+        ...createPuddle({
+          id: `${Math.round(site.x)}:${Math.round(site.y)}`,
+          centerX: foot.x,
+          centerY: foot.y,
+          radius: site.size,
+          seed: site.seed,
+        }),
+      };
+    });
+
+    this.bodyGfx.clear();
+    this.flashGfx.clear();
+    for (const puddle of this.puddles) {
+      drawCloud(this.bodyGfx, puddleSurface(puddle), 0, 0);
+      const lit: PixelCloud = puddle.water.map((pixel) => ({ ...pixel, ink: "deep" }));
+      drawCloud(this.flashGfx, lit, 0, 0);
+    }
+  }
+
+  /** Whichever puddle a screen-space foot is standing in, if any. */
+  puddleUnder(point: Foot, offset: ScreenPoint): Puddle | undefined {
+    return this.puddles.find((puddle) =>
+      puddleHolds(puddle, point.x - offset.x, point.y - offset.y),
+    );
   }
 
   /**
@@ -131,20 +161,22 @@ export class WaterLayer {
    *
    * The drop's own velocity reconstructs where it was before the step; where
    * along that segment the ring belongs is `rainImpact`'s problem, and the
-   * comment there is the one worth reading.
+   * comment there is the one worth reading. The offset comes off both ends of
+   * the segment because rain falls in screen space and puddles do not.
    */
-  landRain(rain: EmitterState, delta: number): void {
+  landRain(rain: EmitterState, delta: number, frame: CameraFrame): void {
     const step = Math.min(Math.max(delta, 0), MAX_STEP_MS);
+    const offset = scrollOffset(frame);
     for (const particle of rain.particles) {
       if (!particle.active) {
         continue;
       }
       const impact = rainImpact(
         this.puddles,
-        particle.x - particle.vx * step,
-        particle.y - particle.vy * step,
-        particle.x,
-        particle.y,
+        particle.x - particle.vx * step - offset.x,
+        particle.y - particle.vy * step - offset.y,
+        particle.x - offset.x,
+        particle.y - offset.y,
       );
       if (impact !== null) {
         spawnRipple(this.ripples, impact.x, impact.y);
@@ -158,15 +190,29 @@ export class WaterLayer {
    * shimmer, then what is standing over it, then the rings the rain punched.
    *
    * The puddle sees whatever the hero is doing, transforms included, and gives
-   * it back in the hero's own inks — a frozen hero reflects ice.
+   * it back in the hero's own inks - a frozen hero reflects ice. He only gets a
+   * reflection when he is actually standing in water now, which on a planet
+   * whose puddles are generated rather than placed is the honest answer: walk
+   * into one and it appears under you.
    */
   animate(
     delta: number,
     elapsedMs: number,
     hero: { readonly cloud: PixelCloud; readonly foot: Foot },
     torchFoot: Foot,
+    frame: CameraFrame,
   ): void {
     stepRipples(this.ripples, Math.min(delta, 40));
+    const offset = scrollOffset(frame);
+    for (const layer of [
+      this.bodyGfx,
+      this.glintGfx,
+      this.reflectionGfx,
+      this.rippleGfx,
+      this.flashGfx,
+    ]) {
+      layer.setPosition(offset.x, offset.y);
+    }
 
     this.glintGfx.clear();
     for (const puddle of this.puddles) {
@@ -174,22 +220,7 @@ export class WaterLayer {
     }
 
     this.reflectionGfx.clear();
-    const heroPuddle = this.puddleFor("hero");
-    if (heroPuddle !== undefined) {
-      const reflection = puddleReflection(
-        heroPuddle,
-        hero.cloud,
-        hero.foot.x,
-        hero.foot.y,
-        elapsedMs,
-      );
-      drawCloud(this.reflectionGfx, reflection, 0, 0, REFLECTION_ALPHA);
-    }
-    const torchPuddle = this.puddleFor("torch");
-    if (torchPuddle !== undefined) {
-      const light = this.torchReflection(torchPuddle, torchFoot, elapsedMs);
-      drawCloud(this.reflectionGfx, light, 0, 0, TORCH_REFLECTION_ALPHA);
-    }
+    this.drawReflections(hero, torchFoot, offset, elapsedMs);
 
     this.rippleGfx.clear();
     for (const ripple of this.ripples.ripples) {
@@ -205,6 +236,37 @@ export class WaterLayer {
     this.flashGfx.setAlpha(LIGHTNING_WATER_GAIN * alpha);
   }
 
+  private drawReflections(
+    hero: { readonly cloud: PixelCloud; readonly foot: Foot },
+    torchFoot: Foot,
+    offset: ScreenPoint,
+    elapsedMs: number,
+  ): void {
+    const heroPuddle = this.puddleUnder(hero.foot, offset);
+    if (heroPuddle !== undefined) {
+      const reflection = puddleReflection(
+        heroPuddle,
+        hero.cloud,
+        hero.foot.x - offset.x,
+        hero.foot.y - offset.y,
+        elapsedMs,
+      );
+      drawCloud(this.reflectionGfx, reflection, 0, 0, REFLECTION_ALPHA);
+    }
+
+    const torchPuddle = this.puddleUnder(torchFoot, offset);
+    if (torchPuddle !== undefined) {
+      const base = { x: torchFoot.x - offset.x, y: torchFoot.y - offset.y };
+      drawCloud(
+        this.reflectionGfx,
+        this.torchReflection(torchPuddle, base, elapsedMs),
+        0,
+        0,
+        TORCH_REFLECTION_ALPHA,
+      );
+    }
+  }
+
   /** Rings spread past the rim they started inside; the water is the frame. */
   private overWater(cloud: PixelCloud): PixelCloud {
     return cloud.filter((pixel) =>
@@ -213,7 +275,7 @@ export class WaterLayer {
   }
 
   /**
-   * The torch on the water — a swaying column of light, not a mirrored sprite.
+   * The torch on the water - a swaying column of light, not a mirrored sprite.
    *
    * A flame has no silhouette worth flipping; what a puddle actually shows of
    * one is a smeared streak that breaks up with distance, which is three lines

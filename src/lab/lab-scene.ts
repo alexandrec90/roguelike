@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
-import { assetFrame, findAsset, textureKey, type AssetEntry } from "../game/asset-entry";
-import { ASSET_REGISTRY } from "../game/asset-registry";
+import { assetFrame, findAsset, textureKey, type AssetEntry } from "../game/asset-registry";
+import { validateRegistry } from "../game/asset-rules";
 import { integerScale } from "../game/integer-scale";
 import { installAssetTextures, TILE_PREVIEW_COLUMNS, TILE_PREVIEW_ROWS } from "../game/textures";
 import { filmstripCells, splitPanes, type Rect } from "./lab-layout";
@@ -45,6 +45,16 @@ export class LabScene extends Phaser.Scene {
   }
 
   create(): void {
+    // The lab is what a broken catalogue actually breaks, and every fault
+    // `validateRegistry` finds is one the screen cannot show you: a swap aimed
+    // at a token the sprite no longer uses just renders in the authored colour.
+    // CI fails on these; saying so here too means the agent holding the browser
+    // open finds out in the same second rather than on the next push.
+    const problems = validateRegistry();
+    if (problems.length > 0) {
+      console.warn(`Asset registry: ${problems.length} problem(s)`, problems);
+    }
+
     installAssetTextures(this.textures);
     this.cameras.main.setBackgroundColor(CHROME);
 
@@ -99,7 +109,7 @@ export class LabScene extends Phaser.Scene {
       return;
     }
 
-    const entry = findAsset(next.assetId, ASSET_REGISTRY) ?? this.currentEntry();
+    const entry = findAsset(next.assetId) ?? this.currentEntry();
     this.state = next;
     this.elapsedMs = next.playing ? timeForFrame(next.frame, entry.frameDurationMs) : next.timeMs;
     this.render();
@@ -117,7 +127,7 @@ export class LabScene extends Phaser.Scene {
   }
 
   private currentEntry(): AssetEntry {
-    const entry = findAsset(this.state.assetId, ASSET_REGISTRY);
+    const entry = findAsset(this.state.assetId);
     if (entry === undefined) {
       throw new Error(`The lab was pointed at an unknown asset '${this.state.assetId}'`);
     }

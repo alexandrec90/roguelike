@@ -11,9 +11,8 @@
  * since been renamed should open the lab on something, not on an error page.
  */
 
-import { AUTHORED_VARIANT_ID, findAsset, findVariant } from "../game/asset-entry";
-import type { AssetEntry } from "../game/asset-entry";
-import { ASSET_REGISTRY } from "../game/asset-registry";
+import { ASSET_REGISTRY, AUTHORED_VARIANT_ID, findAsset, findVariant } from "../game/asset-registry";
+import type { AssetEntry } from "../game/asset-registry";
 
 export type BackgroundMode = "duo" | "checker" | "contrast";
 

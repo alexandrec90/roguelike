@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AssetEntry } from "../game/asset-entry";
+import type { AssetEntry } from "../game/asset-registry";
 import { normalizeLabState, parseLabState, serializeLabState, snapZoom } from "./lab-state";
 
 const REGISTRY: readonly AssetEntry[] = [
