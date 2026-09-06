@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
 import { hexToInt } from "./color";
-import { cellFoot, composeGround, faceCells, rockCells } from "./field";
+import { cellFoot, composeGround, faceCells, rockCells, rowAtFoot } from "./field";
 import {
   DEFAULT_SKY_FRACTION,
   horizonLayout,
@@ -27,6 +27,7 @@ import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./
 import { FAR_PINE_FRAMES, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { installPixelTexture } from "./textures";
 import { WALL_FACE, WALL_TOP } from "./tiles";
+import { SceneryLayer } from "./scenery-layer";
 import { VegetationLayer } from "./vegetation-layer";
 import { visibleRows, walkableBand } from "./viewport";
 import { WaterLayer } from "./water-layer";
@@ -166,6 +167,7 @@ export class DemoScene extends Phaser.Scene {
   private distantPines: Phaser.GameObjects.Image[] = [];
   private readonly hero = new HeroLayer(HERO_START);
   private readonly vegetation = new VegetationLayer();
+  private readonly scenery = new SceneryLayer();
   private readonly water = new WaterLayer();
   private elapsedMs = 0;
   /** Scanlines of the render target the window is showing; the rest is clipped. */
@@ -185,6 +187,7 @@ export class DemoScene extends Phaser.Scene {
     installSceneTextures(this, this.columns, this.rows);
     this.distantPines = drawWorld(this, this.layout, this.columns, this.rows);
     this.vegetation.create(this, this.layout.groundTop, this.columns, this.rows);
+    this.scenery.create(this, this.layout.groundTop, this.rows, { width: WIDTH, height: HEIGHT });
     this.water.create(this, this.layout.groundTop);
     this.hero.create(this, this.layout.groundTop, this.columns, this.walkableRows());
     this.createSlime();
@@ -224,6 +227,13 @@ export class DemoScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     this.elapsedMs += Math.min(delta, 40);
     this.vegetation.animate(this.elapsedMs);
+    // After the hero has been asked where it is, so the scenery knows which
+    // bodies to draw over it.
+    this.scenery.animate(
+      delta,
+      this.elapsedMs,
+      rowAtFoot(this.hero.footNow().y, this.layout.groundTop),
+    );
     this.animateDistantPines();
     this.hero.animate(delta, this.elapsedMs);
     this.animateSlime();

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   burnInk,
+  burnInkFromGrid,
   burningPoints,
+  heatGrid,
   igniteAt,
   makeBurnable,
   stepBurn,
@@ -99,6 +101,47 @@ describe("setting something alight", () => {
       return alightNodes(burnable.field).length;
     };
     expect(spread(1)).toBeLessThan(spread(0));
+  });
+});
+
+describe("the heat grid, which is how a fire reaches the GPU", () => {
+  it("covers the occupied cells and nothing else", () => {
+    const burnable = makeBurnable(blob(), { cellSize: 3 });
+    const grid = heatGrid(burnable);
+    expect(grid.cellSize).toBe(3);
+    expect(grid.width * grid.height).toBeGreaterThanOrEqual(burnable.field.nodes.length);
+    expect(grid.data).toHaveLength(grid.width * grid.height * 4);
+  });
+
+  it("carries heat in red and char in green", () => {
+    const burnable = makeBurnable(blob(), { cellSize: 3 });
+    const lit = igniteAt(burnable, 0, -6);
+    burn(burnable, 600);
+    const grid = heatGrid(burnable);
+    const centre = burnable.centres[lit];
+    expect(centre).toBeDefined();
+    const column = Math.floor((centre!.x - grid.originX) / grid.cellSize);
+    const row = Math.floor((centre!.y - grid.originY) / grid.cellSize);
+    expect(grid.data[(row * grid.width + column) * 4]).toBeGreaterThan(0);
+  });
+
+  it("survives a body that cannot burn at all", () => {
+    const grid = heatGrid(makeBurnable([]));
+    expect(grid.width).toBe(1);
+    expect(grid.height).toBe(1);
+  });
+
+  it("re-inks identically whether read from the graph or from the grid", () => {
+    // The property the GPU parity rests on: both renderers consume this grid,
+    // so a disagreement between them is a real one rather than two paths having
+    // been handed different fires.
+    const cloud = blob();
+    const burnable = makeBurnable(cloud, { cellSize: 3, seed: 11 });
+    igniteAt(burnable, 0, -6);
+    burn(burnable, 1800);
+    expect(JSON.stringify(burnInkFromGrid(heatGrid(burnable), cloud, 500, burnable.seed))).toBe(
+      JSON.stringify(burnInk(burnable, cloud, 500)),
+    );
   });
 });
 

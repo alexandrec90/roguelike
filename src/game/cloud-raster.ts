@@ -18,7 +18,7 @@
  */
 
 import { hexToRgb } from "./color";
-import { INK_ALPHA, INK_COLORS, type InkId, type PixelCloud } from "./ink";
+import { inkHex, INK_ALPHA, INK_COLORS, type InkId, type PixelCloud } from "./ink";
 
 export interface RasterBuffer {
   readonly width: number;
@@ -127,6 +127,26 @@ export function paintRgba(
         1,
       );
     }
+  }
+}
+
+/**
+ * Paint a cloud straight onto a 2D context, one fill per pixel.
+ *
+ * For the handful of particles a GPU-drawn body carries on top of itself. A
+ * `putImageData` cannot be used there — it would erase what the GPU just blitted
+ * rather than compositing over it — and at these counts the fill calls are
+ * cheaper than another full-frame buffer.
+ */
+export function paintCloudOnContext(
+  context: CanvasRenderingContext2D,
+  cloud: PixelCloud,
+  originX: number,
+  originY: number,
+): void {
+  for (const pixel of cloud) {
+    context.fillStyle = inkHex(pixel.ink);
+    context.fillRect(originX + pixel.x, originY + pixel.y, 1, 1);
   }
 }
 

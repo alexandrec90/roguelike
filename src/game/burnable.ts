@@ -27,7 +27,7 @@ import {
   alightNodes,
   createHeat,
   ignite,
-  isAlight,
+  IGNITION,
   isSpent,
   stepHeat,
   type HeatField,
@@ -76,6 +76,59 @@ export interface Burnable {
   readonly centres: readonly { readonly x: number; readonly y: number }[];
   /** Cell index for a cloud pixel, keyed by the grid cell it falls in. */
   readonly lookup: ReadonlyMap<number, number>;
+  /** The occupied grid's extent, so the fire can be handed over as a texture. */
+  readonly grid: {
+    readonly column: number;
+    readonly row: number;
+    readonly columns: number;
+    readonly rows: number;
+  };
+}
+
+/**
+ * The fire as a small RGBA image, one texel per cell.
+ *
+ * This is how a burn crosses to the GPU. The shader cannot walk a graph, but it
+ * can sample a texture, so the automaton stays exactly where it is — on the CPU,
+ * stepping the same rule the tests cover — and only its *result* goes across.
+ * Red carries heat, green marks a cell as spent; that is the whole protocol.
+ *
+ * Rebuilt per frame rather than diffed: a burning body is a few hundred cells,
+ * which is a texture smaller than a single sprite and costs less to upload than
+ * to reason about.
+ */
+export interface HeatGrid {
+  readonly width: number;
+  readonly height: number;
+  /** Cloud coordinate of the top-left corner of cell (0, 0). */
+  readonly originX: number;
+  readonly originY: number;
+  readonly cellSize: number;
+  readonly data: Uint8Array;
+}
+
+export function heatGrid(burnable: Burnable): HeatGrid {
+  const { column, row, columns, rows } = burnable.grid;
+  const data = new Uint8Array(Math.max(1, columns * rows) * 4);
+  burnable.centres.forEach((centre, index) => {
+    const gx = Math.floor(centre.x / burnable.cellSize) - column;
+    const gy = Math.floor(centre.y / burnable.cellSize) - row;
+    if (gx < 0 || gy < 0 || gx >= columns || gy >= rows) {
+      return;
+    }
+    const at = (gy * columns + gx) * 4;
+    data[at] = Math.round(Math.min(Math.max(burnable.field.heat[index] ?? 0, 0), 1) * 255);
+    data[at + 1] = isSpent(burnable.field, index) ? 255 : 0;
+    data[at + 3] = 255;
+  });
+  return {
+    width: Math.max(1, columns),
+    height: Math.max(1, rows),
+    originX: column * burnable.cellSize,
+    originY: row * burnable.cellSize,
+    cellSize: burnable.cellSize,
+    data,
+  };
 }
 
 function cellKey(column: number, row: number): number {
@@ -126,7 +179,18 @@ export function makeBurnable(cloud: PixelCloud, options: BurnableOptions = {}): 
     });
   }
 
-  return { cellSize, seed, field: createHeat(nodes), centres, lookup };
+  const columns = [...buckets.values()].map((bucket) => bucket.column);
+  const gridRows = [...buckets.values()].map((bucket) => bucket.row);
+  const column = columns.length === 0 ? 0 : Math.min(...columns);
+  const row = gridRows.length === 0 ? 0 : Math.min(...gridRows);
+  const grid = {
+    column,
+    row,
+    columns: columns.length === 0 ? 0 : Math.max(...columns) - column + 1,
+    rows: gridRows.length === 0 ? 0 : Math.max(...gridRows) - row + 1,
+  };
+
+  return { cellSize, seed, field: createHeat(nodes), centres, lookup, grid };
 }
 
 /** Eight-connected, so fire crosses a diagonal limb instead of stopping at it. */
@@ -197,18 +261,36 @@ export function stepBurn(burnable: Burnable, dtMs: number, options: HeatOptions 
  * naming, because every unit test passes while it happens.
  */
 export function burnInk(burnable: Burnable, cloud: PixelCloud, elapsedMs = 0): PixelCloud {
+  return burnInkFromGrid(heatGrid(burnable), cloud, elapsedMs, burnable.seed);
+}
+
+/**
+ * The same re-inking, driven by the grid the GPU is handed.
+ *
+ * Both renderers reading the *same* description is what makes a burning body
+ * comparable: the shader samples this grid as a texture, and this samples it as
+ * an array, and any disagreement between them is a real one rather than two
+ * paths having been fed different fires.
+ */
+export function burnInkFromGrid(
+  grid: HeatGrid,
+  cloud: PixelCloud,
+  elapsedMs = 0,
+  seed = 0,
+): PixelCloud {
   const flicker = Math.floor(elapsedMs / 90);
   return cloud.map((pixel) => {
-    const index = burnable.lookup.get(
-      cellKey(Math.floor(pixel.x / burnable.cellSize), Math.floor(pixel.y / burnable.cellSize)),
-    );
-    if (index === undefined) {
+    const column = Math.floor((pixel.x - grid.originX) / grid.cellSize);
+    const row = Math.floor((pixel.y - grid.originY) / grid.cellSize);
+    if (column < 0 || row < 0 || column >= grid.width || row >= grid.height) {
       return pixel;
     }
-    if (isAlight(burnable.field, index)) {
-      return { x: pixel.x, y: pixel.y, ink: emberInk(pixel, burnable.field.heat[index] ?? 0, burnable.seed + flicker) };
+    const at = (row * grid.width + column) * 4;
+    const heat = (grid.data[at] ?? 0) / 255;
+    if (heat > IGNITION) {
+      return { x: pixel.x, y: pixel.y, ink: emberInk(pixel, heat, seed + flicker) };
     }
-    if (isSpent(burnable.field, index) && (burnable.field.nodes[index]?.fuel ?? 0) > 0) {
+    if ((grid.data[at + 1] ?? 0) > 127) {
       return { x: pixel.x, y: pixel.y, ink: "deep" as InkId };
     }
     return pixel;

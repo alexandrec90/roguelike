@@ -13,15 +13,12 @@
  * answers a gust the others are also feeling.
  */
 
-import { fillRect, paintCloud, paintRgba, type RasterBuffer } from "../game/cloud-raster";
-import { createVolumeGl, drawVolume, readVolume, type VolumeGl } from "../game/gpu/volume-gl";
+import { fillRect, paintCloud } from "../game/cloud-raster";
+import { createVolumeGl, type VolumeGl } from "../game/gpu/volume-gl";
+import { blitJobs, diffBody, type GpuJob } from "./gpu-view";
 import type { PixelCloud } from "../game/ink";
 import { particleAlpha, stepEmitter, type EmitterState } from "../game/spark-emitter";
 import { stageTree, type SceneryEnv, type SceneryInstance } from "../game/trees";
-import type { VolumePart } from "../game/scenery";
-import { volumeCloud } from "../game/procgen/volume";
-import { hexToRgb } from "../game/color";
-import { INK_COLORS } from "../game/ink";
 import { SCENERY_SPECIES } from "../game/trees";
 import { detailFor } from "../game/lod";
 import { createRain, RAIN_SLANT } from "../game/weather";
@@ -117,102 +114,10 @@ function envFor(cell: { readonly footX: number; readonly footY: number }): Scene
   };
 }
 
-/**
- * Draw one body's volumes through the shader, and say whether it could.
- *
- * Returns false for a species that is not made of volumes — a Verlet willow, a
- * leaf swarm — so the caller falls back to the CPU path that has always worked.
- * The same is true when the machine has no WebGL2 at all.
- */
-function drawOnGpu(
-  buffer: RasterBuffer,
-  entry: Entry,
-  env: SceneryEnv,
-  cell: { readonly footX: number; readonly footY: number },
-): boolean {
-  const parts = volumeGl === null ? undefined : entry.instance.volumes?.(env);
-  if (volumeGl === null || parts === undefined || parts.length === 0) {
-    return false;
-  }
-  gpuBodies += 1;
-
-  // In diff mode the CPU picture goes down for context and the magenta is
-  // painted over it, so a disagreement is visible where it happens.
-  if (state.renderer === "diff") {
-    paintCloud(buffer, entry.instance.cloud(env), cell.footX, cell.footY);
-  }
-
-  for (const part of parts) {
-    const draw = drawVolume(volumeGl, part.spec, part.light, part.clip);
-    const pixels = readVolume(volumeGl, draw);
-    if (state.renderer === "diff") {
-      mismatched += diffPart(buffer, part, pixels, draw, cell);
-    } else {
-      paintRgba(buffer, pixels, draw, cell.footX + draw.box.left, cell.footY + draw.box.top);
-    }
-  }
-  return true;
-}
-
-/**
- * Compare one part's GPU output against the **CPU render of that same part**,
- * and mark every pixel they disagree about.
- *
- * Per part, not against the finished buffer, and that distinction is the whole
- * test. Diffing against the composited cell reported 132 disagreements on the
- * chestnut, every one of them a trunk pixel the canopy had already painted
- * over — the measurement was wrong, not the shader. A parity check has to
- * compare like with like or it invents its own failures.
- */
-function diffPart(
-  buffer: RasterBuffer,
-  part: VolumePart,
-  pixels: Uint8ClampedArray,
-  draw: { readonly width: number; readonly height: number; readonly box: { left: number; top: number } },
-  cell: { readonly footX: number; readonly footY: number },
-): number {
-  const reference = new Map<number, readonly [number, number, number]>();
-  for (const pixel of volumeCloud(part.spec, part.light, part.clip)) {
-    const { r, g, b } = hexToRgb(INK_COLORS[pixel.ink]);
-    reference.set((pixel.x + 512) * 4096 + (pixel.y + 512), [r, g, b]);
-  }
-
-  let differences = 0;
-  for (let row = 0; row < draw.height; row += 1) {
-    for (let column = 0; column < draw.width; column += 1) {
-      const from = (row * draw.width + column) * 4;
-      const at = { x: draw.box.left + column, y: draw.box.top + row };
-      const onGpu = (pixels[from + 3] ?? 0) > 0;
-      const onCpu = reference.get((at.x + 512) * 4096 + (at.y + 512));
-      if (!onGpu && onCpu === undefined) {
-        continue;
-      }
-      const same =
-        onGpu &&
-        onCpu !== undefined &&
-        onCpu.every((channel, index) => Math.abs(channel - (pixels[from + index] ?? 0)) <= 1);
-      if (same) {
-        continue;
-      }
-      differences += 1;
-      const x = cell.footX + at.x;
-      const y = cell.footY + at.y;
-      if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
-        continue;
-      }
-      const to = (y * buffer.width + x) * 4;
-      buffer.data[to] = 255;
-      buffer.data[to + 1] = 68;
-      buffer.data[to + 2] = 224;
-      buffer.data[to + 3] = 255;
-    }
-  }
-  return differences;
-}
-
 function render(): void {
   mismatched = 0;
   gpuBodies = 0;
+  const jobs: GpuJob[] = [];
   const visible = shown();
   const size = cellSize();
   const grid = galleryLayout(visible.length, size.width, size.height, state.solo === "" ? COLUMNS : 1);
@@ -230,17 +135,37 @@ function render(): void {
     }
     paintGround(buffer, cell, state.ground, state.seed);
     const env = envFor(cell);
-    const cloud = stageTree(entry.instance, env, {
-      shadow: state.shadow,
-      elevation: state.elevation,
-      reflection: state.reflection,
-      // The water is only the band below the foot; a reflection longer than
-      // that lands on dry ground and reads as scattered litter.
-      reflectionDepth: cell.top + cell.height - cell.footY,
-    });
-    if (state.renderer === "cpu" || !drawOnGpu(buffer, entry, env, cell)) {
-      paintCloud(buffer, cloud, cell.footX, cell.footY);
+    const parts = volumeGl === null ? undefined : entry.instance.volumes?.(env);
+    const onGpu = state.renderer !== "cpu" && parts !== undefined && parts.length > 0;
+    if (onGpu) {
+      gpuBodies += 1;
+      if (state.renderer === "diff" && volumeGl !== null) {
+        mismatched += diffBody(volumeGl, buffer, entry.instance, env, cell);
+      } else {
+        jobs.push({
+          parts,
+          overlay: entry.instance.overlay?.(env) ?? [],
+          footX: cell.footX,
+          footY: cell.footY,
+        });
+      }
+      return;
     }
+    // Species that are rope or particles, and every body when the machine has
+    // no WebGL2, take the CPU path that has always worked.
+    paintCloud(
+      buffer,
+      stageTree(entry.instance, env, {
+        shadow: state.shadow,
+        elevation: state.elevation,
+        reflection: state.reflection,
+        // The water is only the band below the foot; a reflection longer than
+        // that lands on dry ground and reads as scattered litter.
+        reflectionDepth: cell.top + cell.height - cell.footY,
+      }),
+      cell.footX,
+      cell.footY,
+    );
   });
 
   if (state.rain > 0) {
@@ -252,6 +177,13 @@ function render(): void {
   canvas.style.width = `${grid.width * state.zoom}px`;
   canvas.style.height = `${grid.height * state.zoom}px`;
   context?.putImageData(new ImageData(buffer.data, grid.width, grid.height), 0, 0);
+  if (volumeGl !== null && context !== null) {
+    blitJobs(volumeGl, context, jobs, {
+      shadow: state.shadow,
+      light: lightVector(state.lightAngle),
+      elevation: state.elevation,
+    });
+  }
 }
 
 /** Drops as short streaks leaning by exactly the slant they are travelling on. */

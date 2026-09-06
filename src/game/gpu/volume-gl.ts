@@ -39,7 +39,15 @@
 
 import type { Box, VolumeLight, VolumeSpec } from "../procgen/volume";
 import { volumeBox } from "../procgen/volume";
-import { volumeUniforms, type VolumeUniforms } from "./volume-uniforms";
+import {
+  burnUniforms,
+  HEAT_TEXTURE_UNIT,
+  shadowBox,
+  volumeUniforms,
+  type VolumeShadow,
+  type VolumeUniforms,
+} from "./volume-uniforms";
+import type { HeatGrid } from "../burnable";
 import { VOLUME_FRAGMENT_SHADER, VOLUME_VERTEX_SHADER } from "./volume-shader";
 
 export interface VolumeGl {
@@ -47,6 +55,8 @@ export interface VolumeGl {
   readonly gl: WebGL2RenderingContext;
   readonly program: WebGLProgram;
   readonly locations: Map<string, WebGLUniformLocation | null>;
+  /** One texture, reused: a burning body re-uploads it, nothing else binds it. */
+  readonly heatTexture: WebGLTexture | null;
 }
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader | null {
@@ -105,7 +115,18 @@ export function createVolumeGl(): VolumeGl | null {
   gl.enableVertexAttribArray(attribute);
   gl.vertexAttribPointer(attribute, 2, gl.FLOAT, false, 0, 0);
 
-  return { canvas, gl, program, locations: new Map() };
+  // NEAREST and clamped, because a texel is a *cell* rather than a sample of
+  // something continuous: filtering it would blur the fire across cell borders
+  // and stop the GPU agreeing with the CPU's map lookup.
+  const heatTexture = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0 + HEAT_TEXTURE_UNIT);
+  gl.bindTexture(gl.TEXTURE_2D, heatTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  return { canvas, gl, program, locations: new Map(), heatTexture };
 }
 
 function locate(renderer: VolumeGl, name: string): WebGLUniformLocation | null {
@@ -150,6 +171,23 @@ function applyUniforms(renderer: VolumeGl, uniforms: VolumeUniforms): void {
   set("u_normalEpsilon", (l) => gl.uniform1f(l, uniforms.u_normalEpsilon));
   set("u_flat", (l) => gl.uniform1i(l, uniforms.u_flat));
   set("u_dither", (l) => gl.uniform1i(l, uniforms.u_dither));
+  set("u_shadowOn", (l) => gl.uniform1i(l, uniforms.u_shadowOn));
+  set("u_shadowSpread", (l) => gl.uniform1f(l, uniforms.u_shadowSpread));
+  set("u_shadowSlope", (l) => gl.uniform1f(l, uniforms.u_shadowSlope));
+  set("u_shadowSquash", (l) => gl.uniform1f(l, uniforms.u_shadowSquash));
+  set("u_shadowSoftness", (l) => gl.uniform1f(l, uniforms.u_shadowSoftness));
+  set("u_shadowSeed", (l) => gl.uniform1i(l, uniforms.u_shadowSeed));
+  set("u_heatOn", (l) => gl.uniform1i(l, uniforms.u_heatOn));
+  set("u_heat", (l) => gl.uniform1i(l, uniforms.u_heat));
+  set("u_heatOrigin", (l) => gl.uniform2f(l, uniforms.u_heatOrigin[0], uniforms.u_heatOrigin[1]));
+  set("u_heatSize", (l) => gl.uniform2f(l, uniforms.u_heatSize[0], uniforms.u_heatSize[1]));
+  set("u_heatCell", (l) => gl.uniform1f(l, uniforms.u_heatCell));
+  set("u_emberRamp", (l) => gl.uniform3fv(l, uniforms.u_emberRamp));
+  set("u_emberSteps", (l) => gl.uniform1i(l, uniforms.u_emberSteps));
+  set("u_charColor", (l) =>
+    gl.uniform3f(l, uniforms.u_charColor[0], uniforms.u_charColor[1], uniforms.u_charColor[2]),
+  );
+  set("u_heatFlicker", (l) => gl.uniform1i(l, uniforms.u_heatFlicker));
 }
 
 export interface VolumeDraw {
@@ -165,13 +203,65 @@ export interface VolumeDraw {
  * `box.left, box.top`. No readback here: a caller that only wants it on screen
  * can use the canvas directly as a texture or a `drawImage` source.
  */
+export interface VolumeBurn {
+  readonly grid: HeatGrid;
+  readonly elapsedMs: number;
+  readonly seed: number;
+}
+
 export function drawVolume(
   renderer: VolumeGl,
   spec: VolumeSpec,
   light: VolumeLight,
   clip?: Partial<Box>,
+  burn?: VolumeBurn,
 ): VolumeDraw {
-  const box = { ...volumeBox(spec), ...clip };
+  return render(renderer, spec, light, { ...volumeBox(spec), ...clip }, undefined, burn);
+}
+
+/** Upload the fire's current state. A few hundred texels; cheaper than diffing. */
+function uploadHeat(renderer: VolumeGl, grid: HeatGrid): void {
+  const { gl } = renderer;
+  gl.activeTexture(gl.TEXTURE0 + HEAT_TEXTURE_UNIT);
+  gl.bindTexture(gl.TEXTURE_2D, renderer.heatTexture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    grid.width,
+    grid.height,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    grid.data,
+  );
+}
+
+/**
+ * Render the body's shadow onto the ground, as its own pass over the same field.
+ *
+ * A different rectangle and a different question — "which body pixel would have
+ * darkened this patch of ground" — but the same lobes, so the shadow cannot
+ * drift from the thing casting it. The result is `void` pixels, which punch a
+ * hole in whatever lit ground is composited underneath.
+ */
+export function drawVolumeShadow(
+  renderer: VolumeGl,
+  spec: VolumeSpec,
+  light: VolumeLight,
+  shadow: VolumeShadow,
+): VolumeDraw {
+  return render(renderer, spec, light, shadowBox(spec, shadow), shadow);
+}
+
+function render(
+  renderer: VolumeGl,
+  spec: VolumeSpec,
+  light: VolumeLight,
+  box: Box,
+  shadow?: VolumeShadow,
+  burn?: VolumeBurn,
+): VolumeDraw {
   const width = Math.max(1, box.right - box.left + 1);
   const height = Math.max(1, box.bottom - box.top + 1);
 
@@ -182,7 +272,19 @@ export function drawVolume(
   }
   gl.viewport(0, 0, width, height);
   gl.useProgram(renderer.program);
-  applyUniforms(renderer, volumeUniforms(spec, light, box));
+  if (burn !== undefined) {
+    uploadHeat(renderer, burn.grid);
+  }
+  applyUniforms(
+    renderer,
+    volumeUniforms(
+      spec,
+      light,
+      box,
+      shadow,
+      burn === undefined ? undefined : burnUniforms(burn.grid, burn.elapsedMs, burn.seed),
+    ),
+  );
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLES, 0, 6);

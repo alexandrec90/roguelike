@@ -1,24 +1,24 @@
-/** Runtime presentation for the pure vegetation models in `vegetation.ts`. */
+/**
+ * Runtime presentation for the ground cover in `vegetation.ts`.
+ *
+ * Grass only. The trees moved to `scenery-layer.ts` when the chestnut became
+ * the direction: a volumetric SDF body rendered by the shader is not a pixel
+ * cloud stroked into a `Graphics`, and the two do not belong in one layer just
+ * because both are plants.
+ */
 
 import Phaser from "phaser";
 
 import { drawCloud } from "./draw-cloud";
-import { cellFoot, terrainAt, TREE_SITES, type TreeSite } from "./field";
+import { cellFoot, terrainAt } from "./field";
 import { TILE_WIDTH } from "./projection";
-import { grassTuftCloud, treeCloud } from "./vegetation";
+import { grassTuftCloud } from "./vegetation";
 
 const RANK_GRASS = 3;
-const RANK_TREE = 7;
 
-interface DrawnTree {
-  readonly site: TreeSite;
-  readonly gfx: Phaser.GameObjects.Graphics;
-}
-
-/** One depth-sorted graphics object per field row, plus one per tree. */
+/** One depth-sorted graphics object per field row. */
 export class VegetationLayer {
   private grassRows: Phaser.GameObjects.Graphics[] = [];
-  private trees: DrawnTree[] = [];
   private groundTop = 0;
   private columns = 0;
   private rows = 0;
@@ -30,24 +30,10 @@ export class VegetationLayer {
     this.grassRows = Array.from({ length: rows }, (_, row) =>
       scene.add.graphics().setDepth(row * TILE_WIDTH + RANK_GRASS),
     );
-    this.trees = TREE_SITES.filter((site) => site.row < rows).map((site) => ({
-      site,
-      gfx: scene.add.graphics().setDepth(site.row * TILE_WIDTH + RANK_TREE),
-    }));
   }
 
   animate(elapsedMs: number): void {
     this.drawGrass(elapsedMs);
-    for (const { site, gfx } of this.trees) {
-      const foot = cellFoot(site.column, site.row, this.groundTop);
-      gfx.clear();
-      drawCloud(
-        gfx,
-        treeCloud(elapsedMs, site.seed, foot.x, foot.y),
-        foot.x + (site.offsetX ?? 0),
-        foot.y,
-      );
-    }
   }
 
   private drawGrass(elapsedMs: number): void {

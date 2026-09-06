@@ -16,8 +16,14 @@
  * instead of blinking as one.
  */
 
-import { cloudBounds, type PixelCloud } from "../ink";
-import { detailOf, type SceneryEnv, type SceneryInstance, type ScenerySpecies } from "../scenery";
+import type { PixelCloud } from "../ink";
+import {
+  detailOf,
+  type SceneryEnv,
+  type SceneryInstance,
+  type ScenerySpecies,
+  type VolumePart,
+} from "../scenery";
 import { volumeCloud } from "../procgen/volume";
 import { cycleRamp, INK_RAMPS } from "../shading";
 import { pixelHash } from "../transforms";
@@ -54,49 +60,62 @@ class MushroomRing implements SceneryInstance {
     this.caps = ring(seed);
   }
 
-  cloud(env: SceneryEnv): PixelCloud {
+  /**
+   * Stems and caps, all of them volumes.
+   *
+   * The stem is a capsule of radius 0.5 — one logical pixel wide — rather than
+   * a hand-stepped column, which is what lets the whole ring go to the GPU
+   * without the shader learning anything new. The cycled glow needs nothing new
+   * either: `cycleRamp` returns an ordinary list of inks, and a ramp is already
+   * a uniform. Palette cycling turns out to be free on both renderers.
+   */
+  volumes(env: SceneryEnv): readonly VolumePart[] {
     const detail = detailOf(env);
-    const cloud: PixelCloud = [];
+    const shading = {
+      light: env.light,
+      dither: detail.dither,
+      normalEpsilon: detail.normalEpsilon,
+      flat: detail.flat,
+    };
+    const parts: VolumePart[] = [];
     // Painter's order down the screen, so a near cap covers the far one behind
     // it rather than the ring reading as a flat scatter.
-    const sorted = [...this.caps].sort((a, b) => a.y - b.y);
-
-    for (const cap of sorted) {
-      for (let y = 0; y < cap.stem; y += 1) {
-        cloud.push({ x: cap.x, y: cap.y - y, ink: "bone" });
-      }
-      const glow = cycleRamp(INK_RAMPS.arcane, env.elapsedMs / 260 + cap.phase * 4);
-      const head = volumeCloud(
-        {
+    for (const cap of [...this.caps].sort((a, b) => a.y - b.y)) {
+      parts.push({
+        spec: {
+          weld: 0,
+          lobes: [{ x: cap.x, y: cap.y, toX: cap.x, toY: cap.y - cap.stem, radius: 0.5 }],
+        },
+        light: { ramp: ["bone"], ambient: 1, occlusion: 0, ...shading },
+        clip: { bottom: 0 },
+      });
+      parts.push({
+        spec: {
           lobes: [{ x: cap.x, y: cap.y - cap.stem - cap.radius * 0.4, radius: cap.radius }],
           weld: 0.6,
           warp: { amplitudeX: 1.2, amplitudeY: 0.8, scale: 2.4, seed: this.seed, drift: 0, octaves: 1 },
         },
-        {
-          ramp: glow,
-          light: env.light,
+        light: {
+          ramp: cycleRamp(INK_RAMPS.arcane, env.elapsedMs / 260 + cap.phase * 4),
           ambient: 0.35,
           occlusion: 0.24,
-          dither: detail.dither,
-          normalEpsilon: detail.normalEpsilon,
-          flat: detail.flat,
+          ...shading,
         },
-      );
-      for (const pixel of head) {
+        clip: { bottom: 0 },
+      });
+    }
+    return parts;
+  }
+
+  cloud(env: SceneryEnv): PixelCloud {
+    const cloud: PixelCloud = [];
+    for (const part of this.volumes(env)) {
+      for (const pixel of volumeCloud(part.spec, part.light, part.clip)) {
         cloud.push(pixel);
       }
     }
-    return trimBelowGround(cloud);
-  }
-}
-
-/** Caps sit on the ground; nothing may hang under it. */
-function trimBelowGround(cloud: PixelCloud): PixelCloud {
-  const bounds = cloudBounds(cloud);
-  if (bounds === null) {
     return cloud;
   }
-  return cloud.filter((pixel) => pixel.y <= 0);
 }
 
 export const MUSHROOM_RING: ScenerySpecies = {

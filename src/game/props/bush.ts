@@ -20,15 +20,22 @@ import type { PixelCloud } from "../ink";
 import {
   burnInk,
   burningPoints,
+  heatGrid,
   igniteAt,
   makeBurnable,
   stepBurn,
   type Burnable,
 } from "../burnable";
-import { detailOf, type SceneryEnv, type SceneryInstance, type ScenerySpecies } from "../scenery";
+import {
+  detailOf,
+  type SceneryEnv,
+  type SceneryInstance,
+  type ScenerySpecies,
+  type VolumePart,
+} from "../scenery";
 import { curlFlow } from "../procgen/noise";
 import { createMotes, moteCloud, stepMotes, type MoteField } from "../procgen/motes";
-import { lobeRing, volumeCloud, type Lobe } from "../procgen/volume";
+import { lobeRing, volumeCloud, type Lobe, type VolumeSpec } from "../procgen/volume";
 import { INK_RAMPS } from "../shading";
 import { createSway, stepSway, windAt, type Sway } from "../wind";
 
@@ -86,16 +93,67 @@ class Bush implements SceneryInstance {
     });
   }
 
+  /**
+   * The body, and the fire on it as a grid the shader can sample.
+   *
+   * The embers stay off this list: they are pooled particles rather than a
+   * volume, so they draw through the CPU cloud path on top. The *burn itself*
+   * crosses, which is the part that would otherwise pin a burning body to the
+   * CPU forever.
+   */
+  volumes(env: SceneryEnv): readonly VolumePart[] {
+    const detail = detailOf(env);
+    return [
+      {
+        spec: this.spec(this.lean, env.elapsedMs, detail.warpOctaves),
+        light: {
+          ramp: INK_RAMPS.canopy,
+          light: env.light,
+          ambient: 0.06,
+          occlusion: 0.2,
+          dither: detail.dither,
+          normalEpsilon: detail.normalEpsilon,
+          flat: detail.flat,
+        },
+        clip: { bottom: 0 },
+        burn:
+          this.burning === null
+            ? undefined
+            : { grid: heatGrid(this.burning), elapsedMs: env.elapsedMs, seed: this.seed },
+      },
+    ];
+  }
+
+  /** The embers: pooled particles, which no distance field can express. */
+  overlay(): PixelCloud {
+    return this.burning === null ? [] : moteCloud(this.embers, INK_RAMPS.ember);
+  }
+
   cloud(env: SceneryEnv): PixelCloud {
     const body = this.render(this.lean, env.light, env);
     if (this.burning === null) {
       return body;
     }
     const burnt = burnInk(this.burning, body, env.elapsedMs);
-    for (const pixel of moteCloud(this.embers, INK_RAMPS.ember)) {
+    for (const pixel of this.overlay()) {
       burnt.push(pixel);
     }
     return burnt;
+  }
+
+  private spec(lean: number, elapsedMs: number, octaves: number): VolumeSpec {
+    return {
+      lobes: this.lobes.map((lobe) => ({ ...lobe, x: lobe.x + lean })),
+      weld: 1.6,
+      warp: {
+        amplitudeX: 3.4,
+        amplitudeY: 2.6,
+        scale: 3.2,
+        seed: this.seed,
+        drift: elapsedMs / 1100 + lean * 0.5,
+        octaves,
+      },
+    };
   }
 
   private render(
@@ -105,18 +163,7 @@ class Bush implements SceneryInstance {
   ): PixelCloud {
     const detail = env === undefined ? detailOf({} as SceneryEnv) : detailOf(env);
     return volumeCloud(
-      {
-        lobes: this.lobes.map((lobe) => ({ ...lobe, x: lobe.x + lean })),
-        weld: 1.6,
-        warp: {
-          amplitudeX: 3.4,
-          amplitudeY: 2.6,
-          scale: 3.2,
-          seed: this.seed,
-          drift: (env?.elapsedMs ?? 0) / 1100 + lean * 0.5,
-          octaves: detail.warpOctaves,
-        },
-      },
+      this.spec(lean, env?.elapsedMs ?? 0, detail.warpOctaves),
       {
         ramp: INK_RAMPS.canopy,
         light,

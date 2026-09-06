@@ -23,6 +23,7 @@
  */
 
 import type { PixelCloud } from "./ink";
+import type { HeatGrid } from "./burnable";
 import type { Box, VolumeLight, VolumeSpec } from "./procgen/volume";
 import { DETAIL_TIERS, type Detail } from "./lod";
 import type { WindOptions } from "./wind";
@@ -64,6 +65,14 @@ export interface VolumePart {
   readonly spec: VolumeSpec;
   readonly light: VolumeLight;
   readonly clip?: Partial<Box>;
+  /**
+   * The fire crawling over this part, if any.
+   *
+   * The automaton itself stays on the CPU — a shader cannot walk a graph — and
+   * only its result crosses, as a texel per cell. So a burning body renders on
+   * the GPU without the fire rule being written twice.
+   */
+  readonly burn?: { readonly grid: HeatGrid; readonly elapsedMs: number; readonly seed: number };
 }
 
 export interface SceneryInstance {
@@ -86,6 +95,16 @@ export interface SceneryInstance {
    * the right answer for them anyway.
    */
   volumes?(env: SceneryEnv): readonly VolumePart[];
+  /**
+   * Pixels that are not volumes and are drawn over them — embers, sparks, motes.
+   *
+   * The companion to `volumes`: a body can be mostly a field and still carry a
+   * handful of particles, and a particle is the one thing that genuinely does
+   * not belong in a distance field. A species implementing `volumes` returns
+   * here whatever `cloud` would have drawn on top, so the GPU path loses
+   * nothing by taking it.
+   */
+  overlay?(env: SceneryEnv): PixelCloud;
 }
 
 export interface SceneryFootprint {

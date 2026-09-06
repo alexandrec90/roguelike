@@ -30,10 +30,16 @@
  *
  * Measured, rather than assumed, by the tree lab's `diff` renderer over 18
  * poses of the chestnut across three light angles: **worst case 8 pixels of
- * roughly 550, mean 1.2, and 0 in fifteen of the eighteen.** The boulder — a
- * body whose warp does not animate — is pixel-exact at every pose tried. The
- * disagreements are single pixels sitting on a dither boundary, never a change
- * of silhouette.
+ * roughly 550, mean 1.2, and 0 in fifteen of the eighteen.** The boulder, the
+ * mushroom ring and a *burning* bush — body, fire and char together — are
+ * pixel-exact at every pose tried. The disagreements are single pixels sitting
+ * on a dither boundary, never a change of silhouette.
+ *
+ * The one deliberate approximation is the **shadow**. Its inverse projection is
+ * exact per row but the rounding is not invertible — a shallow sun squashes
+ * five or six body rows onto one row of ground — so the pass walks that band in
+ * four samples instead of resolving it exactly. The parity claim above is for
+ * bodies; shadows are dithered and match by eye.
  */
 
 /** Fixed-size uniform arrays: GLSL ES 3.00 needs a compile-time bound. */
@@ -80,6 +86,25 @@ uniform float u_occlusion;
 uniform float u_normalEpsilon;
 uniform int u_flat;
 uniform int u_dither;
+
+// The fire, sampled from a texture the CPU automaton fills in (burnable.ts).
+uniform int u_heatOn;
+uniform sampler2D u_heat;
+uniform vec2 u_heatOrigin;
+uniform vec2 u_heatSize;
+uniform float u_heatCell;
+uniform vec3 u_emberRamp[${MAX_RAMP}];
+uniform int u_emberSteps;
+uniform vec3 u_charColor;
+uniform int u_heatFlicker;
+
+// The shadow pass: same field, read backwards from the ground.
+uniform int u_shadowOn;
+uniform float u_shadowSpread;
+uniform float u_shadowSlope;
+uniform float u_shadowSquash;
+uniform float u_shadowSoftness;
+uniform int u_shadowSeed;
 
 // --- transforms.ts: pixelHash -------------------------------------------------
 // Exactly the CPU hash. Math.imul is a wrapping 32-bit multiply, which is what
@@ -200,6 +225,44 @@ vec3 rampInk(float level, int x, int y) {
   return u_ramp[index];
 }
 
+// --- burnable.ts: emberInk ----------------------------------------------------
+// A second ramp walk rather than a parameter on the first, because GLSL cannot
+// pass an array to a function. The level mapping is the CPU's exactly: heat is
+// kept off the top of the ramp so the body of a fire is orange and only a
+// scatter of pixels reaches white.
+vec3 emberInk(float heat, int x, int y) {
+  float jitter = pixelHash(x, y, u_heatFlicker, 4) * 0.28;
+  float level = clamp(0.18 + heat * 0.42 + jitter, 0.0, 1.0);
+  float scaled = level * float(u_emberSteps - 1);
+  float base = floor(scaled);
+  int index = int(base) + ((scaled - base) > ditherThreshold(x, y) ? 1 : 0);
+  return u_emberRamp[clamp(index, 0, u_emberSteps - 1)];
+}
+
+/**
+ * Re-ink a pixel from the fire crawling over it, or leave it as it was.
+ *
+ * One texel per cell, sampled NEAREST, so a pixel takes the state of the cell it
+ * falls in — the same lookup burnInk does on the CPU, with a texture standing in
+ * for the map.
+ */
+vec3 burnt(vec3 colour, vec2 at, int x, int y) {
+  if (u_heatOn == 0) {
+    return colour;
+  }
+  vec2 cell = floor((at - u_heatOrigin) / u_heatCell);
+  if (cell.x < 0.0 || cell.y < 0.0 || cell.x >= u_heatSize.x || cell.y >= u_heatSize.y) {
+    return colour;
+  }
+  vec4 state = texture(u_heat, (cell + 0.5) / u_heatSize);
+  if (state.r > 0.34) {
+    return emberInk(state.r, x, y);
+  }
+  // Char is a dark ink, never the background: drawing a burnt body in the
+  // void ink deletes it rather than blackening it.
+  return state.g > 0.5 ? u_charColor : colour;
+}
+
 // The flat path: directionalLevel over the box, exactly as shading.ts computes it.
 float acrossBox(vec2 at) {
   vec2 unit = length(u_light) == 0.0 ? vec2(0.0) : normalize(u_light);
@@ -215,6 +278,54 @@ float acrossBox(vec2 at) {
   return (unit.x * at.x + unit.y * at.y - low) / span;
 }
 
+// --- trees/foliage.ts: castShadow, read backwards -----------------------------
+// The CPU walks the body and asks where each pixel lands on the ground. A
+// fragment shader has to go the other way: this fragment IS a patch of ground,
+// so invert the projection and ask which body pixel would have darkened it.
+//
+// The mapping is one-to-one per row, which is what makes the inversion possible
+// at all: every pixel at height h lands on the same ground row, shifted by the
+// same amount, so a ground row is one body row moved sideways.
+//
+// The *rounding* is not one-to-one, though: a shallow sun squashes five or six
+// body rows onto one row of ground, and the CPU draws the union of all of them.
+// Sampling the middle of that band alone drew a visibly thinner, harder shadow —
+// so this walks the band, and a ground pixel is in shadow if any height in it
+// is. Four samples is enough at every sun angle the game allows, and a shadow
+// pass is cheap next to the body it belongs to.
+void castShadow(vec2 ground) {
+  if (ground.y < 0.0 || u_shadowSpread <= 0.0) {
+    discard;
+  }
+  float perRow = 1.0 / (u_shadowSpread * u_shadowSquash);
+  float centre = ground.y / (u_shadowSpread * u_shadowSquash);
+  float height = -1.0;
+  for (int step = 0; step < 4; step++) {
+    float candidate = centre + (float(step) / 3.0 - 0.5) * perRow;
+    if (candidate <= 0.0) {
+      continue;
+    }
+    float reach = candidate * u_shadowSpread;
+    if (volumeField(vec2(ground.x - reach * u_shadowSlope, -candidate)) <= 0.0) {
+      height = candidate;
+      break;
+    }
+  }
+  if (height < 0.0) {
+    discard;
+  }
+  // Contact hardening: the further from the foot, the more of the shadow the
+  // ordered dither eats, so the edge reads as penumbra rather than as noise.
+  int gx = int(ground.x);
+  int gy = int(ground.y);
+  float falloff = min(height / 34.0, 1.0);
+  if (falloff * u_shadowSoftness
+      > ditherThreshold(gx, gy) * 0.9 + pixelHash(gx, gy, u_shadowSeed, 0) * 0.25) {
+    discard;
+  }
+  fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+}
+
 void main() {
   // WebGL measures gl_FragCoord.y from the BOTTOM and a pixel cloud measures y
   // from the top, so the row is flipped here rather than left to the caller.
@@ -224,6 +335,12 @@ void main() {
   // renders every body upside down, which is the trap this comment exists for.
   float row = u_viewport.y - 1.0 - floor(gl_FragCoord.y);
   vec2 at = u_boxOrigin + vec2(floor(gl_FragCoord.x), row);
+
+  if (u_shadowOn == 1) {
+    castShadow(at);
+    return;
+  }
+
   float distance = volumeField(at);
   if (distance > 0.0) {
     discard;
@@ -240,7 +357,9 @@ void main() {
 
   float buried = min(1.0, -distance * u_occlusion);
   float level = clamp(u_ambient + (1.0 - u_ambient) * facing - buried, 0.0, 1.0);
-  fragColor = vec4(rampInk(level, int(at.x), int(at.y)), 1.0);
+  int px = int(at.x);
+  int py = int(at.y);
+  fragColor = vec4(burnt(rampInk(level, px, py), at, px, py), 1.0);
 }
 `;
 

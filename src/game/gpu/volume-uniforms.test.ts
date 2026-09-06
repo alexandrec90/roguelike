@@ -12,7 +12,13 @@ import {
   VOLUME_FRAGMENT_SHADER,
   VOLUME_VERTEX_SHADER,
 } from "./volume-shader";
-import { packRamp, volumeUniforms } from "./volume-uniforms";
+import {
+  packRamp,
+  SHADOW_SQUASH,
+  shadowBox,
+  shadowUniforms,
+  volumeUniforms,
+} from "./volume-uniforms";
 
 const SPEC: VolumeSpec = {
   lobes: [
@@ -37,6 +43,18 @@ describe("the shader source", () => {
     expect(VOLUME_FRAGMENT_SHADER).toContain(`octave < ${MAX_OCTAVES}`);
   });
 
+  it("never names a local after a GLSL reserved word", () => {
+    // A shader only reports this at compile time, in a browser, as a blank
+    // canvas — `sample` as a loop counter cost a round trip to find. The list is
+    // the GLSL ES 3.00 reserved words a JavaScript author would reach for
+    // without a second thought.
+    const reserved = ["sample", "filter", "input", "output", "buffer", "shared", "resource", "patch"];
+    for (const word of reserved) {
+      const declaration = new RegExp(`\\b(int|float|vec[234]|bool)\\s+${word}\\b`);
+      expect(declaration.test(VOLUME_FRAGMENT_SHADER), `'${word}' is reserved in GLSL`).toBe(false);
+    }
+  });
+
   it("ports the CPU hash's constants rather than inventing a shader hash", () => {
     // The whole point of the port: a `fract(sin(dot(...)))` hash would be a
     // different lattice and therefore a visibly different tree.
@@ -55,6 +73,38 @@ describe("the uniform names", () => {
     const declared = new Set(declaredUniforms());
     const packed = new Set(Object.keys(volumeUniforms(SPEC, LIGHT, BOX)));
     expect([...packed].sort()).toEqual([...declared].sort());
+  });
+});
+
+describe("the shadow terms", () => {
+  const SUN = { light: { x: -1, y: -0.5 } };
+
+  it("leans the shadow away from the light, and the other way when it moves", () => {
+    const left = shadowUniforms(SPEC, SUN).u_shadowSlope;
+    const right = shadowUniforms(SPEC, { light: { x: 1, y: -0.5 } }).u_shadowSlope;
+    expect(left).toBeGreaterThan(0);
+    expect(right).toBeLessThan(0);
+  });
+
+  it("scales the whole shadow under a cap rather than clamping it flat", () => {
+    // The same property the CPU regression pins: cap the tallest pixel, and let
+    // everything below scale under it, or the shadow collapses onto one row.
+    const low = shadowUniforms(SPEC, { ...SUN, elevation: 0.2 }).u_shadowSpread;
+    const high = shadowUniforms(SPEC, { ...SUN, elevation: 1 }).u_shadowSpread;
+    expect(low).toBeGreaterThan(high);
+    expect(low).toBeLessThanOrEqual(26);
+  });
+
+  it("boxes the ground the shadow can reach, starting at the foot", () => {
+    const box = shadowBox(SPEC, SUN);
+    expect(box.top).toBe(0);
+    expect(box.bottom).toBeGreaterThan(0);
+    // Downwind of a light from the left, so the box must extend to the right.
+    expect(box.right).toBeGreaterThan(volumeBox(SPEC).right);
+  });
+
+  it("uses the same foreshortening the ground itself does", () => {
+    expect(SHADOW_SQUASH).toBeCloseTo((12 / 16) * 0.45, 10);
   });
 });
 
@@ -142,6 +192,11 @@ describe("packing a body", () => {
       warp: { ...SPEC.warp!, octaves: MAX_OCTAVES + 1 },
     };
     expect(() => volumeUniforms(deep, LIGHT, BOX)).toThrow(/octaves exceeds the shader/);
+  });
+
+  it("leaves the shadow pass off unless one is asked for", () => {
+    expect(volumeUniforms(SPEC, LIGHT, BOX).u_shadowOn).toBe(0);
+    expect(volumeUniforms(SPEC, LIGHT, BOX, { light: { x: -1, y: -0.5 } }).u_shadowOn).toBe(1);
   });
 
   it("refuses an empty box", () => {
