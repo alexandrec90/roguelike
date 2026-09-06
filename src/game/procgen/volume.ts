@@ -27,16 +27,29 @@ import { fbm3 } from "./noise";
 import { pixelHash } from "../transforms";
 import {
   rasterizeSdf,
+  sdCapsule,
   sdSmoothUnion,
   warpField,
   type Offset,
   type SdfField,
 } from "./sdf";
 
+/**
+ * One blob of a body: a disc, or a capsule when an end point is given.
+ *
+ * The capsule is what lets a trunk, a limb, a bone or a pipe live in the same
+ * body as the round parts, so an object is one field rather than a volume plus
+ * some line art drawn beside it. That matters more than it sounds: only a
+ * single field can be smooth-unioned, lit from one normal, and handed whole to
+ * the GPU.
+ */
 export interface Lobe {
   readonly x: number;
   readonly y: number;
   readonly radius: number;
+  /** With `toY`, the far end of a capsule. Without, the lobe is a disc. */
+  readonly toX?: number;
+  readonly toY?: number;
 }
 
 export interface WarpSpec {
@@ -82,10 +95,13 @@ export interface Box {
 
 /** The welded, warped field. Exported so a caller can subtract or union further. */
 export function volumeField(spec: VolumeSpec): SdfField {
-  const circles = spec.lobes.map((lobe): SdfField => {
-    return (x, y) => Math.hypot(x - lobe.x, y - lobe.y) - lobe.radius;
+  const parts = spec.lobes.map((lobe): SdfField => {
+    if (lobe.toX === undefined || lobe.toY === undefined) {
+      return (x, y) => Math.hypot(x - lobe.x, y - lobe.y) - lobe.radius;
+    }
+    return sdCapsule(lobe.x, lobe.y, lobe.toX, lobe.toY, lobe.radius);
   });
-  const base = sdSmoothUnion(spec.weld, ...circles);
+  const base = sdSmoothUnion(spec.weld, ...parts);
   if (spec.warp === undefined) {
     return base;
   }
@@ -115,10 +131,14 @@ export function volumeBox(spec: VolumeSpec): Box {
   // the box scan — not the normals — is where most of a render's time goes.
   const warpReach = Math.max(spec.warp?.amplitudeX ?? 0, spec.warp?.amplitudeY ?? 0) / 2;
   const pad = Math.ceil(warpReach + spec.weld + 2);
-  const left = Math.min(...spec.lobes.map((lobe) => lobe.x - lobe.radius)) - pad;
-  const right = Math.max(...spec.lobes.map((lobe) => lobe.x + lobe.radius)) + pad;
-  const top = Math.min(...spec.lobes.map((lobe) => lobe.y - lobe.radius)) - pad;
-  const bottom = Math.max(...spec.lobes.map((lobe) => lobe.y + lobe.radius)) + pad;
+  // Both ends of a capsule, or the same point twice for a disc.
+  const xs = spec.lobes.flatMap((lobe) => [lobe.x, lobe.toX ?? lobe.x]);
+  const ys = spec.lobes.flatMap((lobe) => [lobe.y, lobe.toY ?? lobe.y]);
+  const radii = spec.lobes.flatMap((lobe) => [lobe.radius, lobe.radius]);
+  const left = Math.min(...xs.map((x, index) => x - (radii[index] ?? 0))) - pad;
+  const right = Math.max(...xs.map((x, index) => x + (radii[index] ?? 0))) + pad;
+  const top = Math.min(...ys.map((y, index) => y - (radii[index] ?? 0))) - pad;
+  const bottom = Math.max(...ys.map((y, index) => y + (radii[index] ?? 0))) + pad;
   return {
     left: Math.floor(left),
     top: Math.floor(top),

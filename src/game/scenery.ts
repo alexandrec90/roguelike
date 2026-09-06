@@ -23,6 +23,7 @@
  */
 
 import type { PixelCloud } from "./ink";
+import type { Box, VolumeLight, VolumeSpec } from "./procgen/volume";
 import { DETAIL_TIERS, type Detail } from "./lod";
 import type { WindOptions } from "./wind";
 
@@ -55,11 +56,36 @@ export interface SceneryEnv {
   readonly detail?: Detail;
 }
 
+/**
+ * One volumetric body in a species' silhouette, as a description rather than as
+ * pixels — lobes, weld, warp, ramp, light, and where to clip it.
+ */
+export interface VolumePart {
+  readonly spec: VolumeSpec;
+  readonly light: VolumeLight;
+  readonly clip?: Partial<Box>;
+}
+
 export interface SceneryInstance {
   /** Advance any integrator the species owns. Species with none may omit it. */
   step?(dtMs: number, env: SceneryEnv): void;
   /** The lit pixels now, foot-anchored: (0, 0) is the base on the ground. */
   cloud(env: SceneryEnv): PixelCloud;
+  /**
+   * The body as a description the GPU can also draw, when the species is made
+   * entirely of volumes.
+   *
+   * This is what keeps the two renderers from drifting. A species that
+   * implements it builds its parts *once* and hands the same objects to
+   * `volumeCloud` on the CPU and to the shader on the GPU, so there is no
+   * second copy of "where the lobes are" to fall out of step — the only
+   * difference between the paths is who evaluates the field.
+   *
+   * Optional because plenty of species are not volumes at all: a Verlet willow
+   * is rope, a leaf swarm is particles. Those simply render on the CPU, which is
+   * the right answer for them anyway.
+   */
+  volumes?(env: SceneryEnv): readonly VolumePart[];
 }
 
 export interface SceneryFootprint {

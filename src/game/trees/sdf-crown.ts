@@ -24,9 +24,14 @@
 
 import type { PixelCloud } from "../ink";
 import { cachedPose, createPoseCache, quantize, type Detail, type PoseCache } from "../lod";
-import { rasterizeSdf, sdCapsule, sdSmoothUnion, type SdfField } from "../procgen/sdf";
 import { lobeRing, volumeCloud, type Lobe, type VolumeSpec } from "../procgen/volume";
-import { detailOf, type SceneryEnv, type SceneryInstance, type ScenerySpecies } from "../scenery";
+import {
+  detailOf,
+  type SceneryEnv,
+  type SceneryInstance,
+  type ScenerySpecies,
+  type VolumePart,
+} from "../scenery";
 import { INK_RAMPS } from "../shading";
 import { createSway, stepSway, windAt, type Sway } from "../wind";
 import { rooted } from "./foliage";
@@ -52,54 +57,74 @@ class SdfCrown implements SceneryInstance {
     );
   }
 
-  cloud(env: SceneryEnv): PixelCloud {
+  /** The pose the body is actually drawn at, snapped to the detail's quantum. */
+  private pose(env: SceneryEnv): { lean: number; drift: number; detail: Detail } {
     const detail = detailOf(env);
+    return {
+      detail,
+      lean: quantize(this.lean, detail.poseQuantum),
+      drift: quantize(env.elapsedMs / 1500, detail.poseQuantum * 0.25),
+    };
+  }
+
+  cloud(env: SceneryEnv): PixelCloud {
     // The render is snapped to whole pixels anyway, so snapping the *inputs* to
     // a quantum and caching the result is exact up to that quantum: every frame
     // between two distinct poses becomes a cache hit that draws exactly the
     // pixels a full rasterisation would have spent its time computing.
-    const lean = quantize(this.lean, detail.poseQuantum);
-    const drift = quantize(env.elapsedMs / 1500, detail.poseQuantum * 0.25);
+    const { lean, drift, detail } = this.pose(env);
     const light = `${Math.round(env.light.x * 8)},${Math.round(env.light.y * 8)}`;
-    return cachedPose(this.cache, `${lean}|${drift}|${detail.tier}|${light}`, () =>
-      this.render(lean, drift, env, detail),
-    );
-  }
-
-  private render(lean: number, drift: number, env: SceneryEnv, detail: Detail): PixelCloud {
-    const cloud = rasterizeSdf(this.woodField(lean), {
-      box: { left: -12, top: CROWN_Y + 1, right: 12, bottom: 0 },
-      ramp: INK_RAMPS.bone,
-      light: env.light,
-      ambient: 0.2,
-      occlusion: 0.22,
-      dither: detail.dither,
-      normalEpsilon: detail.normalEpsilon,
-      flat: detail.flat,
+    return cachedPose(this.cache, `${lean}|${drift}|${detail.tier}|${light}`, () => {
+      const cloud: PixelCloud = [];
+      for (const part of this.parts(lean, drift, env, detail)) {
+        for (const pixel of volumeCloud(part.spec, part.light, part.clip)) {
+          cloud.push(pixel);
+        }
+      }
+      return rooted(cloud);
     });
-    // Two rasterisations rather than one union, because the two want different
-    // ramps: a union would light the trunk with the canopy's greens.
-    for (const pixel of volumeCloud(this.canopySpec(lean, drift, detail.warpOctaves), {
-      ramp: INK_RAMPS.canopy,
+  }
+
+  volumes(env: SceneryEnv): readonly VolumePart[] {
+    const { lean, drift, detail } = this.pose(env);
+    return this.parts(lean, drift, env, detail);
+  }
+
+  /**
+   * Trunk and canopy, as two bodies rather than one.
+   *
+   * Two rather than a single union because the two want different ramps: welded
+   * into one field, the trunk would be lit from the canopy's greens. The trunk's
+   * lobes are **capsules** — the same primitive as the discs above them — which
+   * is what lets the whole tree be one description the GPU can draw, instead of
+   * a volume with some line art beside it.
+   */
+  private parts(lean: number, drift: number, env: SceneryEnv, detail: Detail): VolumePart[] {
+    const shading = {
       light: env.light,
-      ambient: 0.04,
-      occlusion: 0.13,
       dither: detail.dither,
       normalEpsilon: detail.normalEpsilon,
       flat: detail.flat,
-    })) {
-      cloud.push(pixel);
-    }
-    return rooted(cloud);
-  }
-
-  private woodField(lean: number): SdfField {
-    return sdSmoothUnion(
-      1.1,
-      sdCapsule(0, 0, lean * 0.5, CROWN_Y + 9, 2.1),
-      sdCapsule(lean * 0.5, CROWN_Y + 9, lean - 7, CROWN_Y + 1, 1.3),
-      sdCapsule(lean * 0.5, CROWN_Y + 9, lean + 8, CROWN_Y + 2, 1.3),
-    );
+    };
+    return [
+      {
+        spec: {
+          weld: 1.1,
+          lobes: [
+            { x: 0, y: 0, toX: lean * 0.5, toY: CROWN_Y + 9, radius: 2.1 },
+            { x: lean * 0.5, y: CROWN_Y + 9, toX: lean - 7, toY: CROWN_Y + 1, radius: 1.3 },
+            { x: lean * 0.5, y: CROWN_Y + 9, toX: lean + 8, toY: CROWN_Y + 2, radius: 1.3 },
+          ],
+        },
+        light: { ramp: INK_RAMPS.bone, ambient: 0.2, occlusion: 0.22, ...shading },
+        clip: { bottom: 0 },
+      },
+      {
+        spec: this.canopySpec(lean, drift, detail.warpOctaves),
+        light: { ramp: INK_RAMPS.canopy, ambient: 0.04, occlusion: 0.13, ...shading },
+        clip: { bottom: 0 },
+      },
+    ];
   }
 
   /**

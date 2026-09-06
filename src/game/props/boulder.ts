@@ -19,7 +19,13 @@
  */
 
 import type { PixelCloud } from "../ink";
-import { detailOf, type SceneryEnv, type SceneryInstance, type ScenerySpecies } from "../scenery";
+import {
+  detailOf,
+  type SceneryEnv,
+  type SceneryInstance,
+  type ScenerySpecies,
+  type VolumePart,
+} from "../scenery";
 import { lobeMound, volumeCloud, type Lobe } from "../procgen/volume";
 import { INK_RAMPS } from "../shading";
 import { pixelHash } from "../transforms";
@@ -44,51 +50,63 @@ class Boulder implements SceneryInstance {
       }));
   }
 
-  cloud(env: SceneryEnv): PixelCloud {
+  /**
+   * The boulder, described rather than drawn.
+   *
+   * `cloud` renders these on the CPU and the GPU renderer draws the very same
+   * objects, so the two paths cannot disagree about where the rock is — only
+   * about who evaluates its field.
+   */
+  volumes(env: SceneryEnv): readonly VolumePart[] {
     const detail = detailOf(env);
-    const stone = volumeCloud(
+    const shading = {
+      light: env.light,
+      dither: detail.dither,
+      normalEpsilon: detail.normalEpsilon,
+      flat: detail.flat,
+    };
+    const parts: VolumePart[] = [
       {
-        lobes: this.body,
-        weld: 1.8,
-        // A still warp: rock is lumpy but it does not breathe. Same mechanism
-        // as the canopy's, with the drift held at a constant.
-        warp: { amplitudeX: 2.6, amplitudeY: 2, scale: 4, seed: this.seed, drift: 0, octaves: detail.warpOctaves },
+        spec: {
+          lobes: this.body,
+          weld: 1.8,
+          // A still warp: rock is lumpy but it does not breathe. Same mechanism
+          // as the canopy's, with the drift held at a constant.
+          warp: {
+            amplitudeX: 2.6,
+            amplitudeY: 2,
+            scale: 4,
+            seed: this.seed,
+            drift: 0,
+            octaves: detail.warpOctaves,
+          },
+        },
+        light: { ramp: INK_RAMPS.bone, ambient: 0.1, occlusion: 0.16, ...shading },
+        clip: { bottom: 0 },
       },
-      {
-        ramp: INK_RAMPS.bone,
-        light: env.light,
-        ambient: 0.1,
-        occlusion: 0.16,
-        dither: detail.dither,
-        normalEpsilon: detail.normalEpsilon,
-        flat: detail.flat,
-      },
-      { bottom: 0 },
-    );
+    ];
+    if (this.moss.length > 0 && detail.tier !== "far") {
+      parts.push({
+        spec: {
+          lobes: this.moss,
+          weld: 1.4,
+          warp: { amplitudeX: 3.2, amplitudeY: 2.4, scale: 3, seed: this.seed + 5, drift: 0, octaves: 1 },
+        },
+        light: { ramp: INK_RAMPS.canopy, ambient: 0.2, occlusion: 0.3, ...shading },
+        clip: { bottom: -2 },
+      });
+    }
+    return parts;
+  }
 
-    if (this.moss.length === 0 || detail.tier === "far") {
-      return stone;
+  cloud(env: SceneryEnv): PixelCloud {
+    const cloud: PixelCloud = [];
+    for (const part of this.volumes(env)) {
+      for (const pixel of volumeCloud(part.spec, part.light, part.clip)) {
+        cloud.push(pixel);
+      }
     }
-    for (const pixel of volumeCloud(
-      {
-        lobes: this.moss,
-        weld: 1.4,
-        warp: { amplitudeX: 3.2, amplitudeY: 2.4, scale: 3, seed: this.seed + 5, drift: 0, octaves: 1 },
-      },
-      {
-        ramp: INK_RAMPS.canopy,
-        light: env.light,
-        ambient: 0.2,
-        occlusion: 0.3,
-        dither: detail.dither,
-        normalEpsilon: detail.normalEpsilon,
-        flat: detail.flat,
-      },
-      { bottom: -2 },
-    )) {
-      stone.push(pixel);
-    }
-    return stone;
+    return cloud;
   }
 }
 

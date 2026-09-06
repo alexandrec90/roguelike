@@ -22,6 +22,16 @@ export type Ground = (typeof GROUNDS)[number];
 
 export const ZOOMS = [1, 2, 3, 4, 6] as const;
 
+/**
+ * Which renderer draws the volumetric bodies.
+ *
+ * `diff` is the one that matters: it draws both and marks every pixel they
+ * disagree about, which is the only way to know whether the GPU port is
+ * drawing the same tree rather than a similar one.
+ */
+export const RENDERERS = ["cpu", "gpu", "diff"] as const;
+export type Renderer = (typeof RENDERERS)[number];
+
 export interface GalleryState {
   /** Wind strength multiplier, 0..2.5. */
   readonly wind: number;
@@ -42,6 +52,7 @@ export interface GalleryState {
    * continuously as it rolls closer rather than popping between versions.
    */
   readonly distance: number;
+  readonly renderer: Renderer;
   readonly shadow: boolean;
   readonly reflection: boolean;
   readonly ground: Ground;
@@ -62,6 +73,7 @@ export const DEFAULT_GALLERY: GalleryState = {
   rain: 0,
   snow: 0,
   distance: 0,
+  renderer: "cpu",
   shadow: true,
   reflection: false,
   ground: "duo",
@@ -94,6 +106,9 @@ export function parseGalleryState(search: string): GalleryState {
     rain: clamp(readNumber(params, "rain", DEFAULT_GALLERY.rain), 0, 1),
     snow: clamp(readNumber(params, "snow", DEFAULT_GALLERY.snow), 0, 1),
     distance: clamp(Math.round(readNumber(params, "far", DEFAULT_GALLERY.distance)), 0, 30),
+    renderer: (RENDERERS as readonly string[]).includes(params.get("renderer") ?? "")
+      ? (params.get("renderer") as Renderer)
+      : DEFAULT_GALLERY.renderer,
     shadow: readFlag(params, "shadow", DEFAULT_GALLERY.shadow),
     reflection: readFlag(params, "reflect", DEFAULT_GALLERY.reflection),
     ground: (GROUNDS as readonly string[]).includes(ground ?? "")
@@ -116,6 +131,7 @@ export function serializeGalleryState(state: GalleryState): string {
     rain: state.rain.toFixed(2),
     snow: state.snow.toFixed(2),
     far: String(state.distance),
+    renderer: state.renderer,
     shadow: state.shadow ? "1" : "0",
     reflect: state.reflection ? "1" : "0",
     ground: state.ground,

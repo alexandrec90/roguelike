@@ -94,6 +94,42 @@ export function paintCloud(
   }
 }
 
+/**
+ * Composite a block of RGBA bytes — what the GPU renderer hands back.
+ *
+ * Straight alpha, and fully transparent pixels are skipped rather than blended,
+ * because the shader discards outside the body and a discarded fragment is
+ * transparent black: blending it would darken whatever ground is underneath.
+ */
+export function paintRgba(
+  buffer: RasterBuffer,
+  pixels: Uint8ClampedArray,
+  size: { readonly width: number; readonly height: number },
+  originX: number,
+  originY: number,
+): void {
+  for (let row = 0; row < size.height; row += 1) {
+    for (let column = 0; column < size.width; column += 1) {
+      const from = (row * size.width + column) * 4;
+      const alpha = (pixels[from + 3] ?? 0) / 255;
+      if (alpha === 0) {
+        continue;
+      }
+      const x = originX + column;
+      const y = originY + row;
+      if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
+        continue;
+      }
+      blend(
+        buffer,
+        (y * buffer.width + x) * 4,
+        { r: pixels[from] ?? 0, g: pixels[from + 1] ?? 0, b: pixels[from + 2] ?? 0, a: alpha },
+        1,
+      );
+    }
+  }
+}
+
 function blend(buffer: RasterBuffer, offset: number, ink: Channels, alpha: number): void {
   const a = Math.min(Math.max(ink.a * alpha, 0), 1);
   if (a >= 1) {

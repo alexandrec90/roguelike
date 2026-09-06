@@ -38,6 +38,7 @@ describe("gallery state", () => {
       gust: 0.25,
       ground: "grass",
       distance: 12,
+      renderer: "diff",
       zoom: 4,
       play: false,
       solo: "sdf-crown",
@@ -56,12 +57,13 @@ describe("gallery state", () => {
   });
 
   it("ignores unparseable numbers, an unknown ground and an off-grid zoom", () => {
-    const state = parseGalleryState("?wind=lots&ground=lava&zoom=5");
+    const state = parseGalleryState("?wind=lots&ground=lava&zoom=5&renderer=vulkan");
     expect(state.wind).toBe(DEFAULT_GALLERY.wind);
     expect(state.ground).toBe(DEFAULT_GALLERY.ground);
     // A tie between two steps goes down, so a hand-typed zoom never
     // overflows the pane it has to fit in.
     expect(state.zoom).toBe(4);
+    expect(state.renderer).toBe("cpu");
   });
 
   it("leaves solo out of the URL when nothing is soloed", () => {

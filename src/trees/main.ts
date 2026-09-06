@@ -13,10 +13,15 @@
  * answers a gust the others are also feeling.
  */
 
-import { fillRect, paintCloud } from "../game/cloud-raster";
+import { fillRect, paintCloud, paintRgba, type RasterBuffer } from "../game/cloud-raster";
+import { createVolumeGl, drawVolume, readVolume, type VolumeGl } from "../game/gpu/volume-gl";
 import type { PixelCloud } from "../game/ink";
 import { particleAlpha, stepEmitter, type EmitterState } from "../game/spark-emitter";
 import { stageTree, type SceneryEnv, type SceneryInstance } from "../game/trees";
+import type { VolumePart } from "../game/scenery";
+import { volumeCloud } from "../game/procgen/volume";
+import { hexToRgb } from "../game/color";
+import { INK_COLORS } from "../game/ink";
 import { SCENERY_SPECIES } from "../game/trees";
 import { detailFor } from "../game/lod";
 import { createRain, RAIN_SLANT } from "../game/weather";
@@ -25,6 +30,7 @@ import {
   galleryLayout,
   GROUNDS,
   lightVector,
+  RENDERERS,
   paintGround,
   parseGalleryState,
   serializeGalleryState,
@@ -56,6 +62,11 @@ let entries = build(state.seed);
 let rain: EmitterState = createRain(CELL.width * COLUMNS);
 let elapsedMs = 0;
 let lastFrameMs = performance.now();
+// One context for the page. A WebGL context per body is not a performance
+// idea, it is a crash: browsers cap them at around sixteen.
+const volumeGl: VolumeGl | null = createVolumeGl();
+let mismatched = 0;
+let gpuBodies = 0;
 
 function build(seed: number): Entry[] {
   // A different seed per species, derived from the one the user sees, so
@@ -106,7 +117,102 @@ function envFor(cell: { readonly footX: number; readonly footY: number }): Scene
   };
 }
 
+/**
+ * Draw one body's volumes through the shader, and say whether it could.
+ *
+ * Returns false for a species that is not made of volumes — a Verlet willow, a
+ * leaf swarm — so the caller falls back to the CPU path that has always worked.
+ * The same is true when the machine has no WebGL2 at all.
+ */
+function drawOnGpu(
+  buffer: RasterBuffer,
+  entry: Entry,
+  env: SceneryEnv,
+  cell: { readonly footX: number; readonly footY: number },
+): boolean {
+  const parts = volumeGl === null ? undefined : entry.instance.volumes?.(env);
+  if (volumeGl === null || parts === undefined || parts.length === 0) {
+    return false;
+  }
+  gpuBodies += 1;
+
+  // In diff mode the CPU picture goes down for context and the magenta is
+  // painted over it, so a disagreement is visible where it happens.
+  if (state.renderer === "diff") {
+    paintCloud(buffer, entry.instance.cloud(env), cell.footX, cell.footY);
+  }
+
+  for (const part of parts) {
+    const draw = drawVolume(volumeGl, part.spec, part.light, part.clip);
+    const pixels = readVolume(volumeGl, draw);
+    if (state.renderer === "diff") {
+      mismatched += diffPart(buffer, part, pixels, draw, cell);
+    } else {
+      paintRgba(buffer, pixels, draw, cell.footX + draw.box.left, cell.footY + draw.box.top);
+    }
+  }
+  return true;
+}
+
+/**
+ * Compare one part's GPU output against the **CPU render of that same part**,
+ * and mark every pixel they disagree about.
+ *
+ * Per part, not against the finished buffer, and that distinction is the whole
+ * test. Diffing against the composited cell reported 132 disagreements on the
+ * chestnut, every one of them a trunk pixel the canopy had already painted
+ * over — the measurement was wrong, not the shader. A parity check has to
+ * compare like with like or it invents its own failures.
+ */
+function diffPart(
+  buffer: RasterBuffer,
+  part: VolumePart,
+  pixels: Uint8ClampedArray,
+  draw: { readonly width: number; readonly height: number; readonly box: { left: number; top: number } },
+  cell: { readonly footX: number; readonly footY: number },
+): number {
+  const reference = new Map<number, readonly [number, number, number]>();
+  for (const pixel of volumeCloud(part.spec, part.light, part.clip)) {
+    const { r, g, b } = hexToRgb(INK_COLORS[pixel.ink]);
+    reference.set((pixel.x + 512) * 4096 + (pixel.y + 512), [r, g, b]);
+  }
+
+  let differences = 0;
+  for (let row = 0; row < draw.height; row += 1) {
+    for (let column = 0; column < draw.width; column += 1) {
+      const from = (row * draw.width + column) * 4;
+      const at = { x: draw.box.left + column, y: draw.box.top + row };
+      const onGpu = (pixels[from + 3] ?? 0) > 0;
+      const onCpu = reference.get((at.x + 512) * 4096 + (at.y + 512));
+      if (!onGpu && onCpu === undefined) {
+        continue;
+      }
+      const same =
+        onGpu &&
+        onCpu !== undefined &&
+        onCpu.every((channel, index) => Math.abs(channel - (pixels[from + index] ?? 0)) <= 1);
+      if (same) {
+        continue;
+      }
+      differences += 1;
+      const x = cell.footX + at.x;
+      const y = cell.footY + at.y;
+      if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
+        continue;
+      }
+      const to = (y * buffer.width + x) * 4;
+      buffer.data[to] = 255;
+      buffer.data[to + 1] = 68;
+      buffer.data[to + 2] = 224;
+      buffer.data[to + 3] = 255;
+    }
+  }
+  return differences;
+}
+
 function render(): void {
+  mismatched = 0;
+  gpuBodies = 0;
   const visible = shown();
   const size = cellSize();
   const grid = galleryLayout(visible.length, size.width, size.height, state.solo === "" ? COLUMNS : 1);
@@ -123,7 +229,8 @@ function render(): void {
       return;
     }
     paintGround(buffer, cell, state.ground, state.seed);
-    const cloud = stageTree(entry.instance, envFor(cell), {
+    const env = envFor(cell);
+    const cloud = stageTree(entry.instance, env, {
       shadow: state.shadow,
       elevation: state.elevation,
       reflection: state.reflection,
@@ -131,7 +238,9 @@ function render(): void {
       // that lands on dry ground and reads as scattered litter.
       reflectionDepth: cell.top + cell.height - cell.footY,
     });
-    paintCloud(buffer, cloud, cell.footX, cell.footY);
+    if (state.renderer === "cpu" || !drawOnGpu(buffer, entry, env, cell)) {
+      paintCloud(buffer, cloud, cell.footX, cell.footY);
+    }
   });
 
   if (state.rain > 0) {
@@ -194,9 +303,15 @@ function updateStatus(): void {
   const active = SCENERY_SPECIES.find((species) => species.id === state.solo);
   need<HTMLElement>("clock").textContent = `${(elapsedMs / 1000).toFixed(1)} s`;
   const tier = detailFor(state.distance).tier;
+  const gpu =
+    state.renderer === "cpu"
+      ? ""
+      : ` · ${state.renderer} · ${gpuBodies} on GPU` +
+        (state.renderer === "diff" ? ` · ${mismatched} px differ` : "") +
+        (volumeGl === null ? " · no WebGL2" : "");
   need<HTMLElement>("status").textContent = active
-    ? `${active.label} — ${active.technique} · ${tier} detail`
-    : `${SCENERY_SPECIES.length} species · wind ${state.wind.toFixed(2)} · ${state.distance} rows away · ${tier} detail`;
+    ? `${active.label} — ${active.technique} · ${tier} detail${gpu}`
+    : `${SCENERY_SPECIES.length} species · wind ${state.wind.toFixed(2)} · ${state.distance} rows away · ${tier} detail${gpu}`;
   need<HTMLElement>("notes").textContent = active?.notes ?? "Click a species on the left to show it alone.";
 }
 
@@ -241,6 +356,7 @@ function syncControls(): void {
   need<HTMLInputElement>("reflect").checked = state.reflection;
   need<HTMLSelectElement>("ground").value = state.ground;
   need<HTMLSelectElement>("zoom").value = String(state.zoom);
+  need<HTMLSelectElement>("renderer").value = state.renderer;
   need<HTMLInputElement>("seed").value = String(state.seed);
   need<HTMLButtonElement>("play").textContent = state.play ? "Pause" : "Play";
   for (const button of document.querySelectorAll<HTMLButtonElement>("#species button")) {
@@ -278,6 +394,12 @@ function bindSelects(): void {
   const zoom = need<HTMLSelectElement>("zoom");
   zoom.append(...ZOOMS.map((value) => new Option(`${value}x`, String(value))));
   zoom.addEventListener("change", () => apply({ zoom: Number.parseInt(zoom.value, 10) }));
+
+  const renderer = need<HTMLSelectElement>("renderer");
+  renderer.append(...RENDERERS.map((id) => new Option(id, id)));
+  renderer.addEventListener("change", () =>
+    apply({ renderer: renderer.value as GalleryState["renderer"] }),
+  );
 }
 
 function onKey(event: KeyboardEvent): void {
@@ -330,6 +452,7 @@ declare global {
       advance: (ms: number) => number;
       ignite: () => number;
       species: () => readonly { id: string; label: string; technique: string }[];
+      parity: () => { bodies: number; mismatched: number; webgl2: boolean };
       snapshot: () => string;
     };
   }
@@ -362,6 +485,7 @@ window.treeGallery = {
     return shown().length;
   },
   species: () => SCENERY_SPECIES.map(({ id, label, technique }) => ({ id, label, technique })),
+  parity: () => ({ bodies: gpuBodies, mismatched, webgl2: volumeGl !== null }),
   snapshot: () => canvas.toDataURL("image/png"),
 };
 
