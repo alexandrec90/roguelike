@@ -19,6 +19,7 @@ import { SkyLayer } from "./sky-layer";
 import { FAR_PINE_FRAMES, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { openGround } from "./terrain";
 import { installPixelTexture } from "./textures";
+import { SceneryLayer } from "./scenery-layer";
 import { VegetationLayer } from "./vegetation-layer";
 import { anchorFoot, walkableBand } from "./viewport";
 import { WaterLayer } from "./water-layer";
@@ -94,6 +95,7 @@ export class DemoScene extends Phaser.Scene {
   private readonly sky = new SkyLayer();
   private readonly ground = new GroundLayer();
   private readonly vegetation = new VegetationLayer();
+  private readonly scenery = new SceneryLayer();
   private readonly water = new WaterLayer();
   private elapsedMs = 0;
   /** Scanlines of the render target the window is showing; the rest is clipped. */
@@ -115,6 +117,7 @@ export class DemoScene extends Phaser.Scene {
     this.hero.create(this, this.layout.groundTop, this.anchor);
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
+    this.scenery.create(this, this.bounds);
     this.water.create(this);
     this.createProps();
     this.createWeather();
@@ -145,6 +148,7 @@ export class DemoScene extends Phaser.Scene {
     const pose = this.hero.groundPose();
     this.ground.draw(frame, pose);
     this.vegetation.animate(frame, pose, this.elapsedMs);
+    this.scenery.animate(frame, pose, delta, this.elapsedMs);
     this.water.relocate(frame, pose, localReach(this.bounds));
     this.drawProps(frame, pose);
 
@@ -185,6 +189,7 @@ export class DemoScene extends Phaser.Scene {
     this.hero.setAnchor(this.anchor);
     this.ground.layout(flat, this.bounds);
     this.vegetation.layout(flat, this.bounds);
+    this.scenery.layout(this.bounds);
   }
 
   private createProps(): void {

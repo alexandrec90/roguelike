@@ -9,7 +9,7 @@ import {
   textureKey,
   type AssetEntry,
 } from "./asset-registry";
-import { validateRegistry } from "./asset-rules";
+import { validateRegistry } from "./asset-registry";
 
 const TWO_FRAMES: AssetEntry = {
   id: "probe",

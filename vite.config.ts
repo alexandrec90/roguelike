@@ -50,10 +50,13 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       rollupOptions: {
-        // Two pages: the scene, and the asset lab that inspects what the scene draws.
+        // Three pages: the scene, the asset lab that inspects what the scene
+        // draws, and the tree lab where competing procedural mechanisms are
+        // compared side by side under one wind.
         input: {
           main: resolve(import.meta.dirname, "index.html"),
           lab: resolve(import.meta.dirname, "lab.html"),
+          trees: resolve(import.meta.dirname, "trees.html"),
         },
       },
     },

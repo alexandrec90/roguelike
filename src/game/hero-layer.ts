@@ -48,13 +48,10 @@ import {
   type PlayerState,
   type World,
 } from "./player";
-import { rowAtFoot, TILE_WIDTH } from "./projection";
+import { RANK, rowAtFoot, TILE_WIDTH } from "./projection";
 import { renderModel, samplePose, type RigPose } from "./rig";
 import { MAX_STEP_MS } from "./spark-emitter";
 import { isRockAt } from "./terrain";
-
-/** Rank within a row, on the scene's shared `row * TILE_WIDTH + rank` order. */
-const RANK_ACTOR = 8;
 
 export interface Foot {
   readonly x: number;
@@ -173,7 +170,9 @@ export class HeroLayer {
       flipX: this.player.flipX,
     });
 
-    this.gfx.setDepth(Math.round(rowAtFoot(this.foot.y, this.groundTop)) * TILE_WIDTH + RANK_ACTOR);
+    this.gfx.setDepth(
+      Math.round(rowAtFoot(this.foot.y, this.groundTop)) * TILE_WIDTH + RANK.actor,
+    );
     this.gfx.clear();
     drawCloud(this.gfx, this.cloud, this.foot.x, this.foot.y);
   }

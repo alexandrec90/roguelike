@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
 import { assetFrame, findAsset, textureKey, type AssetEntry } from "../game/asset-registry";
-import { validateRegistry } from "../game/asset-rules";
+import { validateRegistry } from "../game/asset-registry";
 import { integerScale } from "../game/integer-scale";
 import { installAssetTextures, TILE_PREVIEW_COLUMNS, TILE_PREVIEW_ROWS } from "../game/textures";
 import { filmstripCells, splitPanes, type Rect } from "./lab-layout";

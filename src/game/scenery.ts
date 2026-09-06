@@ -1,0 +1,140 @@
+/**
+ * What a piece of scenery *is*: a seeded generator plus a per-frame pose.
+ *
+ * This started as the tree contract and moved up a level the moment a rock
+ * wanted the same volumetric body the chestnut crown uses. Trees and props are
+ * not different kinds of thing here — both are "a seed makes a shape, a clock
+ * poses it, and the result is a pixel cloud" — so both implement this, and
+ * everything downstream (the labs, the shadow, the reflection, the burn, the
+ * detail budget) is written once against it.
+ *
+ * The split inside it is the important part:
+ *
+ * - `create(seed)` builds whatever static structure the species needs — lobes,
+ *   a fractal skeleton, a colonized branch graph, Verlet chains, a particle
+ *   pool. Once, and allowed to be expensive.
+ * - `step` advances any integrator it owns, and `cloud` returns the lit pixels
+ *   for right now. `cloud` never mutates; two calls at one moment agree.
+ *
+ * Because the output is a plain `PixelCloud`, everything the game already owns
+ * applies for free: `shadeCloud` lights it, `reflectCloud` puts it in a puddle,
+ * `burnable.ts` sets it on fire, a palette variant turns it to autumn, and the
+ * asset lab bakes it to a filmstrip without knowing which mechanism drew it.
+ */
+
+import type { PixelCloud } from "./ink";
+import type { HeatGrid } from "./burnable";
+import type { Box, VolumeLight, VolumeSpec } from "./procgen/volume";
+import { DETAIL_TIERS, type Detail } from "./lod";
+import type { WindOptions } from "./wind";
+
+export type SceneryKind = "tree" | "prop";
+
+export interface SceneryEnv {
+  readonly elapsedMs: number;
+  readonly wind: WindOptions;
+  /** Screen-space light; +y is down, matching cloud coordinates. */
+  readonly light: { readonly x: number; readonly y: number };
+  /** Where it stands, so the wind wave reaches it at the right moment. */
+  readonly fieldX: number;
+  readonly fieldY: number;
+  /**
+   * What the sky is doing, 0..1 each.
+   *
+   * Weather is an *input to the model*, not a layer drawn over it: snow
+   * accumulates on the upward-facing surfaces a species can compute, rain
+   * darkens and weighs down what it lands on. A species free to ignore both
+   * does, and the field costs it nothing.
+   */
+  readonly weather?: { readonly rain?: number; readonly snow?: number };
+  /**
+   * How much work this body is worth right now (`lod.ts`).
+   *
+   * A species that honours it evaluates the *same* field more cheaply — never a
+   * different, simpler model — so a body gains detail continuously as the
+   * player walks toward it instead of popping between versions of itself.
+   */
+  readonly detail?: Detail;
+}
+
+/**
+ * One volumetric body in a species' silhouette, as a description rather than as
+ * pixels — lobes, weld, warp, ramp, light, and where to clip it.
+ */
+export interface VolumePart {
+  readonly spec: VolumeSpec;
+  readonly light: VolumeLight;
+  readonly clip?: Partial<Box>;
+  /**
+   * The fire crawling over this part, if any.
+   *
+   * The automaton itself stays on the CPU — a shader cannot walk a graph — and
+   * only its result crosses, as a texel per cell. So a burning body renders on
+   * the GPU without the fire rule being written twice.
+   */
+  readonly burn?: { readonly grid: HeatGrid; readonly elapsedMs: number; readonly seed: number };
+}
+
+export interface SceneryInstance {
+  /** Advance any integrator the species owns. Species with none may omit it. */
+  step?(dtMs: number, env: SceneryEnv): void;
+  /** The lit pixels now, foot-anchored: (0, 0) is the base on the ground. */
+  cloud(env: SceneryEnv): PixelCloud;
+  /**
+   * The body as a description the GPU can also draw, when the species is made
+   * entirely of volumes.
+   *
+   * This is what keeps the two renderers from drifting. A species that
+   * implements it builds its parts *once* and hands the same objects to
+   * `volumeCloud` on the CPU and to the shader on the GPU, so there is no
+   * second copy of "where the lobes are" to fall out of step — the only
+   * difference between the paths is who evaluates the field.
+   *
+   * Optional because plenty of species are not volumes at all: a Verlet willow
+   * is rope, a leaf swarm is particles. Those simply render on the CPU, which is
+   * the right answer for them anyway.
+   */
+  volumes?(env: SceneryEnv): readonly VolumePart[];
+  /**
+   * Pixels that are not volumes and are drawn over them — embers, sparks, motes.
+   *
+   * The companion to `volumes`: a body can be mostly a field and still carry a
+   * handful of particles, and a particle is the one thing that genuinely does
+   * not belong in a distance field. A species implementing `volumes` returns
+   * here whatever `cloud` would have drawn on top, so the GPU path loses
+   * nothing by taking it.
+   */
+  overlay?(env: SceneryEnv): PixelCloud;
+}
+
+export interface SceneryFootprint {
+  readonly width: number;
+  readonly height: number;
+  readonly originX: number;
+  readonly originY: number;
+}
+
+export interface ScenerySpecies {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: SceneryKind;
+  /** The procedural mechanism this species exists to demonstrate. */
+  readonly technique: string;
+  readonly notes: string;
+  readonly footprint: SceneryFootprint;
+  create(seed: number): SceneryInstance;
+}
+
+export const DEFAULT_SCENERY_ENV: SceneryEnv = {
+  elapsedMs: 0,
+  wind: { strength: 1, gustiness: 0.6 },
+  light: { x: -0.6, y: -0.8 },
+  fieldX: 0,
+  fieldY: 0,
+  detail: DETAIL_TIERS.near,
+};
+
+/** The budget a species should use when the caller did not name one. */
+export function detailOf(env: SceneryEnv): Detail {
+  return env.detail ?? DETAIL_TIERS.near;
+}

@@ -1,34 +1,20 @@
 /**
- * The shape rules the asset catalogue holds to.
+ * The structural rules the asset catalogue holds to.
  *
- * Split from `asset-registry.ts` when that file crossed the module size cap,
- * along the seam its own imports drew: the registry is *data*, and this is what
- * that data must be true of. Adding an asset still means adding an entry there
- * and nothing here - which is the whole point of keeping the two apart, because
- * the file an agent edits every week should not also be the file holding a
- * hundred lines of validation it never reads.
+ * Kept apart from the catalogue itself because the two change for different
+ * reasons and at different rates: entries are added weekly, rules almost never.
+ * The rules are what turn "the palette variant silently did nothing" into a
+ * failing test rather than a puzzling screenshot, so they are worth reading on
+ * their own rather than at the bottom of four hundred lines of data.
  *
- * Every rule here is one an eye cannot check. A palette swap aimed at a token
- * the sprite stopped using renders in the authored colour and looks *fine*; a
- * variant list that lost its authored entry silently makes the lab open on a
- * recolour. Both fail a test instead, which is the only reason they are found.
+ * Problems are returned rather than thrown, so one test reports all of them at
+ * once: a registry that is wrong five ways should not need five runs to say so.
  */
 
+import { AUTHORED_VARIANT_ID, type AssetEntry, type PaletteVariant } from "./asset-types";
 import { rasterizeSprite } from "./pixel-art";
-import {
-  ASSET_REGISTRY,
-  AUTHORED_VARIANT_ID,
-  type AssetEntry,
-  type PaletteVariant,
-} from "./asset-registry";
 
-/**
- * Every structural rule the catalogue holds to, as a list of problems.
- *
- * Returned rather than thrown so one test can report all of them at once; a
- * registry that fails five ways should not need five runs to find out.
- */
-export function validateRegistry(registry: readonly AssetEntry[] = ASSET_REGISTRY): string[] {
+export function validateRegistry(registry: readonly AssetEntry[]): string[] {
   const problems: string[] = [];
   const seen = new Set<string>();
 

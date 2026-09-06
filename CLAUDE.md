@@ -240,10 +240,59 @@ byte-identical pixels on every run: effects step from a seed in fixed 16 ms slic
 
 **To add an asset, add an entry to `ASSET_REGISTRY` (`src/game/asset-registry.ts`).**
 The lab, its texture installation, and its filmstrip are all driven from that array —
-there is no scene to edit. The structural rules over that array live beside it in
-`src/game/asset-rules.ts`, which needs none of the art imports. `validateRegistry` is
-asserted in `asset-registry.test.ts`, so a palette-swap token that no longer exists in
+there is no scene to edit. The types that array is built from are `src/game/asset-types.ts`
+and the structural rules over it are `src/game/registry-validation.ts`, which imports the
+types rather than the catalogue and so needs none of the art imports. `validateRegistry`
+is asserted in `asset-registry.test.ts`, so a palette-swap token that no longer exists in
 the sprite fails a test rather than silently rendering the authored colour.
+
+#### The tree lab
+
+`trees.html` is the second lab, and it exists because the asset lab answers "is this
+frame right" while scenery needs "is this *mechanism* right". It shows every species side
+by side under one wind and one light, so the question it is built for — does a recursive
+oak sit convincingly next to an SDF chestnut — is asked with both on screen at the same
+moment, and a change to the shared wind moves all of them at once.
+
+It also runs the GPU parity check. Every volumetric species is renderable two ways, and
+the lab renders both and diffs them: `src/game/gpu/volume-gl.ts` reads the shader back
+into pixels, the CPU path in `src/game/procgen/volume.ts` evaluates the same field, and
+the two must agree exactly. That is the only thing stopping the shader and the CPU
+drifting apart, because they are two implementations of one description.
+
+### Scenery: trees and props
+
+A tree is not a sprite and not a tile. It is **a seeded generator plus a per-frame pose**
+(`src/game/scenery.ts`), and everything downstream is written once against that contract —
+so a shadow, a reflection, a burn, a palette variant and a detail budget apply to a
+species nobody has written yet.
+
+| Module | Owns |
+| --- | --- |
+| `src/game/scenery.ts` | The contract: `ScenerySpecies` (a seed makes a shape), `SceneryInstance` (a clock poses it, `cloud` returns lit pixels), and `VolumePart` — a body as a *description* the GPU can also draw. |
+| `src/game/procgen/` | The primitives, none of which are about trees: `volume.ts` (lobes smooth-unioned into a field), `sdf.ts`, `noise.ts`, `verlet.ts` (rope and chain), `growth.ts` (space colonization), `heat.ts` (the fire automaton), `motes.ts`. |
+| `src/game/trees/` | The species — eight of them, each existing to demonstrate one mechanism — plus `foliage.ts` for what they share. |
+| `src/game/props/` | A boulder, a bush and a mushroom, built from the same three calls as a crown. |
+| `src/game/gpu/` | The volume shader (`volume-shader.ts`), its uniforms (`volume-uniforms.ts`), and the two hosts that consume it: `volume-phaser.ts` for the game, `volume-gl.ts` for the lab's readback and parity diff. |
+| `src/game/lod.ts` | The detail budget. A distant body evaluates the **same field** more cheaply — never a different, simpler model — so it gains detail as you walk toward it instead of popping. |
+| `src/game/scenery-layer.ts` | The Phaser wiring: one `GameObjects.Shader` per volume part, positioned at the body's foot and depth-sorted like anything else. |
+| `src/game/scenery-slots.ts` | Which body gets which slot, pure and tested — the pool is smaller than the planet, so a slot is *lent* to whichever tree is in reach and an incumbent keeps it. |
+
+Three things about it that are easy to break:
+
+- **A body is a game object, not a texture.** An earlier version rendered into a second
+  WebGL2 context and handed Phaser one texture, which meant one depth for all the scenery
+  and a hand-rolled behind/in-front split around the hero. Phaser accepts a context you
+  give it (`main.ts` hands it a WebGL2 one), and on that it compiles the `#version 300 es`
+  shader through `GameObjects.Shader` unchanged — so a body takes a `setDepth` and
+  interleaves with the hero for free.
+- **Phaser matches uniforms against WebGL's *active* names**, where an array is
+  `u_lobes[0]`. The bare name is silently ignored, the lobes stay at radius zero, and the
+  body draws nothing, with no error anywhere. `ARRAY_UNIFORMS` holds that in one place.
+- **A tree is a point feature, not a cell.** It has planet coordinates out of
+  `terrain.ts`, keeps its identity as the world scrolls, and is seeded and wind-sampled
+  from the *planet* point rather than from where it happens to be on screen — otherwise a
+  whole field of them re-phases every time the hero takes a step.
 
 ### Branch previews
 

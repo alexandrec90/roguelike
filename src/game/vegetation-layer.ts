@@ -1,21 +1,18 @@
 /**
- * Runtime presentation for the pure vegetation models in `vegetation.ts`.
+ * Runtime presentation for the ground cover in `vegetation.ts`.
  *
- * Two kinds of thing, and the round world treats them differently on purpose:
+ * **Grass only.** The trees moved to `scenery-layer.ts` when the volumetric
+ * crown became the direction: an SDF body evaluated by the shader is not a pixel
+ * cloud stroked into a `Graphics`, and the two do not belong in one layer just
+ * because both are plants. What is left is the half that genuinely is ground.
  *
- * - **Grass** is a property of the ground, so it is drawn on the local grid like
- *   the ground is - one tuft per cell that samples as grass, seeded from the
- *   *planet* point that cell is reading rather than from the cell's screen
- *   position, so a tuft keeps its shape as it scrolls past instead of
- *   re-rolling itself every step.
- * - **A tree** is a thing with an identity and a place, so it is a point feature
- *   with planet coordinates (`terrain.ts`), drawn at its exact local position
- *   rather than snapped to a cell. It may be, precisely because it is one sprite
- *   with a foot and not a tile that has to meet its neighbours.
- *
- * Both are drawn on the zero-phase grid and moved by the scroll, so they travel
- * with the ground to the pixel; nothing here re-derives where the world has got
- * to.
+ * Grass is a property of the ground, so it is drawn on the local grid like the
+ * ground is - one tuft per cell that samples as grass, seeded from the *planet*
+ * point that cell is reading rather than from the cell's screen position, so a
+ * tuft keeps its shape as it scrolls past instead of re-rolling itself every
+ * step. It is drawn on the zero-phase grid and moved by the scroll, so it
+ * travels with the ground to the pixel; nothing here re-derives where the world
+ * has got to.
  */
 
 import Phaser from "phaser";
@@ -28,16 +25,10 @@ import {
   type LocalBounds,
 } from "./camera";
 import { drawCloud } from "./draw-cloud";
-import { fromLocal, toLocal, type PlanetPose } from "./planet";
-import { TILE_WIDTH } from "./projection";
-import { terrainAt, treesNear } from "./terrain";
-import { grassTuftCloud, treeCloud } from "./vegetation";
-
-const RANK_GRASS = 3;
-const RANK_TREE = 7;
-
-/** Trees that can be on screen at once. Density puts about twenty in reach. */
-const TREE_POOL = 32;
+import { fromLocal, type PlanetPose } from "./planet";
+import { RANK, TILE_WIDTH } from "./projection";
+import { terrainAt } from "./terrain";
+import { grassTuftCloud } from "./vegetation";
 
 function tuftSeed(x: number, y: number): number {
   let h = Math.imul(Math.round(x) + 1, 0x9e37) ^ Math.imul(Math.round(y) + 1, 0x85eb);
@@ -45,16 +36,14 @@ function tuftSeed(x: number, y: number): number {
   return h >>> 0;
 }
 
-/** One depth-sorted graphics object per screen row, plus a pool for the trees. */
+/** One depth-sorted graphics object per screen row. */
 export class VegetationLayer {
   private scene!: Phaser.Scene;
   private grassRows: Phaser.GameObjects.Graphics[] = [];
-  private trees: Phaser.GameObjects.Graphics[] = [];
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
   create(scene: Phaser.Scene, frame: CameraFrame, bounds: LocalBounds): void {
     this.scene = scene;
-    this.trees = Array.from({ length: TREE_POOL }, () => scene.add.graphics());
     this.layout(frame, bounds);
   }
 
@@ -69,14 +58,13 @@ export class VegetationLayer {
       this.scene.add
         .graphics()
         .setDepth(
-          Math.round(localRow(flat, { x: 0, y: bounds.minY + index })) * TILE_WIDTH + RANK_GRASS,
+          Math.round(localRow(flat, { x: 0, y: bounds.minY + index })) * TILE_WIDTH + RANK.grass,
         ),
     );
   }
 
   animate(frame: CameraFrame, pose: PlanetPose, elapsedMs: number): void {
     this.drawGrass(frame, pose, elapsedMs);
-    this.drawTrees(frame, pose, elapsedMs);
   }
 
   /**
@@ -106,42 +94,6 @@ export class VegetationLayer {
         const seed = tuftSeed(planet.x, planet.y);
         drawCloud(gfx, grassTuftCloud(elapsedMs, seed, foot.x, foot.y), foot.x, foot.y);
       }
-    }
-  }
-
-  /**
-   * Every tree in reach, at its exact local position.
-   *
-   * Depth is taken from where it actually stands rather than from a row index,
-   * because it does not stand on a row: a tree three-quarters of the way between
-   * two of them has to sort as three-quarters, or it swaps in front of the hero
-   * a whole step early.
-   */
-  private drawTrees(frame: CameraFrame, pose: PlanetPose, elapsedMs: number): void {
-    const reach = Math.max(this.bounds.maxX - this.bounds.minX, this.bounds.maxY - this.bounds.minY);
-    const features = treesNear(pose, reach);
-    let drawn = 0;
-
-    for (const feature of features) {
-      const gfx = this.trees[drawn];
-      if (gfx === undefined) {
-        break;
-      }
-      const local = toLocal(pose, feature);
-      if (local.y < this.bounds.minY - 1 || local.y > this.bounds.maxY + 1) {
-        continue;
-      }
-      const foot = localFoot(frame, local);
-      gfx
-        .clear()
-        .setVisible(true)
-        .setDepth(Math.round(localRow(frame, local)) * TILE_WIDTH + RANK_TREE);
-      drawCloud(gfx, treeCloud(elapsedMs, feature.seed, foot.x, foot.y), foot.x, foot.y);
-      drawn += 1;
-    }
-
-    for (let index = drawn; index < this.trees.length; index += 1) {
-      this.trees[index]?.clear().setVisible(false);
     }
   }
 }

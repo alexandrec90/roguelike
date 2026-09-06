@@ -9,51 +9,28 @@
  * failing test instead of a puzzling screenshot.
  */
 
+import {
+  AUTHORED,
+  AUTHORED_VARIANT_ID,
+  type AssetEntry,
+  type PaletteVariant,
+} from "./asset-types";
 import { INK_COLORS } from "./ink";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
-import type { Palette, PixelSpriteSource } from "./pixel-art";
-import { rasterizeSprite } from "./pixel-art";
+import type { PixelSpriteSource } from "./pixel-art";
 import { samplePuddleFrames } from "./puddles";
+import { validateRegistry as checkRegistry } from "./registry-validation";
 import { sampleRippleFrames } from "./ripples";
 import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
 import { FAR_PINE_FRAMES, FAR_TOWER, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { DIRT_PATH, GRASS, WALL_FACE, WALL_SHELF, WALL_TOP } from "./tiles";
+import { TREE_ASSETS } from "./tree-assets";
 import { sampleGrassFrames, sampleTreeFrames } from "./vegetation";
 
-export type AssetCategory = "actor" | "prop" | "tile" | "effect";
-
-/** Effects are simulated rather than played frame by frame. */
-export type EffectId = "sparks";
-
-export interface PaletteVariant {
-  readonly id: string;
-  readonly label: string;
-  /** Empty for the authored colours; otherwise token -> colour. */
-  readonly overrides: Palette;
-}
-
-export interface AssetEntry {
-  readonly id: string;
-  readonly label: string;
-  readonly category: AssetCategory;
-  readonly frames: readonly PixelSpriteSource[];
-  /** How long one frame holds when the clip plays. */
-  readonly frameDurationMs: number;
-  /** Always at least one; the first is the authored palette. */
-  readonly variants: readonly PaletteVariant[];
-  readonly effect?: EffectId;
-  readonly notes?: string;
-}
-
-export const AUTHORED_VARIANT_ID = "authored";
-
-const AUTHORED: PaletteVariant = {
-  id: AUTHORED_VARIANT_ID,
-  label: "Authored",
-  overrides: {},
-};
+export type { AssetCategory, AssetEntry, EffectId, PaletteVariant } from "./asset-types";
+export { AUTHORED, AUTHORED_VARIANT_ID } from "./asset-types";
 
 /** One swap shared by every rig entry: the bone ink re-inked to ice. */
 const FROST: PaletteVariant = { id: "frost", label: "Frozen", overrides: { w: "#a8ecff" } };
@@ -398,6 +375,7 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
       { id: "arcane", label: "Arcane", overrides: { x: "#8fe0ff" } },
     ],
   },
+  ...TREE_ASSETS,
 ];
 
 export function findAsset(
@@ -445,4 +423,13 @@ export function textureKey(
 ): string {
   const tail = suffix === "" ? "" : `:${suffix}`;
   return `asset:${entryId}:${variantId}:${frameIndex}${tail}`;
+}
+
+/**
+ * Check the catalogue against the structural rules in `registry-validation.ts`.
+ *
+ * Defaulted to this registry so a test can simply ask "is the catalogue sound".
+ */
+export function validateRegistry(registry: readonly AssetEntry[] = ASSET_REGISTRY): string[] {
+  return checkRegistry(registry);
 }
