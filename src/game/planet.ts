@@ -59,12 +59,52 @@ export const PLANET_TILES = 256;
 
 /**
  * Radius of the sideways circle, in tiles - the one knob that sets how fast the
- * horizon spins. A lap is `2 * pi * radius`, so 19 is about 120 tiles.
+ * horizon spins. A lap is `2 * pi * radius`, so 512 is about 3200 tiles.
  *
- * Small radii turn hard: at 19 a single sideways step is roughly 3 degrees and
- * the field visibly swings. Large ones approach a plain sideways scroll.
+ * Small radii turn hard: at 19 a single sideways step was roughly 3 degrees and
+ * the field visibly swung. Large ones approach a plain sideways scroll.
+ *
+ * ## Why this is 512 and not 19
+ *
+ * Because the *ground* cannot show a turn smoothly, and at a tight radius it
+ * showed one badly. A strafe rotates the local frame, so a point `y` tiles ahead
+ * sweeps sideways by `d * (1 + y / radius)` and a point `x` tiles to the side
+ * moves in **depth** by `d * x / radius` - near and far by different amounts,
+ * left and right in opposite directions. But the renderer carries a step in
+ * flight as one uniform translation (`scrollPhase` in `player.ts`), because a
+ * tile grid has no other way to slide. A translation cannot approximate a
+ * rotation, so the two agree at the start of a step and part company by its end,
+ * where the picture snaps onto the truth.
+ *
+ * Measured over every visible cell at a 320x180 target, per sideways step:
+ *
+ * | radius | up/down px | sideways snap px | horizon px/step | lap    |
+ * | ------ | ---------- | ---------------- | --------------- | ------ |
+ * | 19     | 7.46       | 10.36            | 10.72           | 119 t  |
+ * | 128    | 1.08       | 1.51             | 1.59            | 804 t  |
+ * | 288    | 0.48       | 0.67             | 0.71            | 1810 t |
+ * | 512    | 0.27       | 0.38             | 0.40            | 3217 t |
+ *
+ * Depth motion goes under half a pixel at radius 277 and *both* axes do at 474,
+ * so at 512 nothing on screen can move a whole pixel because of a strafe. The
+ * arc is then shallow enough that the straight-line slide the renderer draws is
+ * within half a pixel of the arc the simulation walks - which is why one number
+ * fixes both the visible up-and-down drift and the snap underneath it.
+ *
+ * The cost is that the turn stops reading moment to moment: the horizon moves
+ * 0.4px a step rather than 10.7. The mechanic is unchanged and exact - walking
+ * sideways still swings the heading through a full 360 and returns you to where
+ * you began (`planet.test.ts` asserts the lap closes at any radius) - it now
+ * takes 3200 tiles rather than 119. `?radius=` overrides this per load with no
+ * rebuild, which is the point of it being a knob: dial back toward 128 to watch
+ * the world turn, and know that is also where the ground starts to jump.
+ *
+ * One consequence worth knowing rather than discovering: past about 128 the
+ * pivot sits more than half a planet behind you, so "a circle whose centre is
+ * behind you" stops being a literal picture and is only a turn rate. The
+ * arithmetic is unaffected - it closes exactly at every radius tried.
  */
-export const DEFAULT_STRAFE_RADIUS = 19;
+export const DEFAULT_STRAFE_RADIUS = 512;
 
 /** Below this the circle is smaller than the screen and stops reading as straight. */
 const MIN_STRAFE_RADIUS = 3;
@@ -194,8 +234,10 @@ export interface Gait {
  *
  * The fraction matters as much as the whole: a step in flight is sampled here
  * at `distance * t` rather than lerped between its endpoints, because a strafe
- * is an arc and the chord across it is not the path. At radius 19 the two are
- * a visible distance apart by mid-step.
+ * is an arc and the chord across it is not the path. At a tight radius the two
+ * are a visible distance apart by mid-step; at the default they are not, and
+ * this stays exact anyway - a sampler that is only right for one setting of a
+ * knob is a trap for whoever turns the knob.
  *
  * Strafe first, then forward, and the order is load-bearing rather than
  * arbitrary: strafing turns the heading, so a diagonal walked this way leaves
