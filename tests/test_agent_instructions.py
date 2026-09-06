@@ -15,7 +15,7 @@ def test_visual_architecture_is_a_durable_agent_contract():
         "SVG is not a primary game-art format",
         "Use math for motion, light, particles",
         "grid-quantized translation",
-        "Keep turn simulation deterministic",
+        "simulation deterministic and independent of the presentation layer",
         "Maintain an asset-lab scene",
         "Give each agent branch its own Git worktree",
     )

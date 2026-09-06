@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  applyStride,
+  applyGait,
   DEFAULT_STRAFE_RADIUS,
   forwardOf,
   fromLocal,
@@ -22,11 +22,12 @@ const TAU = Math.PI * 2;
 const R = DEFAULT_STRAFE_RADIUS;
 const ORIGIN: PlanetPose = { x: 128, y: 128, turn: 0 };
 
-/** Walk a stride in `steps` equal slices, the way a held key does. */
+/** Walk one gait in `steps` equal slices, the way a held key does. */
 function walk(pose: PlanetPose, gait: "forward" | "strafe", steps: number): PlanetPose {
+  const one = gait === "forward" ? { forward: 1, strafe: 0 } : { forward: 0, strafe: 1 };
   let at = pose;
   for (let index = 0; index < steps; index += 1) {
-    at = applyStride(at, { gait, distance: 1 }, R);
+    at = applyGait(at, one, R);
   }
   return at;
 }
@@ -191,25 +192,35 @@ describe("stepStrafe", () => {
   });
 });
 
-describe("applyStride", () => {
+describe("applyGait", () => {
   it("walks the arc rather than the chord across it", () => {
     // Half a strafe stride is a point on the circle, not the midpoint of the
     // straight line between its ends. At radius 19 the gap is visible.
-    const half = applyStride(ORIGIN, { gait: "strafe", distance: 0.5 }, R);
-    const whole = applyStride(ORIGIN, { gait: "strafe", distance: 1 }, R);
+    const half = applyGait(ORIGIN, { forward: 0, strafe: 0.5 }, R);
+    const whole = applyGait(ORIGIN, { forward: 0, strafe: 1 }, R);
     const chordY = (ORIGIN.y + whole.y) / 2;
 
     expect(half.y).not.toBeCloseTo(chordY, 6);
     expect(pivotOf(half, R).x).toBeCloseTo(pivotOf(ORIGIN, R).x, 6);
   });
 
-  it("dispatches the two gaits to the two walks", () => {
-    expect(applyStride(ORIGIN, { gait: "forward", distance: 2 }, R)).toEqual(
-      stepForward(ORIGIN, 2),
-    );
-    expect(applyStride(ORIGIN, { gait: "strafe", distance: 2 }, R)).toEqual(
-      stepStrafe(ORIGIN, 2, R),
-    );
+  it("dispatches a single walk to the walk it is", () => {
+    expect(applyGait(ORIGIN, { forward: 2, strafe: 0 }, R)).toEqual(stepForward(ORIGIN, 2));
+    expect(applyGait(ORIGIN, { forward: 0, strafe: 2 }, R)).toEqual(stepStrafe(ORIGIN, 2, R));
+  });
+
+  it("stands perfectly still for a gait that walks neither way", () => {
+    expect(applyGait(ORIGIN, { forward: 0, strafe: 0 }, R)).toEqual(ORIGIN);
+  });
+
+  it("strafes first, so a diagonal leaves along the heading it arrives with", () => {
+    // The order is the contract: a strafe turns you, and the forward half of a
+    // diagonal is walked along the turned heading rather than the old one.
+    const diagonal = applyGait(ORIGIN, { forward: 1, strafe: 1 }, R);
+
+    expect(diagonal).toEqual(stepForward(stepStrafe(ORIGIN, 1, R), 1));
+    expect(diagonal.turn).toBeCloseTo(1 / R, 9);
+    expect(diagonal).not.toEqual(stepStrafe(stepForward(ORIGIN, 1), 1, R));
   });
 });
 

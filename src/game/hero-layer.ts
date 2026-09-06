@@ -1,7 +1,7 @@
 /**
  * The played character: input in, pixels out.
  *
- * The split this file defends is the one `CLAUDE.md` asks for - the turn
+ * The split this file defends is the one `CLAUDE.md` asks for - the movement
  * simulation is deterministic and knows nothing about the presentation. So the
  * four interesting parts live elsewhere and none of them import Phaser:
  * `keybindings.ts` says what an input means, `controls.ts` says what is held,
@@ -23,14 +23,14 @@ import Phaser from "phaser";
 
 import {
   createControls,
-  nextDirection,
+  nextHeading,
   pressButton,
   pressKey,
   releaseAll,
   releaseButton,
   releaseKey,
   spendAttack,
-  spendDirection,
+  spendHeading,
   wantsAttack,
 } from "./controls";
 import { drawCloud } from "./draw-cloud";
@@ -127,7 +127,7 @@ export class HeroLayer {
     const step = Math.min(Math.max(delta, 0), MAX_STEP_MS);
     const tick = advancePlayer(
       this.player,
-      { direction: nextDirection(this.controls), attack: wantsAttack(this.controls) },
+      { heading: nextHeading(this.controls), attack: wantsAttack(this.controls) },
       step,
       this.world,
     );
@@ -135,8 +135,8 @@ export class HeroLayer {
     if (tick.attacked) {
       spendAttack(this.controls);
     }
-    if (tick.usedDirection) {
-      spendDirection(this.controls);
+    if (tick.usedHeading) {
+      spendHeading(this.controls);
     }
     this.redraw(elapsedMs);
   }
@@ -179,18 +179,26 @@ export class HeroLayer {
   }
 
   /**
-   * Which clip, sampled where. A step samples half a walk cycle so one press is
-   * one stride, and the next press leads with the other leg.
+   * Which clips, sampled where - plural, because he can swing while he walks.
+   *
+   * The two are *layered* rather than chosen between, which `samplePose` gives
+   * for free: unkeyed channels fall through to the pose handed in as the base.
+   * `SWING` keys only the sword arm, the sword and the torso, so laying it over
+   * a walk sample leaves the legs striding and the root bobbing underneath it -
+   * one line for a combination that would otherwise be a whole second clip.
+   *
+   * A step samples half a walk cycle so one press is one stride, and the next
+   * press leads with the other leg.
    */
   private pose(elapsedMs: number): RigPose {
     const base = HERO_EQUIPPED.basePose;
-    if (this.player.activity === "attack") {
-      return samplePose(SWING, base, this.player.activityMs);
-    }
-    if (this.player.activity === "step") {
-      return samplePose(WALK, base, walkClipMs(this.player, WALK.durationMs));
-    }
-    return samplePose(IDLE, base, elapsedMs);
+    const moving =
+      this.player.motion === "step"
+        ? samplePose(WALK, base, walkClipMs(this.player, WALK.durationMs))
+        : samplePose(IDLE, base, elapsedMs);
+
+    const attackMs = this.player.attackMs;
+    return attackMs === undefined ? moving : samplePose(SWING, moving, attackMs);
   }
 
   /**

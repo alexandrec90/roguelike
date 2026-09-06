@@ -59,8 +59,8 @@ Every noun in that is a primitive that already exists or is worth building once.
 
 ## Determinism is the contract, not a nicety
 
-The asset lab must reproduce a capture byte for byte, and the turn simulation must not
-be able to disagree with the picture. So:
+The asset lab must reproduce a capture byte for byte, and the movement and combat
+simulation must not be able to disagree with the picture. So:
 
 - **Every random draw is seeded.** `pixelHash(x, y, seed, salt)` in
   `src/game/transforms.ts` is the hash; emitters take a seed in their config. A single

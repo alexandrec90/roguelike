@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { HERO_EQUIPPED, IDLE, SWING } from "./models";
+import { HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import { rasterizeSprite } from "./pixel-art";
 import { RIG_FRAME, sampleClipFrames, sampleMeltFrames } from "./rig-frames";
 
@@ -11,6 +11,20 @@ describe("sampleClipFrames", () => {
     for (const frame of frames) {
       expect(frame.rows).toHaveLength(RIG_FRAME.height);
       expect(frame.rows[0]?.length).toBe(RIG_FRAME.width);
+      expect(() => rasterizeSprite(frame)).not.toThrow();
+    }
+  });
+
+  it("plays one clip under another, so a swing can be walked", () => {
+    const swingOnly = sampleClipFrames(HERO_EQUIPPED, SWING, 8);
+    const walked = sampleClipFrames(HERO_EQUIPPED, SWING, 8, { under: WALK });
+
+    expect(walked).toHaveLength(8);
+    // Same swing on top, different legs underneath: every frame differs, and
+    // the frame box still holds all of it.
+    for (const [index, frame] of walked.entries()) {
+      expect(frame.rows).toHaveLength(RIG_FRAME.height);
+      expect(frame.rows.join("\n")).not.toBe(swingOnly[index]?.rows.join("\n"));
       expect(() => rasterizeSprite(frame)).not.toThrow();
     }
   });

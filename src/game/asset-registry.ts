@@ -122,6 +122,17 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     variants: [AUTHORED, FROST],
   },
   {
+    id: "hero-swing-walk",
+    label: "Hero — swing while walking (rig)",
+    category: "actor",
+    frames: sampleClipFrames(HERO_EQUIPPED, SWING, 8, { under: WALK }),
+    frameDurationMs: 65,
+    notes:
+      "Two tracks, one skeleton: SWING sampled onto a WALK sample. No combined clip was "
+      + "authored — the legs stride because SWING keys nothing below the waist.",
+    variants: [AUTHORED, FROST],
+  },
+  {
     id: "hero-cast",
     label: "Hero — cast (rig)",
     category: "actor",

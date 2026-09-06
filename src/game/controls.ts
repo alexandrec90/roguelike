@@ -11,19 +11,24 @@
  * - **An action can be held from several sources at once.** Space and the mouse
  *   are both bound to `attack`, and releasing one while the other is still down
  *   must not release the action. So each action holds a *set* of sources.
- * - **The newest direction wins.** Holding right and then pressing up should go
- *   up, and releasing up should resume going right — which is what a player
- *   means by it, and what a fixed axis priority (or summing to a diagonal, on a
- *   four-way grid) gets wrong.
+ * - **Both axes are read, and the newest press wins its own axis.** Holding
+ *   right and then pressing up goes up *and* right, because this is a
+ *   twin-stick game and two inputs at once mean a diagonal. Pressing left while
+ *   right is still down reverses, and releasing left resumes right — the
+ *   newest-wins rule survives, scoped to the axis the two of them share instead
+ *   of applied across all four.
  */
 
 import {
   actionForButton,
   actionForKey,
   DEFAULT_KEYBINDINGS,
-  DIRECTIONS,
+  DIRECTION_AXES,
+  HEADING_VECTOR,
+  headingOf,
   type Direction,
   type GameAction,
+  type Heading,
   type Keybindings,
   type MouseButton,
 } from "./keybindings";
@@ -43,14 +48,18 @@ export interface ControlState {
    */
   attackQueued: boolean;
   /**
-   * The last direction pressed, kept on the same terms.
+   * The heading last pressed, kept on the same terms.
    *
    * Without it a tap shorter than a frame is silently lost: press and release
    * both land between two `update` calls, so nothing is held by the time the
-   * game looks. A roguelike is played in taps, so a press owes exactly one step
-   * whether or not the key is still down when it is read.
+   * game looks. A press owes exactly one step whether or not the key is still
+   * down when it is read.
+   *
+   * Two taps in the same frame join into the diagonal they mean, rather than
+   * the second overwriting the first — a flick of up-and-right is a flick
+   * up-right even when neither key survives to the next `update`.
    */
-  queuedDirection: Direction | undefined;
+  queuedHeading: Heading | undefined;
 }
 
 export function createControls(bindings: Keybindings = DEFAULT_KEYBINDINGS): ControlState {
@@ -60,7 +69,7 @@ export function createControls(bindings: Keybindings = DEFAULT_KEYBINDINGS): Con
     pressedAt: new Map(),
     sequence: 0,
     attackQueued: false,
-    queuedDirection: undefined,
+    queuedHeading: undefined,
   };
 }
 
@@ -98,18 +107,21 @@ export function releaseAll(state: ControlState): void {
   state.held.clear();
   state.pressedAt.clear();
   state.attackQueued = false;
-  state.queuedDirection = undefined;
+  state.queuedHeading = undefined;
 }
 
 export function isHeld(state: ControlState, action: GameAction): boolean {
   return (state.held.get(action)?.size ?? 0) > 0;
 }
 
-/** The most recently pressed direction still being held, if any. */
-export function heldDirection(state: ControlState): Direction | undefined {
+/** The most recently pressed of a set of directions that is still held. */
+function newestHeld(
+  state: ControlState,
+  directions: readonly Direction[],
+): Direction | undefined {
   let newest: Direction | undefined;
   let newestAt = -1;
-  for (const direction of DIRECTIONS) {
+  for (const direction of directions) {
     const at = state.pressedAt.get(direction) ?? -1;
     if (isHeld(state, direction) && at > newestAt) {
       newest = direction;
@@ -120,17 +132,38 @@ export function heldDirection(state: ControlState): Direction | undefined {
 }
 
 /**
+ * The heading everything currently held adds up to.
+ *
+ * One winner per axis, then the two summed: up and right held together is
+ * northeast, and up plus down is whichever of the pair was pressed later rather
+ * than a cancelled-out stand still.
+ */
+export function heldHeading(state: ControlState): Heading | undefined {
+  let dx = 0;
+  let dy = 0;
+  for (const axis of DIRECTION_AXES) {
+    const held = newestHeld(state, axis);
+    if (held === undefined) {
+      continue;
+    }
+    dx += HEADING_VECTOR[held].dx;
+    dy += HEADING_VECTOR[held].dy;
+  }
+  return headingOf(dx, dy);
+}
+
+/**
  * Which way the player wants to go: what is held, or failing that the tap that
  * has not been walked yet.
  *
- * Held wins, so a queued tap never overrides the key the player is leaning on.
+ * Held wins, so a queued tap never overrides the keys the player is leaning on.
  */
-export function nextDirection(state: ControlState): Direction | undefined {
-  return heldDirection(state) ?? state.queuedDirection;
+export function nextHeading(state: ControlState): Heading | undefined {
+  return heldHeading(state) ?? state.queuedHeading;
 }
 
-export function spendDirection(state: ControlState): void {
-  state.queuedDirection = undefined;
+export function spendHeading(state: ControlState): void {
+  state.queuedHeading = undefined;
 }
 
 /**
@@ -165,10 +198,26 @@ function press(state: ControlState, action: GameAction | undefined, source: stri
     if (action === "attack") {
       state.attackQueued = true;
     } else {
-      state.queuedDirection = action;
+      state.queuedHeading = joinQueued(state.queuedHeading, action);
     }
   }
   return true;
+}
+
+/**
+ * Fold a fresh direction into the unspent tap debt.
+ *
+ * The new press owns its own axis and leaves the other one alone, so up-then-
+ * right within a single frame owes one northeast step, and up-then-down owes a
+ * step south. A direction is never the zero vector, so the fallback is
+ * unreachable and only there to keep the type honest.
+ */
+function joinQueued(queued: Heading | undefined, pressed: Direction): Heading {
+  const fresh = HEADING_VECTOR[pressed];
+  const prior = queued === undefined ? { dx: 0, dy: 0 } : HEADING_VECTOR[queued];
+  const dx = fresh.dx === 0 ? prior.dx : fresh.dx;
+  const dy = fresh.dy === 0 ? prior.dy : fresh.dy;
+  return headingOf(dx, dy) ?? pressed;
 }
 
 function release(state: ControlState, action: GameAction | undefined, source: string): boolean {

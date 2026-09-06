@@ -176,25 +176,35 @@ export function strafeLap(radius: number): number {
   return TAU * Math.max(radius, MIN_STRAFE_RADIUS);
 }
 
-/** The two walks, named. `distance` is signed: forward/right are positive. */
-export interface Stride {
-  readonly gait: "forward" | "strafe";
-  readonly distance: number;
+/**
+ * The two walks, taken together. Both distances are signed - forward and right
+ * are positive - and either may be zero.
+ *
+ * One structure rather than two, because a planet has no diagonal: pressing up
+ * and right is not a third direction, it is a forward stride and a strafe
+ * walked at the same time, and the pair is what the simulation commits to.
+ */
+export interface Gait {
+  readonly forward: number;
+  readonly strafe: number;
 }
 
 /**
- * Walk a stride, or any fraction of one.
+ * Walk a gait, or any fraction of one.
  *
  * The fraction matters as much as the whole: a step in flight is sampled here
  * at `distance * t` rather than lerped between its endpoints, because a strafe
  * is an arc and the chord across it is not the path. At radius 19 the two are
  * a visible distance apart by mid-step.
+ *
+ * Strafe first, then forward, and the order is load-bearing rather than
+ * arbitrary: strafing turns the heading, so a diagonal walked this way leaves
+ * along the heading it arrives with. Composing it the other way round would
+ * make the same two presses land somewhere the picture did not go through.
  */
-export function applyStride(pose: PlanetPose, stride: Stride, radius: number): PlanetPose {
-  if (stride.gait === "forward") {
-    return stepForward(pose, stride.distance);
-  }
-  return stepStrafe(pose, stride.distance, radius);
+export function applyGait(pose: PlanetPose, gait: Gait, radius: number): PlanetPose {
+  const turned = gait.strafe === 0 ? pose : stepStrafe(pose, gait.strafe, radius);
+  return gait.forward === 0 ? turned : stepForward(turned, gait.forward);
 }
 
 /**
