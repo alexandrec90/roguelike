@@ -15,7 +15,7 @@ import {
 import { TILE_WIDTH, type ScreenPoint } from "./projection";
 import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./spark-emitter";
 import { SkyLayer } from "./sky-layer";
-import { FAR_PINE_FRAMES, FAR_TOWER, RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
+import { RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { openGround } from "./terrain";
 import { installPixelTexture } from "./textures";
 import { SceneryLayer } from "./scenery-layer";
@@ -50,10 +50,6 @@ function installSceneTextures(scene: Phaser.Scene): void {
   );
   installPixelTexture(scene.textures, "spark", SPARK);
   installPixelTexture(scene.textures, "rain", RAIN_STREAK);
-  FAR_PINE_FRAMES.forEach((frame, index) =>
-    installPixelTexture(scene.textures, `far-pine-${index}`, frame),
-  );
-  installPixelTexture(scene.textures, "far-tower", FAR_TOWER);
 }
 
 /**
@@ -111,7 +107,7 @@ export class DemoScene extends Phaser.Scene {
     this.hero.create(this, this.layout.groundTop, this.anchor);
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
-    this.scenery.create(this, this.bounds);
+    this.scenery.create(this, this.bounds, WIDTH);
     this.water.create(this);
     this.createProps();
     this.weather.create(this, WIDTH, HEIGHT, this.layout.horizonY);
@@ -161,7 +157,7 @@ export class DemoScene extends Phaser.Scene {
       this.torchFoot,
       frame,
     );
-    this.sky.animate(this.hero.turn(), this.elapsedMs);
+    this.sky.animate(this.hero.turn());
     this.drawMap(frame, pose, delta);
   }
 
@@ -194,6 +190,7 @@ export class DemoScene extends Phaser.Scene {
     const phase = this.hero.phase();
     return {
       groundTop: this.layout.groundTop,
+      rollHeight: this.layout.rollHeight,
       footX: this.anchor.x,
       footY: this.anchor.y,
       phaseX: phase.x,
@@ -212,7 +209,7 @@ export class DemoScene extends Phaser.Scene {
     this.hero.setAnchor(this.anchor);
     this.ground.layout(flat, this.bounds);
     this.vegetation.layout(flat, this.bounds);
-    this.scenery.layout(this.bounds);
+    this.scenery.layout(this.bounds, WIDTH);
   }
 
   private createProps(): void {

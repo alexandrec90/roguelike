@@ -26,7 +26,7 @@ import {
 } from "./camera";
 import { drawCloud } from "./draw-cloud";
 import { fromLocal, type PlanetPose } from "./planet";
-import { RANK, TILE_WIDTH } from "./projection";
+import { RANK, rootedDepth } from "./projection";
 import { terrainAt } from "./terrain";
 import { grassTuftCloud } from "./vegetation";
 
@@ -54,11 +54,13 @@ export class VegetationLayer {
     }
     this.bounds = bounds;
     const flat: CameraFrame = { ...frame, phaseX: 0, phaseY: 0 };
+    // Rooted, not standing: the far rows go under the horizon band with their
+    // tiles, so grass never sprouts out of the sky above ground the roll hides.
     this.grassRows = Array.from({ length: bounds.maxY - bounds.minY + 1 }, (_unused, index) =>
       this.scene.add
         .graphics()
         .setDepth(
-          Math.round(localRow(flat, { x: 0, y: bounds.minY + index })) * TILE_WIDTH + RANK.grass,
+          rootedDepth(Math.round(localRow(flat, { x: 0, y: bounds.minY + index })), RANK.grass),
         ),
     );
   }

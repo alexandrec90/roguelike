@@ -3,10 +3,9 @@
  *
  * Everything up here lives at a *bearing* rather than at a screen x, and
  * `panorama.ts` converts. That single change is what makes the planet read as
- * round: strafe and the ridge, the stars and every distant landmark slide
- * together by the same whole number of pixels, keep sliding as you keep
- * walking, and come back round to where they started after one lap of the
- * sideways circle.
+ * round: strafe and the ridge and the stars slide together by the same whole
+ * number of pixels, keep sliding as you keep walking, and come back round to
+ * where they started after one lap of the sideways circle.
  *
  * It is also the only part of the world that shows the turn *continuously*. The
  * ground is a grid and turns in whole tiles once a step (`terrain.ts` says why);
@@ -15,13 +14,20 @@
  * measure a boulder against a mountain - and the smooth half is the half the eye
  * actually reads.
  *
- * The layers, back to front, all of them over the field:
+ * What is *not* up here any more is anything a player could walk to. The pines
+ * and towers that used to stand on the horizon line at a bearing were a painted
+ * backdrop - approach one and it never got closer. The horizon is real now: a
+ * tree on it is a feature of the planet that `scenery-layer.ts` places on the
+ * roll by distance, and it grows and comes down onto the field as the hero
+ * walks toward it. The ridge stays, because a mountain range far past the
+ * horizon is the one thing that genuinely does sit at a bearing.
  *
- *     sky bands + roll       opaque; this is what crops the world at the horizon
+ * The layers, back to front:
+ *
+ *     sky bands + roll       opaque; over the ground, under everything standing
  *     stars                  scroll with the bearing
  *     far ridge              seamless noise profile, scrolls
  *     near ridge             the same, darker and shorter
- *     pines and towers       authored art standing on the horizon line
  */
 
 import Phaser from "phaser";
@@ -36,40 +42,33 @@ import {
   type HorizonLayout,
   type Star,
 } from "./horizon";
-import {
-  bearingOffset,
-  landmarkRing,
-  landmarkX,
-  panoramaColumn,
-  panoramaRidge,
-  PANORAMA_WIDTH,
-} from "./panorama";
-import { FAR_PINE_FRAMES } from "./sprites";
+import { bearingOffset, landmarkX, panoramaColumn, panoramaRidge, PANORAMA_WIDTH } from "./panorama";
+import { HORIZON_DEPTH } from "./projection";
 
 const RIDGE_FAR = { seed: 7, base: 3, amplitude: 3, wavelength: 55, color: "#0d1830" } as const;
 const RIDGE_NEAR = { seed: 21, base: 1, amplitude: 3, wavelength: 26, color: "#08101e" } as const;
 
 /**
- * The band draws **over** the field, not behind it.
+ * The band draws **over the ground and under everything that stands on it**.
  *
- * That reads backwards and is not. The tile grid is cut to cover the render
- * target with a cell of margin on every side (`visibleLocal`), and a cell is
- * anchored by its *foot*, so the topmost row necessarily hangs above
- * `groundTop` - and it has to, or the far edge of the field tears open a
- * tile-high gap every time a stride scrolls it down. Painting the horizon on
- * top is what turns that overhang into what it should be: ground that has gone
- * over the hill. Anything else the field puts up there - a tall tree on the far
- * row, a rock cap - is beyond the horizon too, and is hidden for the same
- * reason.
+ * Over the ground, because the tile grid is cut to cover the render target with
+ * a cell of margin on every side (`visibleLocal`), and a cell is anchored by its
+ * *foot*, so the topmost row necessarily hangs above `groundTop` - and it has
+ * to, or the far edge of the field tears open a tile-high gap every time a
+ * stride scrolls it down. Painting the horizon on top of the tiles is what turns
+ * that overhang into what it should be: ground that has gone over the hill.
+ * Puddles lie on the ground and go under with it.
  *
- * Above the whole world (the deepest world rank is about 300) and below the
- * weather, which falls in front of the sky and always did.
+ * Under everything standing, because a horizon is at eye level and a tree on
+ * the far row of a flat field keeps its crown against the sky. An earlier
+ * version painted the band over the whole world, and every tree on the far
+ * rows was cropped at the horizon line as if the sky were a wall. Bodies on the
+ * roll itself sort by their affine row, which keeps decreasing with distance
+ * (`camera.ts`): `ROLL_ROWS` past a field some twenty rows deep is about
+ * seventy rows, or -1120 - so the constant is the one place the roll's depth
+ * budget is spent, and `rootedDepth` puts grass past the seam beneath it.
  */
-const BAND_DEPTH = 1000;
-
-/** Distant things, spread round the full turn rather than across one screen. */
-const PINE_COUNT = 16;
-const TOWER_COUNT = 3;
+const BAND_DEPTH = HORIZON_DEPTH;
 
 const STAR_BRIGHT = "#f2f7ff";
 const STAR_DIM = "#5e7ea6";
@@ -84,13 +83,9 @@ export class SkyLayer {
   private layout: HorizonLayout = horizonLayout(180);
   private stars: readonly Star[] = [];
   private ridges: Ridge[] = [];
-  private pineAt: readonly number[] = [];
-  private towerAt: readonly number[] = [];
 
   private starGfx!: Phaser.GameObjects.Graphics;
   private ridgeGfx!: Phaser.GameObjects.Graphics;
-  private pines: Phaser.GameObjects.Image[] = [];
-  private towers: Phaser.GameObjects.Image[] = [];
 
   create(scene: Phaser.Scene, layout: HorizonLayout, width: number): void {
     this.layout = layout;
@@ -111,23 +106,13 @@ export class SkyLayer {
       profile: panoramaRidge({ ...ridge, maxHeight: layout.horizonY }),
       color: hexToInt(ridge.color),
     }));
-
-    this.pineAt = landmarkRing(PINE_COUNT, 0x2f10);
-    this.towerAt = landmarkRing(TOWER_COUNT, 0x51c3);
-    this.pines = this.pineAt.map(() =>
-      scene.add.image(0, layout.horizonY, "far-pine-0").setOrigin(0.5, 1).setDepth(BAND_DEPTH + 3),
-    );
-    this.towers = this.towerAt.map(() =>
-      scene.add.image(0, layout.horizonY, "far-tower").setOrigin(0.5, 1).setDepth(BAND_DEPTH + 3),
-    );
   }
 
   /** One frame of horizon, for a heading. */
-  animate(turn: number, elapsedMs: number): void {
+  animate(turn: number): void {
     const offset = bearingOffset(turn);
     this.drawStars(offset);
     this.drawRidges(offset);
-    this.placeLandmarks(offset, elapsedMs);
   }
 
   private drawStars(offset: number): void {
@@ -152,29 +137,5 @@ export class SkyLayer {
         }
       }
     }
-  }
-
-  /**
-   * Pines and towers, placed by bearing and hidden when they are behind you.
-   *
-   * The margin is generous on purpose: an image with a 0.5 origin is half off
-   * the edge before it has left the screen, and a pine that vanishes a pixel
-   * early reads as a pop rather than as a walk.
-   */
-  private placeLandmarks(offset: number, elapsedMs: number): void {
-    const frameMs = 600;
-    this.pines.forEach((pine, index) => {
-      const x = landmarkX(this.pineAt[index] ?? 0, offset);
-      const frame = Math.floor((elapsedMs + index * 900) / frameMs) % FAR_PINE_FRAMES.length;
-      pine
-        .setTexture(`far-pine-${frame}`)
-        .setX(x)
-        .setVisible(x > -24 && x < this.width + 24);
-    });
-
-    this.towers.forEach((tower, index) => {
-      const x = landmarkX(this.towerAt[index] ?? 0, offset);
-      tower.setX(x).setVisible(x > -32 && x < this.width + 32);
-    });
   }
 }

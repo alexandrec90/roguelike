@@ -27,14 +27,23 @@
  * The hero himself is the one thing drawn without the phase - he is the anchor,
  * so the phase is precisely the amount the rest of the world is offset *from*
  * him.
+ *
+ * The field has a far edge, and the world does not stop there. `localFoot` is
+ * the affine answer and is right anywhere on the flat field; `localPlacement`
+ * is the whole answer, and past the far edge it hands the point to the horizon
+ * roll (`horizon.ts`), where it lands a little higher and a little smaller for
+ * every row it is further away, until the horizon line.
  */
 
+import { rollPlacement } from "./horizon";
 import type { LocalPoint } from "./planet";
 import { rowAtFoot, TILE_DEPTH, TILE_WIDTH, type ScreenPoint } from "./projection";
 
 export interface CameraFrame {
   /** First scanline of the flat playfield, from `horizonLayout`. */
   readonly groundTop: number;
+  /** Scanlines of ground rolling away above it, from the same layout. */
+  readonly rollHeight: number;
   /** The logical pixel the hero's feet stand on. Everything is measured from it. */
   readonly footX: number;
   readonly footY: number;
@@ -56,6 +65,42 @@ export function localFoot(frame: CameraFrame, local: LocalPoint): ScreenPoint {
   return {
     x: Math.round(frame.footX + (local.x - frame.phaseX) * TILE_WIDTH),
     y: Math.round(frame.footY - (local.y - frame.phaseY) * TILE_DEPTH),
+  };
+}
+
+/** Where a body stands on screen, and how large — in the field or on the roll. */
+export interface Placement extends ScreenPoint {
+  /** 1 anywhere in the flat field; `rollScale` past its far edge. */
+  readonly scale: number;
+  /** False once the point has gone over the horizon. */
+  readonly visible: boolean;
+}
+
+/**
+ * Where a local point's feet land, including past the field's far edge.
+ *
+ * `localFoot` is the flat field's answer and stops being true the moment the
+ * affine projection puts a foot above `groundTop`: that scanline is where the
+ * ground starts curving away, and a thing standing there is drawn on the roll
+ * instead — a fraction of the way up it and a fraction of its size, both by
+ * `rollPlacement`. The two answers meet exactly at the seam, so a tree walking
+ * onto the field arrives at full size on the top scanline and never pops.
+ *
+ * `x` converges on the hero's own column as a body recedes, by the same scale
+ * that shrinks it. That is perspective's convergence, applied only past the
+ * field: inside it the grid is affine and a column is a column.
+ */
+export function localPlacement(frame: CameraFrame, local: LocalPoint): Placement {
+  const affineY = frame.footY - (local.y - frame.phaseY) * TILE_DEPTH;
+  if (affineY >= frame.groundTop) {
+    return { ...localFoot(frame, local), scale: 1, visible: true };
+  }
+  const roll = rollPlacement((frame.groundTop - affineY) / TILE_DEPTH);
+  return {
+    x: Math.round(frame.footX + (local.x - frame.phaseX) * TILE_WIDTH * roll.scale),
+    y: Math.round(frame.groundTop - frame.rollHeight * roll.lift),
+    scale: roll.scale,
+    visible: !roll.beyond,
   };
 }
 

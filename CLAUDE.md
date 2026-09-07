@@ -96,7 +96,7 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 | Camera | A **pitched-back overhead** view, not a 45°-yaw diamond isometric: rows and columns stay axis-aligned and only the vertical axis is foreshortened. A 16×16 world square lands on 16×12 of screen, and height rises straight up the screen by `WALL_RISE`, which is what makes walls stand. `src/game/projection.ts` owns that math; nothing else re-derives it. The camera is **bolted to the hero and turns with him** — he never moves on screen, the planet moves under him (`src/game/camera.ts`). |
 | Grid | 16×16 tiles, and **the grid belongs to the screen, not to the world**: the planet has no lattice, so a turning camera never puts a tile on a diagonal. Author ground art **already foreshortened** — 16×`TILE_DEPTH` for anything lying on the ground, 16×`WALL_RISE` for anything standing up — so every tile blits 1:1 and nothing is scaled at draw time. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
 | Flatness | Below the horizon band the ground is **affine, not perspective**: every world row is exactly `TILE_DEPTH` scanlines tall, with no convergence and no per-row scaling. A tile's screen size never depends on how far up the screen it is. |
-| Horizon | The top of the screen **rolls over the horizon** — sky, then a short band where the ground curves away and a dozen world rows compress into a few scanlines, then the flat field. `src/game/horizon.ts` owns it, and one knob sets the split. |
+| Horizon | The top of the screen **rolls over the horizon** — sky, then a short band where the ground curves away and `ROLL_ROWS` world rows compress into a few scanlines, then the flat field. `src/game/horizon.ts` owns it, and one knob sets the split. **The horizon is real, and the band is a place rather than a backdrop.** Anything that stands is drawn over it, so a tree on the far row keeps its crown against the sky, and what is on the horizon line is a feature of the planet: a body past the field's far edge lands on the roll a little higher and a little smaller for every row it is further away (`rollPlacement`), and walking toward it makes it grow and come down onto the flat field. Nothing that a player could walk to is painted at a bearing. |
 | Identity art | **Characters are skeleton rigs**, not frame-by-frame sprites: bones posed in rig-space 3D (`src/game/rig.ts`), dressed by the authored models in `src/game/models.ts`, rasterized to pixels at draw time. Props, tiles, and effect sources stay authored palette-indexed raster sprites. All sources are text-defined and diffable; generated PNG atlases are build output. SVG is not a primary game-art format. |
 | Procedural art | Use math for motion, light, particles, world simulation and effects. Character silhouettes are procedural too — posed rigs rather than drawn frames — but they stay **authored**: proportions, gear and clips are designed by hand, and a mechanism renders them. Status effects (melt, freeze, burn, reflect) are **generic transforms over pixel clouds** (`src/game/transforms.ts`), never per-model frames. Image-generated art may guide mood and composition; it never becomes production pixels. |
 | Animation | Character actions are **clips**: sparse 3D keyframes over rig bones (`src/game/models.ts`), sampled per channel — a new attack is a handful of direction lines, not a redraw. Facing is front/back only (depth negated, front-only stamps dropped); left/right is a mirror flip. Combine silhouette-changing poses with discrete, grid-quantized translation and squash/stretch. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. Prefer **more terms over more keyframes**: what is on screen is `base pose + clip + secondary motion + reaction`, each a function of time, summed. Breathing, bob, recoil, stagger and wind are terms, not frames. |
@@ -114,8 +114,8 @@ Seven modules, and no eighth place where any of this is decided:
 | `src/game/projection.ts` | `TILE_WIDTH` 16, `TILE_DEPTH` 12, `WALL_RISE` 16, and `cellOrigin()` / `cellFoot()` / `rowAtFoot()` / `wallCapY()` / `wallFaceY()` / `depthOf()`. Draw order is `row * TILE_WIDTH + rank` — painter's algorithm down the screen. |
 | `src/game/planet.ts` | The round world: `PLANET_TILES`, the sideways circle's radius, `stepForward` / `stepStrafe` / `applyGait` (both walks at once, which is what a diagonal is), and the only conversion between planet and local coordinates (`fromLocal` / `toLocal`). |
 | `src/game/terrain.ts` | What the planet is made of, as a continuous seeded field — `terrainAt()`, `elevationAt()`, and the point features (`treesNear`, `puddlesNear`) hashed out of planet cells. |
-| `src/game/camera.ts` | The local frame on screen: the pixel the hero is nailed to, the sub-tile `scrollOffset` of a stride in flight, and `localFoot` / `localOrigin` / `localRow` — the one answer to "this is *x* tiles right and *y* ahead, where do I draw it". |
-| `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, the roll's easing, and `ridgeProfile()` for distant silhouettes — which takes a `period` when the profile has to close on itself. |
+| `src/game/camera.ts` | The local frame on screen: the pixel the hero is nailed to, the sub-tile `scrollOffset` of a stride in flight, and `localFoot` / `localOrigin` / `localRow` — the one answer to "this is *x* tiles right and *y* ahead, where do I draw it". `localPlacement` is that answer continued past the field's far edge: where on the roll a body stands, how small it is, and whether it has gone over the horizon. |
+| `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, `ridgeProfile()` for distant silhouettes — which takes a `period` when the profile has to close on itself — and the roll's projection: `ROLL_ROWS` to the horizon, `HORIZON_SCALE` at it, and `rollPlacement(rowsBeyond)` → lift and scale, the one curve both the ground's roll bands and every body standing on them are drawn from. |
 | `src/game/panorama.ts` | The horizon as a 360° loop: `PANORAMA_WIDTH` pixels to a full turn, `bearingOffset()` from a heading, and where a landmark at a bearing lands on screen. |
 | `src/game/viewport.ts` | What the window left of the render target: `visibleHeight()` (scanlines that survived the cover crop), `walkableBand()` (that, horizon roll excluded) and `anchorFoot()` (the pixel the hero — and therefore the whole world — is centred on). The one place the *window* is allowed to influence the simulation, and it now only re-frames. |
 
@@ -133,13 +133,22 @@ two cancel exactly.
 **Nothing is drawn from more than one direction, and nothing needs to be.** The player
 cannot perceive absolute rotation — the camera is bolted to the heading, so the view is
 identical at every bearing — so an object's *art* never varies with which way the world
-has turned. Only its position does. Distant landmarks are the airtight case: they sit at
-a bearing, effectively infinitely far, so the viewing angle on them cannot change at all.
-Near props are a small and safe lie — walk past a tree and you see the same sprite from
-behind, which on a broadleaf nobody can tell. The lie only shows on an *asymmetric* near
-prop (a signpost, a door), and the answer there is the rig's existing
+has turned. Only its position does. The ridge and the stars are the airtight case: they
+sit at a bearing, effectively infinitely far, so the viewing angle on them cannot change
+at all. Near props are a small and safe lie — walk past a tree and you see the same
+sprite from behind, which on a broadleaf nobody can tell. The lie only shows on an
+*asymmetric* near prop (a signpost, a door), and the answer there is the rig's existing
 `facing: front | back`, never an eight-way sprite set. This is why the round planet cost
 the art pipeline nothing.
+
+**A body past the field is the same field sampled at a smaller scale, never a shrunk
+sprite.** The horizon roll is the one place the projection makes a thing smaller for
+being far away, and it does it by handing the volume shader a `u_scale` (and the CPU
+rasteriser the same number), so every screen pixel evaluates the description at its own
+point and the dither stays locked to the screen grid. That is what lets the speck on the
+horizon and the tree the hero walks past be one object. A raster sprite cannot be drawn
+out there — it would have to be resampled — which is a reason to make scenery volumetric,
+not a reason to scale a sprite.
 
 The one thing that would break it is a light anchored to the **planet** instead of the
 screen. `shadeCloud` takes a screen-space direction, so the sun turns with the camera and
@@ -152,31 +161,12 @@ which is where the eye reads a turn anyway, and distance reconciles the two. `?r
 is the knob: turn it up until the ground's quantisation disappears, down until every
 step swings the sky.
 
-**That quantisation is not confined to the tiles, and this is the part that cost a
-session.** Read as written above, the trade sounds like it is paid by the grid alone —
-but a strafe rotates the local frame, and the renderer carries a step in flight as a
-*single uniform translation* (`scrollPhase`), so **everything drawn from the local frame
-pays it**: trees, props, puddles, the slime, the torch. Those are point features, not
-cells; they have exact planet coordinates and could follow the true arc continuously. As
-built they cannot, because they are drawn from `groundPose + scrollPhase` so the whole
-picture moves rigidly, and a translation cannot approximate a rotation. The two agree at
-the start of a step and part company by its end, where every object on screen snaps by a
-*different* amount — sideways by `d · y / radius`, and in **depth** by `d · x / radius`,
-so things left and right of the hero jump in opposite directions. At radius 19 that was
-7.5px of up-and-down and 10px of sideways per step, and it read as objects moving
-unpredictably rather than as a world turning. Walking forward is exempt, because that
-step genuinely is a translation.
-
-`DEFAULT_STRAFE_RADIUS` is 512 for exactly this reason, not for feel: depth motion goes
-sub-pixel at 277 and both axes do at 474, so at 512 nothing on screen can move a whole
-pixel because of a strafe, and the arc is shallow enough that the straight-line slide the
-renderer draws is within half a pixel of the arc the simulation walks. `map-drift.ts`
-holds that arithmetic and `map-drift.test.ts` pins it, so lowering the radius fails a
-test rather than quietly returning the jumping. **If you want a tight radius back — a
-world that visibly turns under a strafe — raising the number is not enough; the sub-step
-motion has to be drawn as the arc it is, per object, rather than as one offset for the
-whole scene.** `?map=1` draws that disagreement as a field of lines and is the fastest
-way to see whether a change helped.
+**Point features pay the same strafe quantisation as tiles.** The renderer draws
+`groundPose + scrollPhase` as one translation, which cannot follow a tight arc.
+`DEFAULT_STRAFE_RADIUS` stays at 512 to keep the resulting jumps sub-pixel;
+`map-drift.test.ts` pins that budget. Before changing turning, scrolling, or the
+radius, read [the camera-motion reference](.claude/camera-motion.md) and inspect
+`?map=1`. A tighter radius needs per-object arc motion during a step.
 
 ### The ink pipeline
 
@@ -208,11 +198,14 @@ effect vocabulary (emitters, fields, noise, automata, SDFs, decals, impulse), wh
 one is for, and the determinism rules that keep a capture reproducible.
 
 **Two knobs, neither of them a constant to inline.** `DEFAULT_SKY_FRACTION` in
-`horizon.ts` sets the 95/5 sky split and `?horizon=8%` (or `?horizon=0.08`) overrides
+`horizon.ts` sets the 88/12 sky split and `?horizon=8%` (or `?horizon=0.08`) overrides
 it per load; `DEFAULT_STRAFE_RADIUS` in `planet.ts` sets how hard the world turns
 when you walk sideways and `?radius=64` overrides that. Both are meant to be retuned by
 eye in the address bar rather than in a rebuild — though the radius is no longer *only* a
 feel decision, and the paragraph above says what it is now also holding down.
+The split grew from 5% when the horizon became real: a tree standing on the horizon
+line is drawn at `HORIZON_SCALE` of its height and needs that much sky to keep its crown
+on screen.
 
 **And one instrument: `?map=1`** (`map-overlay.ts`, `map-panels.ts`, `map-drift.ts`).
 Off on every other load, drawn on its own canvas over the game so it never enters the
@@ -226,7 +219,7 @@ There is no on-screen caption printing the resulting pixel counts — **the page
 world and nothing else**, so judge a split against the frame itself and read the numbers
 from `horizonLayout()` in the console or from `horizon.test.ts`. Read
 `horizonLayout()` for `groundTop` — never hard-code a y for the horizon, and never
-assume the flat field starts at 9px, because that number moves the moment the knob does.
+assume the flat field starts at 22px, because that number moves the moment the knob does.
 
 Two rules fall out of the projection and are easy to break by accident:
 
@@ -328,7 +321,10 @@ Three things about it that are easy to break:
 - **A tree is a point feature, not a cell.** It has planet coordinates out of
   `terrain.ts`, keeps its identity as the world scrolls, and is seeded and wind-sampled
   from the *planet* point rather than from where it happens to be on screen — otherwise a
-  whole field of them re-phases every time the hero takes a step.
+  whole field of them re-phases every time the hero takes a step. The same identity is
+  what makes the horizon real: the layer sweeps for trees out to `ROLL_ROWS` past the
+  field, and one that first appears as a speck on the horizon line holds its slot, its
+  seed and its sway all the way down onto the field.
 
 ### Branch previews
 

@@ -1,17 +1,20 @@
 /**
- * Level of detail, in a world where distance does not change an object's size.
+ * Level of detail, in a world where distance mostly does not change an
+ * object's size.
  *
  * The usual LOD trick — draw fewer triangles because the thing is smaller on
- * screen — does not apply here. Below the horizon roll the ground is affine, so
- * a tree twelve rows away is drawn at *exactly* the same pixel size as one two
- * rows away (`CLAUDE.md`, Flatness). Nothing gets smaller with distance, and a
- * cheaper model would therefore be plainly visible.
+ * screen — barely applies here. The flat field is affine, so a tree twelve rows
+ * away is drawn at *exactly* the same pixel size as one two rows away
+ * (`CLAUDE.md`, Flatness); only past the field's far edge, on the horizon roll,
+ * does a body shrink (`horizon.ts`, `rollScale`), and there it is the same
+ * field sampled at a wider spacing rather than a cheaper model. Nothing in the
+ * field gets smaller with distance, and a cheaper model would therefore be
+ * plainly visible.
  *
  * Two things do change with distance, and both are worth spending:
  *
- * - **How much of the frame the object owns.** A row near the horizon roll
- *   compresses a dozen world rows into a few scanlines, so a body up there is
- *   genuinely a handful of pixels and its rim highlight cannot be seen at all.
+ * - **How much of the frame the object owns.** On the roll a body is genuinely
+ *   a handful of pixels and its rim highlight cannot be seen at all.
  * - **How closely the player is looking.** A body the player is walking past
  *   is being watched; one across the field is peripheral, and the eye cannot
  *   follow the individual leaves it is fluttering.

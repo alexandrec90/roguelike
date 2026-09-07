@@ -160,6 +160,9 @@ function applyUniforms(renderer: VolumeGl, uniforms: VolumeUniforms): void {
       uniforms.u_clipRect[3],
     ),
   );
+  // Never left unset: a float uniform defaults to 0, and dividing by it sends
+  // every fragment off the clip rectangle and draws nothing, with no error.
+  set("u_scale", (l) => gl.uniform1f(l, uniforms.u_scale));
   set("u_lobes", (l) => gl.uniform3fv(l, uniforms.u_lobes));
   set("u_lobeEnds", (l) => gl.uniform3fv(l, uniforms.u_lobeEnds));
   set("u_lobeCount", (l) => gl.uniform1i(l, uniforms.u_lobeCount));

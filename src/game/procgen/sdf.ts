@@ -132,12 +132,16 @@ export function fieldNormal(field: SdfField, x: number, y: number, epsilon = 0.6
   const nx = field(x + epsilon, y) - field(x - epsilon, y);
   const ny = field(x, y + epsilon) - field(x, y - epsilon);
   const length = Math.hypot(nx, ny);
-  return length === 0 ? { x: 0, y: 0 } : { x: nx / length, y: ny / length };
+  // Both float32 (GPU) and float64 can leave roundoff at a capsule's centre.
+  // Normalising that noise would turn a flat point into a fully lit edge.
+  return length < 0.00001 ? { x: 0, y: 0 } : { x: nx / length, y: ny / length };
 }
 
 export interface SdfRasterOptions {
   /** Inclusive integer box to walk. Keep it tight; this is a per-pixel loop. */
   readonly box: { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number };
+  /** Unrounded bounds for flat lighting when the sampling box is scaled. */
+  readonly lightBox?: SdfRasterOptions["box"];
   readonly ramp: readonly InkId[];
   /** Screen-space light; +y is down, matching cloud coordinates. */
   readonly light?: Offset;
@@ -206,7 +210,7 @@ export function rasterizeSdf(field: SdfField, options: SdfRasterOptions): PixelC
   // The cheap light: the same directional field `shadeCloud` uses, projected
   // across this box. Free, and it keeps a far body lit the same way a near one
   // is instead of turning it into a silhouette.
-  const across = directionalLevel(light, options.box);
+  const across = directionalLevel(light, options.lightBox ?? options.box);
 
   for (let y = options.box.top; y <= options.box.bottom; y += 1) {
     for (let x = options.box.left; x <= options.box.right; x += 1) {

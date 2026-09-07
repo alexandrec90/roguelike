@@ -5,8 +5,10 @@ import {
   columnsAcross,
   depthOf,
   DEPTH_RATIO,
+  HORIZON_DEPTH,
   RANK,
   project,
+  rootedDepth,
   rowsDown,
   TILE_DEPTH,
   TILE_WIDTH,
@@ -82,6 +84,33 @@ describe("the pitched-back camera", () => {
     expect(depthOf({ x: 0, y: 3 })).toBeLessThan(depthOf({ x: 0, y: 4 }));
     expect(depthOf({ x: 0, y: 3 })).toBeLessThan(depthOf({ x: 0, y: 3, z: 8 }));
     expect(depthOf({ x: 0, y: 3, z: 8 })).toBeLessThan(depthOf({ x: 0, y: 4 }));
+  });
+});
+
+describe("rootedDepth", () => {
+  it("sorts like anything else on the field, so near grass covers the hero's feet", () => {
+    expect(rootedDepth(3, RANK.grass)).toBe(3 * TILE_WIDTH + RANK.grass);
+    expect(rootedDepth(0, RANK.grass)).toBe(RANK.grass);
+    expect(rootedDepth(4, RANK.grass)).toBeGreaterThan(3 * TILE_WIDTH + RANK.actor);
+  });
+
+  it("puts a row past the seam under the horizon band, above the ground", () => {
+    for (const row of [-1, -2, -3]) {
+      const depth = rootedDepth(row, RANK.grass);
+      expect(depth).toBeLessThan(HORIZON_DEPTH);
+      expect(depth).toBeGreaterThan(-1000);
+    }
+  });
+
+  it("keeps the rows past the seam in order among themselves", () => {
+    expect(rootedDepth(-1, RANK.grass)).toBeGreaterThan(rootedDepth(-2, RANK.grass));
+  });
+
+  it("holds the band above the flat layers and below everything standing", () => {
+    // Ground is -1000 and water -900 (their own modules); a standing body on
+    // the far row is at about -2 rows.
+    expect(HORIZON_DEPTH).toBeGreaterThan(-900);
+    expect(HORIZON_DEPTH).toBeLessThan(-2 * TILE_WIDTH);
   });
 });
 

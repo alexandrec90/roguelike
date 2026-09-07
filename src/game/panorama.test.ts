@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   bearingOffset,
-  landmarkRing,
   landmarkX,
   panoramaColumn,
   panoramaRidge,
@@ -104,31 +103,5 @@ describe("panoramaRidge", () => {
       expect(height).toBeLessThanOrEqual(4);
       expect(height).toBeGreaterThanOrEqual(0);
     }
-  });
-});
-
-describe("landmarkRing", () => {
-  it("spreads its landmarks rather than clumping them", () => {
-    const ring = [...landmarkRing(16, 0x2f10)].sort((a, b) => a - b);
-    const gaps = ring.slice(1).map((at, index) => at - (ring[index] ?? 0));
-    const even = PANORAMA_WIDTH / 16;
-
-    for (const gap of gaps) {
-      expect(gap).toBeGreaterThan(even * 0.2);
-      expect(gap).toBeLessThan(even * 1.8);
-    }
-  });
-
-  it("is deterministic and stays inside one turn", () => {
-    expect(landmarkRing(9, 5)).toEqual(landmarkRing(9, 5));
-    for (const at of landmarkRing(9, 5)) {
-      expect(at).toBeGreaterThanOrEqual(0);
-      expect(at).toBeLessThan(PANORAMA_WIDTH);
-    }
-  });
-
-  it("copes with degenerate counts instead of dividing by zero", () => {
-    expect(landmarkRing(0, 1)).toEqual([]);
-    expect(landmarkRing(1, 1)).toHaveLength(1);
   });
 });

@@ -61,8 +61,10 @@ describe("anchorFoot", () => {
     expect(Number.isInteger(foot.y)).toBe(true);
   });
 
-  it("keeps the whole hero inside the band at every window height", () => {
-    for (let visible = 40; visible <= 180; visible += 1) {
+  it("keeps the whole hero inside the band at every window height that can hold him", () => {
+    // From the first window tall enough for the band to fit him; shorter
+    // ones are the "keep the head" case below, and cannot hold all of him.
+    for (let visible = GROUND_TOP + HERO; visible <= 180; visible += 1) {
       const band = walkableBand(GROUND_TOP, visible);
       const foot = anchorFoot(band, 320, HERO);
 

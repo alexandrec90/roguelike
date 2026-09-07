@@ -3,15 +3,97 @@ import { describe, expect, it } from "vitest";
 import {
   localFoot,
   localOrigin,
+  localPlacement,
   localRow,
   localReach,
   scrollOffset,
   visibleLocal,
   type CameraFrame,
 } from "./camera";
+import { HORIZON_SCALE, ROLL_ROWS } from "./horizon";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 
-const FRAME: CameraFrame = { groundTop: 9, footX: 160, footY: 100, phaseX: 0, phaseY: 0 };
+const FRAME: CameraFrame = {
+  groundTop: 9,
+  rollHeight: 3,
+  footX: 160,
+  footY: 100,
+  phaseX: 0,
+  phaseY: 0,
+};
+
+/** Local rows ahead at which the affine foot lands exactly on `groundTop`. */
+const FAR_EDGE = (FRAME.footY - FRAME.groundTop) / TILE_DEPTH;
+
+describe("localPlacement", () => {
+  it("is localFoot at full size anywhere in the flat field", () => {
+    for (const local of [
+      { x: 0, y: 0 },
+      { x: -3, y: 2 },
+      { x: 5, y: -4 },
+      { x: 2, y: FAR_EDGE },
+    ]) {
+      expect(localPlacement(FRAME, local)).toEqual({ ...localFoot(FRAME, local), scale: 1, visible: true });
+    }
+  });
+
+  it("meets the field exactly at its far edge, so a body walking on never pops", () => {
+    const seam = localPlacement(FRAME, { x: 4, y: FAR_EDGE });
+    const justPast = localPlacement(FRAME, { x: 4, y: FAR_EDGE + 0.001 });
+
+    expect(seam.y).toBe(FRAME.groundTop);
+    expect(justPast.y).toBe(FRAME.groundTop);
+    expect(justPast.x).toBe(seam.x);
+    expect(justPast.scale).toBeCloseTo(1, 2);
+  });
+
+  it("lifts a body up the roll and shrinks it as it recedes", () => {
+    const near = localPlacement(FRAME, { x: 6, y: FAR_EDGE + 4 });
+    const far = localPlacement(FRAME, { x: 6, y: FAR_EDGE + 30 });
+
+    expect(near.y).toBeLessThan(FRAME.groundTop);
+    expect(far.y).toBeLessThanOrEqual(near.y);
+    expect(far.y).toBeGreaterThanOrEqual(FRAME.groundTop - FRAME.rollHeight);
+    expect(far.scale).toBeLessThan(near.scale);
+    expect(near.scale).toBeLessThan(1);
+  });
+
+  it("converges a far body toward the hero's own column", () => {
+    const near = localPlacement(FRAME, { x: 8, y: FAR_EDGE + 1 });
+    const far = localPlacement(FRAME, { x: 8, y: FAR_EDGE + 40 });
+
+    expect(far.x - FRAME.footX).toBeLessThan(near.x - FRAME.footX);
+    expect(far.x).toBeGreaterThan(FRAME.footX);
+  });
+
+  it("stands a body on the horizon line at HORIZON_SCALE, and hides it past there", () => {
+    const onLine = localPlacement(FRAME, { x: 0, y: FAR_EDGE + ROLL_ROWS });
+    const gone = localPlacement(FRAME, { x: 0, y: FAR_EDGE + ROLL_ROWS + 1 });
+
+    expect(onLine.y).toBe(FRAME.groundTop - FRAME.rollHeight);
+    expect(onLine.scale).toBeCloseTo(HORIZON_SCALE, 12);
+    expect(onLine.visible).toBe(true);
+    expect(gone.visible).toBe(false);
+    expect(gone.y).toBe(onLine.y);
+  });
+
+  it("reads the stride like the field does, so the roll scrolls with the ground", () => {
+    // Half a step forward carries a far body the same way it carries the grid.
+    const still = localPlacement(FRAME, { x: 0, y: FAR_EDGE + 2 });
+    const walking = localPlacement({ ...FRAME, phaseY: 0.5 }, { x: 0, y: FAR_EDGE + 2 });
+
+    expect(walking.scale).toBeGreaterThan(still.scale);
+    expect(walking.y).toBeGreaterThanOrEqual(still.y);
+  });
+
+  it("always lands on a whole pixel", () => {
+    for (const phase of [0.1, 0.37, 0.5, 0.83]) {
+      const placed = localPlacement({ ...FRAME, phaseX: phase, phaseY: phase }, { x: 3, y: FAR_EDGE + 7 });
+      expect(Number.isInteger(placed.x)).toBe(true);
+      expect(Number.isInteger(placed.y)).toBe(true);
+    }
+  });
+});
 
 describe("localFoot", () => {
   it("puts the hero on his own anchor", () => {

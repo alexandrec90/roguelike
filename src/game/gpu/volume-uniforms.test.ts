@@ -18,6 +18,7 @@ import {
   shadowBox,
   shadowUniforms,
   volumeUniforms,
+  withQuad,
 } from "./volume-uniforms";
 
 const SPEC: VolumeSpec = {
@@ -203,5 +204,30 @@ describe("packing a body", () => {
     expect(() => volumeUniforms(SPEC, LIGHT, { left: 5, top: 0, right: 4, bottom: 0 })).toThrow(
       /at least one pixel/,
     );
+  });
+});
+
+describe("the scale", () => {
+  it("is 1 straight out of the packer, so the lab's parity render is unchanged", () => {
+    expect(volumeUniforms(SPEC, LIGHT, BOX).u_scale).toBe(1);
+  });
+
+  it("is the only thing withQuad changes besides the quad itself", () => {
+    const base = volumeUniforms(SPEC, LIGHT, BOX);
+    const quad = { originX: -37, originY: -57, width: 74, height: 58 };
+    const aimed = withQuad(base, quad, 0.25);
+
+    expect(aimed.u_scale).toBe(0.25);
+    expect(aimed.u_boxOrigin).toEqual([-37, -57]);
+    expect(aimed.u_viewport).toEqual([74, 58]);
+    expect({ ...aimed, u_scale: 1, u_boxOrigin: base.u_boxOrigin, u_viewport: base.u_viewport }).toEqual(
+      base,
+    );
+    expect(withQuad(base, quad).u_scale).toBe(1);
+  });
+
+  it("refuses a scale the shader would divide by to nothing", () => {
+    const quad = { originX: 0, originY: 0, width: 1, height: 1 };
+    expect(() => withQuad(volumeUniforms(SPEC, LIGHT, BOX), quad, 0)).toThrow(/positive/);
   });
 });

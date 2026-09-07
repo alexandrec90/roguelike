@@ -26,6 +26,8 @@ export interface VolumeUniforms {
   readonly u_viewport: readonly [number, number];
   /** The body's own box: left, top, right, bottom, inclusive. */
   readonly u_clipRect: readonly [number, number, number, number];
+  /** Screen pixels per cloud pixel. 1 unless the body stands on the horizon roll. */
+  readonly u_scale: number;
   /** `MAX_LOBES` triples of (x, y, radius); unused slots are zero. */
   readonly u_lobes: Float32Array;
   /** `MAX_LOBES` triples of (toX, toY, isCapsule); a disc's third is zero. */
@@ -276,19 +278,26 @@ export function activeUniformName(name: string): string {
 /**
  * Re-aim the uniforms at a quad that is not the body's own box.
  *
- * Only two of them describe the rectangle being rasterised; every other uniform
- * — including `u_clipRect`, which is what actually decides where the body is
- * and how it is lit — is unchanged. That separation is what lets a fixed-size
- * game object draw a body whose box moves with the wind.
+ * Only three of them describe the rectangle being rasterised — where it is,
+ * how big it is, and how many screen pixels one cloud pixel spans; every other
+ * uniform — including `u_clipRect`, which is what actually decides where the
+ * body is and how it is lit — is unchanged. That separation is what lets a
+ * fixed-size game object draw a body whose box moves with the wind, and draw
+ * it smaller on the horizon roll without the description knowing.
  */
 export function withQuad(
   uniforms: VolumeUniforms,
   quad: { readonly originX: number; readonly originY: number; readonly width: number; readonly height: number },
+  scale = 1,
 ): VolumeUniforms {
+  if (!(scale > 0)) {
+    throw new Error("A volume scale must be positive");
+  }
   return {
     ...uniforms,
     u_boxOrigin: [quad.originX, quad.originY],
     u_viewport: [quad.width, quad.height],
+    u_scale: scale,
   };
 }
 
@@ -342,6 +351,7 @@ export function volumeUniforms(
     u_boxOrigin: [box.left, box.top],
     u_viewport: [width, height],
     u_clipRect: [box.left, box.top, box.right, box.bottom],
+    u_scale: 1,
     u_lobes: packed.lobes,
     u_lobeEnds: packed.ends,
     u_lobeCount: spec.lobes.length,

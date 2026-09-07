@@ -9,7 +9,7 @@ import { MapOverlay, wantsMap } from "./game/map-overlay";
 import { visibleHeight } from "./game/viewport";
 
 // Two framing decisions, both retunable without a rebuild. `?horizon=0.08` (or
-// `?horizon=8%`) moves the 95/5 sky split; `?radius=64` widens the circle a
+// `?horizon=8%`) moves the 88/12 sky split; `?radius=64` widens the circle a
 // sideways walk runs around, which is what sets how hard the world turns under
 // a strafe. An unreadable value falls back rather than blanking the game.
 const query = new URLSearchParams(window.location.search);

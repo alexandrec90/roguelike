@@ -3,11 +3,10 @@
  * carries the scene, so a sprite is a neon outline with a near-black fill and
  * at most one or two accent colours. The hero is no longer here — characters
  * are rigs now (`models.ts`); what remains raster is what has no limbs to
- * animate: props, effects sources, and distant silhouettes.
+ * animate: props and effect sources.
  */
 
 import type { Palette, PixelSpriteSource } from "./pixel-art";
-import { sampleDistantPineFrames } from "./vegetation";
 
 const SLIME_PALETTE: Palette = {
   ".": null,
@@ -173,33 +172,9 @@ export const RAIN_STREAK: PixelSpriteSource = {
   rows: ["r..", "r..", ".r.", ".r.", "..r", "..R"],
 };
 
-/**
- * Landmarks beyond the horizon.
- *
- * These stand on the horizon line inside the rolled-over band, so they are
- * authored at the scale that band affords — five or six pixels — and read as
- * silhouette plus one lit window rather than as small versions of near art.
- * The ridge they stand on is generated noise (`ridgeProfile`); anything with an
- * identity is drawn, which is the split the art contract asks for.
- */
-const DISTANT_PALETTE: Palette = {
-  ".": null,
-  Q: "#131a2b",
-  q: "#ffd23d",
-};
-
-export const FAR_PINE_FRAMES = sampleDistantPineFrames();
-
-export const FAR_TOWER: PixelSpriteSource = {
-  palette: DISTANT_PALETTE,
-  rows: ["Q.Q.Q", "QQQQQ", "QQQQQ", "QQqQQ", "QQQQQ", "QQQQQ"],
-};
-
 export const ALL_SPRITES: readonly PixelSpriteSource[] = [
   ...SLIME_FRAMES,
   ...TORCH_FRAMES,
   SPARK,
   RAIN_STREAK,
-  ...FAR_PINE_FRAMES,
-  FAR_TOWER,
 ];

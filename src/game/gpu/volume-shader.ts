@@ -109,6 +109,13 @@ uniform vec2 u_viewport;
 // renderers disagree the moment a body is drawn at a distance.
 uniform vec4 u_clipRect;
 
+// Screen pixels per cloud pixel: 1 in the flat field, under 1 on the horizon
+// roll. A quad pixel divides by it to find the cloud point it samples, so a far
+// body is the same field read at a wider spacing — never a shrunk picture. The
+// dither and the shadow's grain stay on the screen pixel, where a dither
+// belongs; everything about the body itself stays in cloud units.
+uniform float u_scale;
+
 uniform vec3 u_lobes[${MAX_LOBES}];      // x, y, radius
 uniform vec3 u_lobeEnds[${MAX_LOBES}];   // toX, toY, 1 when a capsule
 uniform int u_lobeCount;
@@ -245,7 +252,8 @@ vec2 fieldNormal(vec2 at, float epsilon) {
   float nx = volumeField(at + vec2(epsilon, 0.0)) - volumeField(at - vec2(epsilon, 0.0));
   float ny = volumeField(at + vec2(0.0, epsilon)) - volumeField(at - vec2(0.0, epsilon));
   float len = length(vec2(nx, ny));
-  return len == 0.0 ? vec2(0.0) : vec2(nx, ny) / len;
+  // Same roundoff floor as the CPU's fieldNormal.
+  return len < 0.00001 ? vec2(0.0) : vec2(nx, ny) / len;
 }
 
 // --- shading.ts: the 4x4 Bayer matrix, as (value + 0.5) / 16 -----------------
@@ -337,7 +345,7 @@ float acrossBox(vec2 at) {
 // so this walks the band, and a ground pixel is in shadow if any height in it
 // is. Four samples is enough at every sun angle the game allows, and a shadow
 // pass is cheap next to the body it belongs to.
-void castShadow(vec2 ground) {
+void castShadow(vec2 ground, ivec2 screen) {
   if (ground.y < 0.0 || u_shadowSpread <= 0.0) {
     discard;
   }
@@ -360,8 +368,8 @@ void castShadow(vec2 ground) {
   }
   // Contact hardening: the further from the foot, the more of the shadow the
   // ordered dither eats, so the edge reads as penumbra rather than as noise.
-  int gx = int(ground.x);
-  int gy = int(ground.y);
+  int gx = screen.x;
+  int gy = screen.y;
   float falloff = min(height / 34.0, 1.0);
   if (falloff * u_shadowSoftness
       > ditherThreshold(gx, gy) * 0.9 + pixelHash(gx, gy, u_shadowSeed, 0) * 0.25) {
@@ -374,13 +382,18 @@ void main() {
   // From the quad's own texture coordinate rather than gl_FragCoord, so the
   // body does not care where on screen it was placed — which is what lets a
   // Phaser game object draw it anywhere in the world.
-  vec2 at = u_boxOrigin + floor(outTexCoord * u_viewport);
+  // \`screen\` is the pixel relative to the foot; \`at\` is the cloud point it
+  // samples. They are the same numbers in the field, and diverge on the roll.
+  vec2 screen = u_boxOrigin + floor(outTexCoord * u_viewport);
+  vec2 at = screen / u_scale;
   if (at.x < u_clipRect.x || at.y < u_clipRect.y || at.x > u_clipRect.z || at.y > u_clipRect.w) {
     discard;
   }
+  int px = int(screen.x);
+  int py = int(screen.y);
 
   if (u_shadowOn == 1) {
-    castShadow(at);
+    castShadow(at, ivec2(px, py));
     return;
   }
 
@@ -400,8 +413,6 @@ void main() {
 
   float buried = min(1.0, -distance * u_occlusion);
   float level = clamp(u_ambient + (1.0 - u_ambient) * facing - buried, 0.0, 1.0);
-  int px = int(at.x);
-  int py = int(at.y);
   fragColor = vec4(burnt(rampInk(level, px, py), at, px, py), 1.0);
 }
 `;
