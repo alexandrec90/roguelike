@@ -5,6 +5,7 @@ import { DemoScene, GAME_SIZE } from "./game/demo-scene";
 import { parseSkyFraction } from "./game/horizon";
 import { parseStrafeRadius } from "./game/planet";
 import { coverOffset, integerCoverScale } from "./game/integer-scale";
+import { MapOverlay, wantsMap } from "./game/map-overlay";
 import { visibleHeight } from "./game/viewport";
 
 // Two framing decisions, both retunable without a rebuild. `?horizon=0.08` (or
@@ -14,6 +15,9 @@ import { visibleHeight } from "./game/viewport";
 const query = new URLSearchParams(window.location.search);
 const skyFraction = parseSkyFraction(query.get("horizon"));
 const strafeRadius = parseStrafeRadius(query.get("radius"));
+// `?map=1` stacks the debug instrument over the canvas. Off on every other
+// load, because the page is the game world and nothing else unless asked.
+const showMap = wantsMap(query.get("map"));
 
 // Held rather than built inline: the layout below has to tell it how much of
 // the render target survived the window's crop.
@@ -115,7 +119,13 @@ function coverCanvas(): void {
 }
 
 window.addEventListener("resize", coverCanvas);
-game.events.once(Phaser.Core.Events.READY, coverCanvas);
+game.events.once(Phaser.Core.Events.READY, () => {
+  coverCanvas();
+  const host = game.canvas.parentElement;
+  if (host !== null) {
+    scene.setMap(MapOverlay.attach(host, showMap));
+  }
+});
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => game.destroy(true));

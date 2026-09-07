@@ -184,6 +184,15 @@ export function volumeCloud(
   const field = volumeField(spec);
   return rasterizeSdf(scale === 1 ? field : (x, y) => field(x / scale, y / scale), {
     box: scale === 1 ? box : scaleBox(box, scale),
+    lightBox: {
+      left: box.left * scale,
+      top: box.top * scale,
+      right: box.right * scale,
+      bottom: box.bottom * scale,
+    },
+    mask: scale === 1 ? undefined : (x, y) =>
+      x / scale >= box.left && x / scale <= box.right &&
+      y / scale >= box.top && y / scale <= box.bottom,
     ramp: light.ramp,
     light: light.light,
     ambient: light.ambient,

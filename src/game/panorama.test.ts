@@ -34,10 +34,21 @@ describe("bearingOffset", () => {
     expect(bearingOffset(TAU / 2)).toBe(PANORAMA_WIDTH / 2);
   });
 
-  it("moves the horizon a readable amount per sideways step", () => {
-    // The whole reason the sky carries the turn: at the default radius one step
-    // is about eleven pixels, which reads as motion rather than as drift.
-    const step = bearingOffset(1 / DEFAULT_STRAFE_RADIUS);
+  it("keeps the horizon under a pixel per step at the shipped radius", () => {
+    // This used to assert the opposite - about eleven pixels a step, "motion
+    // rather than drift" - and it was right for the radius of the day. The
+    // default is now 512 precisely so a strafe moves nothing perceptibly, the
+    // sky included: see DEFAULT_STRAFE_RADIUS for why the ground forced that.
+    // Asserted rather than dropped, so lowering the radius without reading that
+    // note fails here as well as in `map-drift.test.ts`.
+    expect(bearingOffset(1 / DEFAULT_STRAFE_RADIUS)).toBeLessThan(1);
+  });
+
+  it("still swings the sky readably when the knob is turned down", () => {
+    // The mechanism is intact and only its setting changed - which is the half
+    // of the old assertion worth keeping, and the half that would otherwise be
+    // silently lost if `bearingOffset` were ever broken.
+    const step = bearingOffset(1 / 19);
     expect(step).toBeGreaterThan(4);
     expect(step).toBeLessThan(24);
   });

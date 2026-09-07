@@ -104,6 +104,18 @@ describe("lendSlots", () => {
     expect(plans.map((plan) => plan.index)).toEqual([0, 1, 2, 3]);
   });
 
+  it("reclaims a distant slot when a nearer body enters a full pool", () => {
+    const near = tree(0, 1);
+    const mid = tree(0, 10);
+    const far = tree(0, 40);
+    const first = lendSlots([null, null], [mid, far]);
+    const again = lendSlots(nextHeld(first), [near, mid, far]);
+
+    expect(nextHeld(again)).toEqual([keyOf(mid), keyOf(near)]);
+    expect(again[0]?.kept).toEqual(mid);
+    expect(again[1]?.taken).toEqual(near);
+  });
+
   it("idles every slot when nothing is in reach", () => {
     const first = lendSlots([null, null], [tree(1, 1), tree(2, 2)]);
     const again = lendSlots(nextHeld(first), []);

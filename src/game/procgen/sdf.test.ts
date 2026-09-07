@@ -83,6 +83,13 @@ describe("normals and rasterisation", () => {
     expect(fieldNormal(() => -1, 0, 0)).toEqual({ x: 0, y: 0 });
   });
 
+  it("does not turn capsule centre-line roundoff into a unit normal", () => {
+    const trunk = sdCapsule(0, 0, 0, -20, 2.1);
+    for (let y = -18; y < -1; y += 1) {
+      expect(fieldNormal(trunk, 0, y)).toEqual({ x: 0, y: 0 });
+    }
+  });
+
   it("keeps only the pixels inside the shape", () => {
     const cloud = rasterizeSdf(sdCircle(0, 0, 4), { box: BOX, ramp: INK_RAMPS.verdant });
     expect(cloud.length).toBeGreaterThan(30);

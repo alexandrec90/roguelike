@@ -161,6 +161,32 @@ which is where the eye reads a turn anyway, and distance reconciles the two. `?r
 is the knob: turn it up until the ground's quantisation disappears, down until every
 step swings the sky.
 
+**That quantisation is not confined to the tiles, and this is the part that cost a
+session.** Read as written above, the trade sounds like it is paid by the grid alone —
+but a strafe rotates the local frame, and the renderer carries a step in flight as a
+*single uniform translation* (`scrollPhase`), so **everything drawn from the local frame
+pays it**: trees, props, puddles, the slime, the torch. Those are point features, not
+cells; they have exact planet coordinates and could follow the true arc continuously. As
+built they cannot, because they are drawn from `groundPose + scrollPhase` so the whole
+picture moves rigidly, and a translation cannot approximate a rotation. The two agree at
+the start of a step and part company by its end, where every object on screen snaps by a
+*different* amount — sideways by `d · y / radius`, and in **depth** by `d · x / radius`,
+so things left and right of the hero jump in opposite directions. At radius 19 that was
+7.5px of up-and-down and 10px of sideways per step, and it read as objects moving
+unpredictably rather than as a world turning. Walking forward is exempt, because that
+step genuinely is a translation.
+
+`DEFAULT_STRAFE_RADIUS` is 512 for exactly this reason, not for feel: depth motion goes
+sub-pixel at 277 and both axes do at 474, so at 512 nothing on screen can move a whole
+pixel because of a strafe, and the arc is shallow enough that the straight-line slide the
+renderer draws is within half a pixel of the arc the simulation walks. `map-drift.ts`
+holds that arithmetic and `map-drift.test.ts` pins it, so lowering the radius fails a
+test rather than quietly returning the jumping. **If you want a tight radius back — a
+world that visibly turns under a strafe — raising the number is not enough; the sub-step
+motion has to be drawn as the arc it is, per object, rather than as one offset for the
+whole scene.** `?map=1` draws that disagreement as a field of lines and is the fastest
+way to see whether a change helped.
+
 ### The ink pipeline
 
 Everything renderable flattens to a **pixel cloud** — an ordered list of lit pixels,
@@ -193,10 +219,21 @@ one is for, and the determinism rules that keep a capture reproducible.
 **Two knobs, neither of them a constant to inline.** `DEFAULT_SKY_FRACTION` in
 `horizon.ts` sets the 88/12 sky split and `?horizon=8%` (or `?horizon=0.08`) overrides
 it per load; `DEFAULT_STRAFE_RADIUS` in `planet.ts` sets how hard the world turns
-when you walk sideways and `?radius=64` overrides that. Both are feel decisions meant
-to be retuned by eye in the address bar rather than in a rebuild. The split grew from
-5% when the horizon became real: a tree standing on the horizon line is drawn at
-`HORIZON_SCALE` of its height and needs that much sky to keep its crown on screen.
+when you walk sideways and `?radius=64` overrides that. Both are meant to be retuned by
+eye in the address bar rather than in a rebuild — though the radius is no longer *only* a
+feel decision, and the paragraph above says what it is now also holding down.
+The split grew from 5% when the horizon became real: a tree standing on the horizon
+line is drawn at `HORIZON_SCALE` of its height and needs that much sky to keep its crown
+on screen.
+
+**And one instrument: `?map=1`** (`map-overlay.ts`, `map-panels.ts`, `map-drift.ts`).
+Off on every other load, drawn on its own canvas over the game so it never enters the
+320×180 target or the ink contract. Three panels — the planet north-up where nothing
+rotates, the local frame that does, and a readout whose last number is how far the
+picture will jump when the step in flight lands. It exists because the frames disagree in
+ways no screenshot shows: reach for it before reasoning about turning, scrolling, or
+where a feature is, and prefer adding a panel to it over adding a `console.log`.
+
 There is no on-screen caption printing the resulting pixel counts — **the page is the game
 world and nothing else**, so judge a split against the frame itself and read the numbers
 from `horizonLayout()` in the console or from `horizon.test.ts`. Read
@@ -315,18 +352,16 @@ branch its own Git worktree and dev-server port, and compare branches by switchi
 browser tabs. Vite hot replacement is for edits within one worktree, not for mixing two
 branches in one running module graph.
 
-**Every checkout gets its own port, from its own `.env`.** `vite.config.ts` reads
-`VITE_PORT` and `VITE_PREVIEW_PORT` (see `.env.example`) and runs `strictPort: true`, so
-a collision is a startup error rather than a silent slide onto the next free number.
-That matters more than it sounds: it used to slide, and opening `localhost:4100` out of
-habit then showed you *the other branch's game* — close enough to yours to be believed,
-with every conclusion drawn from it about code you did not write. The tell was a change
-you had just made not being there.
+**A worktree needs no `.env` to get its own port.** `src/worktreePort.ts` derives an
+offset from the checkout's directory name — static checkout 4100/5100, a worktree
+4100+n/5100+n — because two of the three ways a worktree is cut here run no project code
+at the time. That module carries the reasoning; an explicit `VITE_PORT` still wins.
 
-Vite watches `.env` and restarts itself on a change, so editing the port moves the
-running server rather than needing a fresh `npm run dev` — and a second `npm run dev`
-against a server that is already up now fails on the port instead of quietly starting a
-rival.
+`strictPort: true` then makes a collision a startup error rather than a silent slide. It
+used to slide, and opening `localhost:4100` out of habit showed you *the other branch's
+game* — close enough to be believed, with every conclusion drawn from code you did not
+write. The offset is a hash, so collisions remain possible: pin one side with
+`VITE_PORT=4107 npm run dev`.
 
 ## Controls
 

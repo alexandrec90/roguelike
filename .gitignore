@@ -43,3 +43,11 @@ Thumbs.db
 # Only the per-user bits are ignored.
 .vscode/*.log
 .vscode/.ropeproject/
+
+# Worktrees Claude Code cuts for itself under `--spawn worktree` / `--worktree`. This is
+# NOT the `<workspace>/.worktrees/` box tier — that one lives outside every checkout and
+# devkit's `worktree.py` owns it. These land *inside* the repo, so without this line every
+# `git status` carries a nested checkout as untracked, `git add -A` stages the whole of
+# it (five embedded repositories, the first time it was tried here), and anything reading
+# dirtiness calls the checkout `holds_uncommitted` for as long as the worktree exists.
+.claude/worktrees/

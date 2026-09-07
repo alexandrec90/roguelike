@@ -172,8 +172,25 @@ describe("stepStrafe", () => {
     expect(turned).toBeCloseTo(TAU, 6);
   });
 
-  it("does not need a lap of the planet to close", () => {
-    expect(strafeLap(R)).toBeLessThan(PLANET_TILES);
+  it("closes in a lap of exactly 2*pi*radius, at any radius", () => {
+    // The relationship, which holds everywhere, rather than a magnitude that
+    // only held at the radius of the day.
+    for (const radius of [19, 64, 256, R]) {
+      expect(strafeLap(radius)).toBeCloseTo(Math.PI * 2 * radius, 6);
+    }
+  });
+
+  it("closes inside a planet lap only at a tight radius", () => {
+    // **A trade, recorded rather than lost.** A sideways lap shorter than a
+    // forward one - swing the horizon through 360 without walking round the
+    // world - needs radius < PLANET_TILES / 2*pi, about 40. Depth motion goes
+    // sub-pixel only above 277 (`map-drift.test.ts`), so the two cannot both be
+    // had at PLANET_TILES = 256, and the shipped default buys the still picture
+    // and gives up the short lap. Raising PLANET_TILES is what would recover it.
+    expect(strafeLap(19)).toBeLessThan(PLANET_TILES);
+    expect(strafeLap(40)).toBeLessThan(PLANET_TILES);
+    expect(strafeLap(41)).toBeGreaterThan(PLANET_TILES);
+    expect(strafeLap(R)).toBeGreaterThan(PLANET_TILES);
   });
 
   it("makes ground ahead sweep faster than ground beside you", () => {

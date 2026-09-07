@@ -252,7 +252,8 @@ vec2 fieldNormal(vec2 at, float epsilon) {
   float nx = volumeField(at + vec2(epsilon, 0.0)) - volumeField(at - vec2(epsilon, 0.0));
   float ny = volumeField(at + vec2(0.0, epsilon)) - volumeField(at - vec2(0.0, epsilon));
   float len = length(vec2(nx, ny));
-  return len == 0.0 ? vec2(0.0) : vec2(nx, ny) / len;
+  // Same roundoff floor as the CPU's fieldNormal.
+  return len < 0.00001 ? vec2(0.0) : vec2(nx, ny) / len;
 }
 
 // --- shading.ts: the 4x4 Bayer matrix, as (value + 0.5) / 16 -----------------

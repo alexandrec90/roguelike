@@ -2,7 +2,17 @@ import { resolve } from "node:path";
 
 import { defineConfig, loadEnv } from "vite";
 
-/** Conventional bases. A checkout's actual ports come from its own `.env`. */
+import { portOffset } from "./src/worktreePort.ts";
+
+/**
+ * Conventional bases, for the checkout at slot 0.
+ *
+ * A worktree adds `portOffset` to both, derived from its own directory name -- so two
+ * agent sessions serve on different ports with nothing configured, which is the only
+ * thing that works across all three ways a worktree is cut here. `worktreePort.ts`
+ * carries why that is derived rather than allocated. An explicit `VITE_PORT` still
+ * wins over both.
+ */
 const DEV_PORT = 4100;
 const PREVIEW_PORT = 5100;
 
@@ -29,10 +39,13 @@ export default defineConfig(({ mode }) => {
   // `.env` first, then the real environment on top - Vite's own precedence, so
   // `VITE_PORT=4102 npm run dev` beats the file for a one-off.
   const env = { ...loadEnv(mode, import.meta.dirname, ""), ...process.env };
+  // One offset, applied to both bases, so a worktree's pair moves together and
+  // `5103` is always the preview for `4103`.
+  const offset = portOffset(import.meta.dirname);
 
   return {
     server: {
-      port: portFrom(env, "VITE_PORT", DEV_PORT),
+      port: portFrom(env, "VITE_PORT", DEV_PORT + offset),
       // `strictPort` is the whole point of this file being a function.
       //
       // It used to be `false`, and the failure that buys is silent and
@@ -45,7 +58,7 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
     },
     preview: {
-      port: portFrom(env, "VITE_PREVIEW_PORT", PREVIEW_PORT),
+      port: portFrom(env, "VITE_PREVIEW_PORT", PREVIEW_PORT + offset),
       strictPort: true,
     },
     build: {

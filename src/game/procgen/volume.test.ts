@@ -209,6 +209,23 @@ describe("rendering a volume at a scale", () => {
     });
   });
 
+  it("keeps flat lighting in cloud space when the scaled box rounds outward", () => {
+    const light = { ...LIT, flat: true, dither: false };
+    const full = volumeCloud(PAIR, light);
+    const reference = new Map(full.map((p) => [`${p.x},${p.y}`, p.ink]));
+    const half = volumeCloud(PAIR, light, undefined, 0.5);
+    expect(half.length).toBeGreaterThan(0);
+    for (const pixel of half) {
+      expect(pixel.ink).toBe(reference.get(`${pixel.x * 2},${pixel.y * 2}`));
+    }
+  });
+
+  it("does not draw outside a clip that rounds to a partial screen pixel", () => {
+    const clipped = volumeCloud(BALL, LIT, { bottom: -3 }, 0.5);
+    expect(clipped.length).toBeGreaterThan(0);
+    expect(clipped.every((pixel) => pixel.y / 0.5 <= -3)).toBe(true);
+  });
+
   it("refuses a scale that is not positive", () => {
     expect(() => volumeCloud(BALL, LIT, undefined, 0)).toThrow(/positive/);
     expect(() => volumeCloud(BALL, LIT, undefined, -1)).toThrow(/positive/);
