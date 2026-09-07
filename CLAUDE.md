@@ -337,18 +337,16 @@ branch its own Git worktree and dev-server port, and compare branches by switchi
 browser tabs. Vite hot replacement is for edits within one worktree, not for mixing two
 branches in one running module graph.
 
-**Every checkout gets its own port, from its own `.env`.** `vite.config.ts` reads
-`VITE_PORT` and `VITE_PREVIEW_PORT` (see `.env.example`) and runs `strictPort: true`, so
-a collision is a startup error rather than a silent slide onto the next free number.
-That matters more than it sounds: it used to slide, and opening `localhost:4100` out of
-habit then showed you *the other branch's game* — close enough to yours to be believed,
-with every conclusion drawn from it about code you did not write. The tell was a change
-you had just made not being there.
+**A worktree needs no `.env` to get its own port.** `src/worktreePort.ts` derives an
+offset from the checkout's directory name — static checkout 4100/5100, a worktree
+4100+n/5100+n — because two of the three ways a worktree is cut here run no project code
+at the time. That module carries the reasoning; an explicit `VITE_PORT` still wins.
 
-Vite watches `.env` and restarts itself on a change, so editing the port moves the
-running server rather than needing a fresh `npm run dev` — and a second `npm run dev`
-against a server that is already up now fails on the port instead of quietly starting a
-rival.
+`strictPort: true` then makes a collision a startup error rather than a silent slide. It
+used to slide, and opening `localhost:4100` out of habit showed you *the other branch's
+game* — close enough to be believed, with every conclusion drawn from code you did not
+write. The offset is a hash, so collisions remain possible: pin one side with
+`VITE_PORT=4107 npm run dev`.
 
 ## Controls
 
