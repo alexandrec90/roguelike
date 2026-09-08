@@ -109,6 +109,38 @@ def test_vendored_paths_are_read_off_the_manifest_literal(tmp_path):
     assert sc.vendored_paths(tmp_path) == {"a.py", "b/c.py"}
 
 
+def test_vendored_paths_are_read_off_an_annotated_manifest(tmp_path):
+    """The shape `sync-devkit.py` actually uses -- `ast.AnnAssign`, not `ast.Assign`."""
+    write(tmp_path, "DEVKIT_VERSION", "abc\n")
+    write(
+        tmp_path,
+        "scripts/sync-devkit.py",
+        'MANIFEST: tuple[str, ...] = (\n    "a.py",\n    "b/c.py",\n)\n',
+    )
+    assert sc.vendored_paths(tmp_path) == {"a.py", "b/c.py"}
+
+
+def test_vendored_paths_survive_a_bare_manifest_declaration(tmp_path):
+    """`MANIFEST: tuple[str, ...]` with no value is an `AnnAssign` whose `value` is None."""
+    write(tmp_path, "DEVKIT_VERSION", "abc\n")
+    write(tmp_path, "scripts/sync-devkit.py", "MANIFEST: tuple[str, ...]\n")
+    assert sc.vendored_paths(tmp_path) == frozenset()
+
+
+def test_vendored_paths_read_this_repos_real_sync_script(tmp_path):
+    """The regression: every fixture above is synthetic, and the real file parsed to none.
+
+    A consumer is `DEVKIT_VERSION` plus devkit's own `sync-devkit.py`, so build exactly
+    that and assert the manifest comes back non-empty and naming a file devkit vendors.
+    """
+    write(tmp_path, "DEVKIT_VERSION", "abc\n")
+    real = (REPO_ROOT / "scripts" / "sync-devkit.py").read_text(encoding="utf-8")
+    write(tmp_path, "scripts/sync-devkit.py", real)
+    paths = sc.vendored_paths(tmp_path)
+    assert paths, "the real MANIFEST must be readable, or the vendored skip is inert"
+    assert ".claude/rules/engineering.md" in paths
+
+
 def test_vendored_paths_survive_a_script_that_does_not_parse(tmp_path):
     write(tmp_path, "DEVKIT_VERSION", "abc\n")
     write(tmp_path, "scripts/sync-devkit.py", "def (:\n")
@@ -124,6 +156,17 @@ def test_source_files_pick_both_languages_and_skip_tooling_and_declarations(tmp_
     write(tmp_path, "src/readme.md")
     write(tmp_path, "tests/test_a.py")
     assert sc.source_files(tmp_path, config()) == ["src/a.py", "src/b.ts", "tests/test_a.py"]
+
+
+def test_source_files_accept_a_file_entry_in_paths(tmp_path):
+    """A module whose only importer sits outside every scanned tree -- roguelike's
+    `vite.config.ts` importing `src/worktreePort.ts` -- drew a false orphan, and naming
+    the importer in `[structure] paths` was dropped without a word by an `is_dir()` test.
+    A file entry is now scanned as itself; a name that is neither still costs nothing."""
+    write(tmp_path, "src/a.py")
+    write(tmp_path, "vite.config.ts", "import './src/worktreePort'\n")
+    files = sc.source_files(tmp_path, config(paths=("src", "vite.config.ts", "missing")))
+    assert files == ["src/a.py", "vite.config.ts"]
 
 
 def test_source_files_honour_exclude_as_a_prefix_or_a_directory_name(tmp_path):

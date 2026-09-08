@@ -253,6 +253,12 @@ def vendored_paths(root: Path) -> frozenset[str]:
 
     Read off the script's `MANIFEST` literal rather than imported: the script is not a
     module of this tree, and a consumer's copy may be older than this one.
+
+    **`AnnAssign` too.** The real declaration is `MANIFEST: tuple[str, ...] = (...)`, so
+    matching `Assign` alone returned `frozenset()` in every consumer that ever ran this:
+    the skip was inert, and adopting a release reddened both baseline tests on vendored
+    files the consumer cannot fix. Devkit has no `DEVKIT_VERSION`, so its own CI cannot
+    see it -- the guard below short-circuits here for a different reason.
     """
     if not (root / "DEVKIT_VERSION").is_file():
         return frozenset()
@@ -264,11 +270,13 @@ def vendored_paths(root: Path) -> frozenset[str]:
     except (SyntaxError, ValueError, OSError):
         return frozenset()
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "MANIFEST" for t in node.targets
+        bound = getattr(node, "targets", None) or [getattr(node, "target", None)]
+        assigned = getattr(node, "value", None)
+        if assigned is not None and any(
+            isinstance(t, ast.Name) and t.id == "MANIFEST" for t in bound
         ):
             try:
-                value = ast.literal_eval(node.value)
+                value = ast.literal_eval(assigned)
             except ValueError:
                 return frozenset()
             return frozenset(str(v) for v in value if isinstance(v, str))
@@ -295,9 +303,8 @@ def source_files(root: Path, cfg: harness_config.Config) -> list[str]:
     found: list[str] = []
     for directory in scan_roots(cfg):
         base = root / directory
-        if not base.is_dir():
-            continue
-        for path in sorted(base.rglob("*")):
+        # A file entry is scanned as itself: the one importer outside every scanned tree.
+        for path in sorted(base.rglob("*")) if base.is_dir() else [base]:
             if not path.is_file():
                 continue
             rel = path.relative_to(root).as_posix()
