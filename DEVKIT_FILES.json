@@ -1,5 +1,5 @@
 {
-  "devkit_tag": "v0.11.15",
+  "devkit_tag": "v0.11.16",
   "files": {
     ".claude/engineering-evidence.md": "f1ce174a29b3dbfbffa2c2c8d661910f6ad248696768cf41e65dec4460913de6",
     ".claude/hooks/session-start.sh": "4f24e041227b901c6bd50b4ad2e2d3c10a67aed1037807b2a749625de86da98a",
@@ -28,7 +28,7 @@
     "scripts/hooks/tests/test_codex_session_start.py": "62498e3980ed68a7836fb1f74001afaf019f5893a88d2443e50712c135faabae",
     "scripts/hooks/tests/test_codex_translation.py": "8ea42fb4d0034e5a2ea5d5858e1f53d83525282068d0bd0bc340a094b327285e",
     "scripts/hooks/tests/test_enforce_capped_bash.py": "6e85385e52eb0c6501b35da332b3979884bbf53ac2bc61aa0df0a3b6f0e42203",
-    "scripts/hooks/tests/test_harness_config.py": "54274c1c50efe3bcbacc0425058ab33690444aa6a32298434669a6ff64ba9c41",
+    "scripts/hooks/tests/test_harness_config.py": "ac920afb6cff67e7f9f24d3ddd6b9e1ac0ff0014e2ffb90e811984cdc80ca729",
     "scripts/hooks/tests/test_harness_events.py": "47a360ea20cd03523c048f9ee8c6f4a3068359580426309b4cc19361b2ba4087",
     "scripts/hooks/tests/test_hook_execution_contract.py": "0169aa64dc7c58646ebaf882d390f2aee277fb71af6d22c7e2ec951b24d311ca",
     "scripts/hooks/tests/test_invoke_capped.py": "ce50d6a670ab0e0a65d12ca1e2cf878064e587993a5136488efc43e93deb3a4d",
@@ -48,13 +48,13 @@
     "scripts/hooks/tests/test_structure_scan.py": "8583ec9023a3e7eccef49b81c52b5e6f18d3304392c21b07360deea6713d5231",
     "scripts/hooks/tests/test_sync_codex_context.py": "bf93208ed82e5c717f5e1f70c61c4c37b9883812ff266b4c093e1a067adede4d",
     "scripts/hooks/tests/test_sync_codex_hooks.py": "7ba81023d1355708fdf046f371b148dbdb11f815485efdff0e298fac84b26280",
-    "scripts/hooks/tests/test_sync_devkit.py": "79331d7def2e975206f29f24b5c2a1ee7f349aa2b843dc9df378828ac2205bb5",
+    "scripts/hooks/tests/test_sync_devkit.py": "b32e994b1929f8e740adac5b8c9a5be3d9612f5eca077b865cecdf2d28c6cd39",
     "scripts/hooks/tests/test_task_branch.py": "3eca2aecddbda899f45f50de765cf3beb39f664c2dba61052bb5668cb29071a1",
     "scripts/hooks/tests/test_toolchain.py": "494e7b23e8f43d737614429a4f55c6367c5f051ab144ca6f9945edd02a70595e",
-    "scripts/hooks/tests/test_untested_symbols.py": "892a5ad3d3b029efb33d293eff450c6b0a6878b29e44bf9e4aa8dd569ef5fee0",
+    "scripts/hooks/tests/test_untested_symbols.py": "f990e4b3567c58715a59beb81bdb8e5f8e6890d8323ae6950605c4c81f6cb052",
     "scripts/hooks/tests/test_worktree_guard_launch.py": "9c49fbb7b27d0403f35d3b75660969cef672b223c75a7e3b04ea37e193f1e1f7",
     "scripts/hooks/toolchain.py": "481928f29f31c570edf61b221437ea826798aa9a855cbe85abc26548c37489e5",
-    "scripts/hooks/untested_symbols.py": "014211d4ffc82654bdc357ed4dd37dbc3e8c5db7024ed97cd8df45cdfb244b92",
+    "scripts/hooks/untested_symbols.py": "56a8211cc191c03d2b0807baec7c3aaa928992ad36702d9606a442149d791a57",
     "scripts/hooks/worktree-guard-launch.py": "2407a27b1f9e51765d6867a86ea9a88c3df505e7a830d165a1e60983404a41a8",
     "scripts/log-wrap.py": "3cfe9e619f8573a0ef0c18c740c2e6b138747a846e4b6e7d6b5a7c83bfba9c49",
     "scripts/merge-dependabot-prs.py": "d7503c681da5ccfb117accaf6e5a625b8abaae61ef9bb3b4e9178a0053150638",
@@ -63,7 +63,7 @@
     "scripts/ship.py": "f8c6c6fcd8a8acb935e3ec58514d072af1c3fb32e08b910b50a04881810a8ff3",
     "scripts/sync-codex-context.py": "0ec345db1711bda25c5850d02cf0f81a408ba8a906e40f1c1cc43efa088ed307",
     "scripts/sync-codex-hooks.py": "6c876c9be9b0cace281469c01d1d0ba68012fffe48172911be8373a41986d67c",
-    "scripts/sync-devkit.py": "3411c41a925b7adbb131a15337bfa31cb37fb8dd2e50e95ed0728701acdf9dad",
+    "scripts/sync-devkit.py": "83f43d463e0791ee8c1754fc699ee5b16ad98729e6dc53c7c271be2692107e81",
     "scripts/task_branch.py": "5860c09a478c96c18e9f1f508c4f10a3e9f9963b473ff56f9b799801ce1ef80d"
   },
   "version": 1
