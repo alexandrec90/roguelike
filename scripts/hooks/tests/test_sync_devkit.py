@@ -7,9 +7,15 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import load_module
+from conftest import REPO_ROOT, load_module
 
 sh = load_module("scripts/sync-devkit.py")
+
+# This project's own tiers, for the claims whose answer depends on them. Loaded against
+# `REPO_ROOT` the same way `stop.py` and `structure_check.py` do it, so a test running in
+# a consumer reads that consumer's `.devkit.toml` and not a default.
+CFG = load_module("scripts/hooks/harness_config.py").load(REPO_ROOT)
+
 # The settings tier the pull drives. Loaded here rather than off `sh`, because
 # `sync-devkit.py` imports it on use and deliberately holds no reference: a project's
 # first pull runs that script before this file exists. Its own contract is covered in
@@ -1691,3 +1697,384 @@ def test_the_retired_list_reaches_the_settings_pass_from_this_module(tmp_path, m
     )
     monkeypatch.setattr(sh, "RETIRED_PATHS", ("scripts/hooks/made-up.py",))
     assert any("made-up.py" in note for note in sh.settings_pass(root))
+
+
+# --- the gated tier -------------------------------------------------------------
+
+
+def _consumer(root: Path, frontend: str) -> Path:
+    """A project with the given `[frontend]` block. The gate reads `harness_config`
+    relative to the SCRIPT, not to `root`, so through devkit's own `sh` it always finds
+    devkit's copy -- which is the production shape, where the script is inside the
+    consumer. `_consumer_script` below is the fixture for the case where it is not."""
+    _seed(root, ".devkit.toml", frontend)
+    return root
+
+
+def _consumer_script(root: Path, with_config: bool):
+    """`sync-devkit.py` as a consumer actually holds it: a copy under `root/scripts/`,
+    loaded by path, with or without the `scripts/hooks/harness_config.py` beside it that
+    the gate resolves through `__file__`."""
+    import importlib.util
+
+    # Bytes, not `_seed`: that helper writes in the platform codec, and a script that
+    # carries an em dash would arrive as cp1252 and refuse to import as UTF-8.
+    for rel in ("scripts/sync-devkit.py",) + (
+        ("scripts/hooks/harness_config.py",) if with_config else ()
+    ):
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((REPO_ROOT / rel).read_bytes())
+    name = f"_consumer_sync_{'with' if with_config else 'without'}_{abs(hash(str(root)))}"
+    spec = importlib.util.spec_from_file_location(name, root / "scripts" / "sync-devkit.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+ON = "[frontend]\nenabled = true\n"
+ON_WEB = '[frontend]\nenabled = true\ndir = "web"\nsrc = "web/src/"\n'
+ON_FLAT = '[frontend]\nenabled = true\ndir = "."\nsrc = "src/"\n'
+OFF = "[frontend]\nenabled = false\n"
+
+
+def test_the_gated_tier_is_absent_where_the_frontend_tier_is_off(tmp_path):
+    """Skipped, not MISSING: that is the whole difference between a gate and an
+    unconditional entry, and it is what lets devkit itself and every stackless project
+    hold a manifest that names a Vite file."""
+    off = _consumer(tmp_path / "off", OFF)
+    assert sh.gated_paths(off) == ()
+    assert sh.manifest_for(off) == tuple(sh.MANIFEST)
+    assert sh.gated_paths(tmp_path / "never-configured") == ()
+
+
+def test_the_gated_tier_resolves_at_the_consumers_own_source_prefix(tmp_path):
+    on = _consumer(tmp_path / "on", ON_WEB)
+    assert sh.frontend_src(on) == "web/src/"
+    assert sh.gated_paths(on) == ("web/src/worktreePort.ts", "web/src/worktreePort.test.ts")
+    assert set(sh.MANIFEST) < set(sh.manifest_for(on))
+
+
+def test_the_source_prefix_is_normalised_to_the_manifests_spelling(tmp_path):
+    """Forward slashes and exactly one trailing `/`, whatever the TOML said: every path
+    in the manifest is spelled that way, and a gated entry joins onto the prefix."""
+    assert (
+        sh.frontend_src(
+            _consumer(tmp_path / "a", '[frontend]\nenabled = true\nsrc = "web\\\\src"\n')
+        )
+        == "web/src/"
+    )
+    assert (
+        sh.frontend_src(
+            _consumer(tmp_path / "b", '[frontend]\nenabled = true\nsrc = "web/src//"\n')
+        )
+        == "web/src/"
+    )
+    assert sh.frontend_src(_consumer(tmp_path / "c", OFF)) == ""
+
+
+def test_the_gated_tier_is_off_until_the_bootstrap_pull_has_landed(tmp_path):
+    """`sync-devkit.py` is copied into a project as the bootstrap of its FIRST pull, at
+    which moment `scripts/hooks/harness_config.py` is not there to read the gate from.
+    The gate answers "off" rather than raising, the first pull delivers the helper the
+    gate needs, and the second pull delivers what the gate selects."""
+    root = tmp_path / "fresh"
+    _seed(root, ".devkit.toml", ON)
+    bootstrap = _consumer_script(root, with_config=False)
+    assert bootstrap.gated_paths(root) == ()
+    delivered = _consumer_script(root, with_config=True)
+    assert delivered.gated_paths(root) == (
+        "frontend/src/worktreePort.ts",
+        "frontend/src/worktreePort.test.ts",
+    )
+
+
+def test_devkits_own_paths_for_the_gated_tier_never_depend_on_a_consumer():
+    """The unreleased-change check asks about devkit's files, and devkit keeps its own
+    frontend tier off -- so `manifest_for(devkit)` would hide exactly the edits that
+    check exists to catch.
+
+    The answer is a property of `GATED_MANIFEST`, not of the repo this runs in, so it
+    is asserted everywhere. Whether the files are actually *there* is the half that
+    only devkit can answer -- see below."""
+    assert sh.gated_source_paths() == (
+        "frontend/src/worktreePort.ts",
+        "frontend/src/worktreePort.test.ts",
+    )
+
+
+def _gated_expectations(root: Path, vendored: bool) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """`(must_be_present, must_be_absent)` for the gated tier at `root`.
+
+    Pure, and split out so the *decision* can be tested against a consumer layout. The
+    check that used it inline could only ever run against the repo it lives in, and
+    devkit's own frontend tier is off -- so the consumer branch was never executed by
+    devkit's suite, which is how it shipped in v0.11.18 asking for devkit's path on a
+    consumer's disk.
+    """
+    if not vendored:
+        # devkit itself. The question is about ITS copy, so ask at devkit's layout.
+        return sh.gated_source_paths(), ()
+    # A consumer. `gated_paths` already answers both halves: the paths at THIS project's
+    # layout when the tier is on, and empty when it is off. devkit keeps the file under
+    # `frontend/src/`; a project with `dir = "."` and `src = "src/"` holds the same file
+    # at `src/worktreePort.ts`, and asking its disk with devkit's name is asking for
+    # something it was never meant to have.
+    expected = sh.gated_paths(root)
+    if expected:
+        return expected, ()
+    # Tier off, so a leak is looked for at devkit's layout -- where a file delivered by
+    # mistake would have landed.
+    return (), sh.gated_source_paths()
+
+
+def test_a_consumers_gated_path_is_not_devkits_and_the_two_are_not_interchangeable(tmp_path):
+    """The distinction the on-disk check below was missing.
+
+    `gated_source_paths()` answers "where does devkit keep it" and `gated_paths(root)`
+    answers "where should THIS project hold it". For a single-package consumer --
+    `dir = "."`, `src = "src/"`, which is roguelike -- those are different strings, and
+    asking the consumer's disk with devkit's string is asking for a file that project
+    was never meant to have.
+
+    Shipped in v0.11.18 and caught by roguelike's adoption PR, whose gate went red over
+    a file that was present, tracked and in the right place. Every consumer whose
+    frontend is not laid out like devkit's would have failed the same way, and a
+    vendored test cannot be fixed downstream -- the drift hook refuses the edit -- so
+    the only way out was another release.
+    """
+    flat = _consumer(tmp_path / "flat", ON_FLAT)
+    assert sh.gated_paths(flat) == ("src/worktreePort.ts", "src/worktreePort.test.ts")
+    assert set(sh.gated_paths(flat)).isdisjoint(sh.gated_source_paths())
+
+    # Where a consumer's layout DOES match devkit's the two agree, which is why the bug
+    # survived review and every default-layout project's gate stayed green.
+    assert sh.gated_paths(_consumer(tmp_path / "same", ON)) == sh.gated_source_paths()
+
+
+def test_the_on_disk_check_asks_a_flat_consumer_for_its_own_path(tmp_path):
+    """The reversion check for the bug itself, not just for the two helpers.
+
+    This is what shipped in v0.11.18: the on-disk check probed `gated_source_paths()` in
+    a consumer, so roguelike -- `dir = "."`, `src = "src/"` -- had its adoption gate go
+    red over a file that was present, tracked and in the right place. devkit's own suite
+    could not catch it, because devkit's frontend tier is off and the consumer branch
+    never ran here; extracting the decision is what makes it reachable.
+    """
+    flat = _consumer(tmp_path / "flat", ON_FLAT)
+    _seed(flat, sh.VERSION_FILE, "abc123")
+
+    present, absent = _gated_expectations(flat, vendored=True)
+
+    assert present == ("src/worktreePort.ts", "src/worktreePort.test.ts")
+    assert absent == ()
+    assert "frontend/src/worktreePort.ts" not in present
+
+
+def test_the_on_disk_check_still_asks_devkit_for_devkits_own_path(tmp_path):
+    """The other side: with no `DEVKIT_VERSION` the subject is devkit, whose copy really
+    does live under `frontend/src/`."""
+    present, absent = _gated_expectations(REPO_ROOT, vendored=False)
+    assert present == sh.gated_source_paths()
+    assert absent == ()
+
+
+def test_a_consumer_with_the_tier_off_is_checked_for_a_leak_at_devkits_layout(tmp_path):
+    """With the tier off there is no consumer-side path to name, so the only useful
+    question is whether devkit's copy leaked in."""
+    off = _consumer(tmp_path / "off", OFF)
+    _seed(off, sh.VERSION_FILE, "abc123")
+
+    present, absent = _gated_expectations(off, vendored=True)
+
+    assert present == ()
+    assert absent == sh.gated_source_paths()
+
+
+def test_every_gated_path_is_on_disk_exactly_where_it_should_be():
+    """Whether a gated file is present is a question with an answer in every checkout --
+    a different answer, which is why this is one assertion and not a skip.
+
+    In devkit there is no `DEVKIT_VERSION` (the stamp records the upstream commit a
+    vendored copy came from, and the source of truth has no upstream) and the file must
+    be there: the release check in `new-project.py` reads these paths off devkit's own
+    worktree, so a name with no file behind it reports "no unreleased change" about a
+    file that cannot be vendored at all. devkit's own `[frontend]` tier being off is
+    exactly why `gated_source_paths()` exists and does not gate on it.
+
+    In a consumer the file is present iff that project's frontend tier is on, which is
+    the gate doing its job in both directions -- a `bare` project that received it would
+    mean the gate leaks, and a `fullstack` one that did not would mean the pull skipped
+    a file it was supposed to deliver. Asserting bare presence here instead is what
+    turned every generated project's first gate red on arrival.
+    """
+    present, absent = _gated_expectations(REPO_ROOT, (REPO_ROOT / sh.VERSION_FILE).exists())
+    for rel in present:
+        assert (REPO_ROOT / rel).is_file(), f"{rel} is missing -- run sync-devkit.py --pull"
+    for rel in absent:
+        assert not (REPO_ROOT / rel).is_file(), f"{rel} arrived -- the manifest gate leaks"
+
+
+def test_a_pull_delivers_the_gated_file_only_where_the_tier_is_on(tmp_path, monkeypatch):
+    """End to end through `main`, against a source repo that carries the file."""
+    src = _repo(
+        tmp_path / "src",
+        tag="v0.5.3",
+        files={
+            "scripts/hooks/x.py": "upstream",
+            "frontend/src/worktreePort.ts": "vendored",
+            "frontend/src/worktreePort.test.ts": "vendored test",
+        },
+    )
+    monkeypatch.setattr(sh, "MANIFEST", ("scripts/hooks/x.py",))
+
+    on = _consumer(tmp_path / "on", ON)
+    _seed(on, sh.PRECOMMIT_FILE, CONFIG)
+    monkeypatch.setattr(sh, "REPO_ROOT", on)
+    assert sh.main(["--pull", "--src", str(src)]) == 0
+    assert (on / "frontend" / "src" / "worktreePort.ts").read_text(encoding="utf-8") == "vendored"
+    assert "frontend/src/worktreePort.ts" in sh.read_receipt(on)
+    assert sh.main(["--check", "--src", str(src)]) == 0
+
+    off = _consumer(tmp_path / "off", OFF)
+    _seed(off, sh.PRECOMMIT_FILE, CONFIG)
+    monkeypatch.setattr(sh, "REPO_ROOT", off)
+    assert sh.main(["--pull", "--src", str(src)]) == 0
+    assert not (off / "frontend").exists()
+    assert sh.main(["--check", "--src", str(src)]) == 0
+
+
+# --- the two layouts are not the same path ------------------------------------
+#
+# devkit keeps its copy at `frontend/src/`; a single-package consumer sets
+# `dir = "."` and wants it at `src/`. Both sides used to be probed with the
+# consumer's spelling, so devkit was asked for a file it has never had at that name.
+
+
+def test_the_source_map_is_empty_where_both_layouts_agree(tmp_path):
+    """Every MANIFEST entry, and a consumer whose `src` is devkit's own, need no
+    translation -- an entry in the map would be a rename waiting to happen."""
+    assert sh.source_map(_consumer(tmp_path / "off", OFF)) == {}
+    assert sh.source_map(_consumer(tmp_path / "default", ON)) == {}
+
+
+def test_the_source_map_translates_a_consumer_whose_layout_differs(tmp_path):
+    """Keyed by the consumer's path, valued at devkit's -- the direction every caller
+    needs, since the manifest is spelled at the consumer's layout throughout."""
+    assert sh.source_map(_consumer(tmp_path / "web", ON_WEB)) == {
+        "web/src/worktreePort.ts": "frontend/src/worktreePort.ts",
+        "web/src/worktreePort.test.ts": "frontend/src/worktreePort.test.ts",
+    }
+
+
+def test_copy_ends_remaps_only_the_devkit_side_of_each_direction():
+    """The direction is the whole of it. `manifest` is spelled at the consumer's layout,
+    so a pull reads devkit's spelling and writes the consumer's, and a push does the
+    reverse -- remapping both ends, or the wrong one, silently relocates the file."""
+    sources = {"src/worktreePort.ts": "frontend/src/worktreePort.ts"}
+
+    assert sh.copy_ends("src/worktreePort.ts", sources, pull=True) == (
+        "frontend/src/worktreePort.ts",
+        "src/worktreePort.ts",
+    )
+    assert sh.copy_ends("src/worktreePort.ts", sources, pull=False) == (
+        "src/worktreePort.ts",
+        "frontend/src/worktreePort.ts",
+    )
+
+
+def test_copy_ends_leaves_an_unmapped_entry_identical_on_both_sides():
+    """Every MANIFEST entry takes this path, so the untranslated case is the common one
+    and must not depend on the map having a key for it."""
+    for pull in (True, False):
+        assert sh.copy_ends("scripts/hooks/stop.py", {}, pull=pull) == (
+            "scripts/hooks/stop.py",
+            "scripts/hooks/stop.py",
+        )
+
+
+def test_a_single_package_consumer_adopts_the_gated_tier(tmp_path, monkeypatch):
+    """The regression, and it is roguelike's exact shape: `dir = "."`, `src = "src/"`.
+
+    It stopped the v0.11.17 adoption pass after the release itself had succeeded -- the
+    pull skipped both files as absent from the shared repo, and the commit gate then
+    reported them MISSING from a repo that has always carried them at `frontend/src/`.
+    """
+    src = _repo(
+        tmp_path / "src",
+        tag="v0.5.3",
+        files={
+            "scripts/hooks/x.py": "upstream",
+            "frontend/src/worktreePort.ts": "vendored",
+            "frontend/src/worktreePort.test.ts": "vendored test",
+        },
+    )
+    monkeypatch.setattr(sh, "MANIFEST", ("scripts/hooks/x.py",))
+
+    flat = _consumer(tmp_path / "flat", '[frontend]\nenabled = true\ndir = "."\nsrc = "src/"\n')
+    _seed(flat, sh.PRECOMMIT_FILE, CONFIG)
+    monkeypatch.setattr(sh, "REPO_ROOT", flat)
+
+    assert sh.main(["--pull", "--src", str(src)]) == 0
+    assert (flat / "src" / "worktreePort.ts").read_text(encoding="utf-8") == "vendored"
+    assert (flat / "src" / "worktreePort.test.ts").read_text(encoding="utf-8") == "vendored test"
+    # Never at devkit's layout: the consumer's own prefix is the whole point of the gate.
+    assert not (flat / "frontend").exists()
+    assert "src/worktreePort.ts" in sh.read_receipt(flat)
+    # The half that actually failed: the gate must not call these MISSING.
+    assert sh.main(["--check", "--src", str(src)]) == 0
+
+
+def test_a_check_reports_real_drift_at_the_translated_path(tmp_path, monkeypatch):
+    """The mapping may not become a blind spot: an edit to the consumer's copy is still
+    drift against devkit's, even though the two are at different paths."""
+    src = _repo(
+        tmp_path / "src",
+        tag="v0.5.3",
+        files={
+            "scripts/hooks/x.py": "upstream",
+            "frontend/src/worktreePort.ts": "vendored",
+            "frontend/src/worktreePort.test.ts": "vendored test",
+        },
+    )
+    monkeypatch.setattr(sh, "MANIFEST", ("scripts/hooks/x.py",))
+
+    flat = _consumer(tmp_path / "flat", '[frontend]\nenabled = true\ndir = "."\nsrc = "src/"\n')
+    _seed(flat, sh.PRECOMMIT_FILE, CONFIG)
+    monkeypatch.setattr(sh, "REPO_ROOT", flat)
+    assert sh.main(["--pull", "--src", str(src)]) == 0
+
+    (flat / "src" / "worktreePort.ts").write_text("locally edited", encoding="utf-8")
+    drifted, missing, _ = sh.classify(src, flat, sh.manifest_for(flat))
+
+    assert "src/worktreePort.ts" in drifted
+    assert missing == []
+
+
+def test_a_push_sends_the_gated_file_back_to_devkits_layout(tmp_path, monkeypatch):
+    """The mirror direction. A project that authored a fix to its copy has to land it
+    where devkit keeps it, or the next release vendors the old bytes back out."""
+    src = _repo(
+        tmp_path / "src",
+        tag="v0.5.3",
+        files={
+            "scripts/hooks/x.py": "upstream",
+            "frontend/src/worktreePort.ts": "vendored",
+            "frontend/src/worktreePort.test.ts": "vendored test",
+        },
+    )
+    monkeypatch.setattr(sh, "MANIFEST", ("scripts/hooks/x.py",))
+
+    flat = _consumer(tmp_path / "flat", '[frontend]\nenabled = true\ndir = "."\nsrc = "src/"\n')
+    _seed(flat, sh.PRECOMMIT_FILE, CONFIG)
+    monkeypatch.setattr(sh, "REPO_ROOT", flat)
+    assert sh.main(["--pull", "--src", str(src)]) == 0
+    (flat / "src" / "worktreePort.ts").write_text("authored here", encoding="utf-8")
+
+    assert sh.main(["--push", "--src", str(src)]) == 0
+    assert (src / "frontend" / "src" / "worktreePort.ts").read_text(
+        encoding="utf-8"
+    ) == "authored here"
+    assert not (src / "src").exists()
