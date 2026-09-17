@@ -57,6 +57,21 @@ state they *settled on*, so a zoom that did not fit or a `tile` flag on a non-ti
 visible rather than silently assumed — read the return value, do not assume the patch.
 With `play=0`, `seek(ms)` is byte-identical on every run.
 
+### Checking an input change, where none of the above applies
+
+This skill drives a scene that **renders on demand**, and that is the whole reason it
+works from an extension-driven tab. The game does not: a backgrounded tab has
+`requestAnimationFrame` frozen by Chrome, so the Phaser loop stops between tool calls.
+A held synthetic keydown then moves the hero about one cell per screenshot, and a
+`Runtime.evaluate` that awaits rAF times out outright — the capture shows a game that
+is not running, which reads as a movement bug rather than as a stopped loop.
+
+So an input or live-loop check needs the tab **foregrounded for its whole duration**,
+which means a human is watching it. When it cannot be, come back here: `lab.html`
+answers every question about what a frame *looks like* without needing a loop at all,
+and the questions it cannot answer belong in a unit test over the input handler rather
+than in a screenshot.
+
 ## 4. Judge it
 
 Capture at `zoom=1` and at `zoom=6`, both on `bg=duo`, and answer these. Anything
