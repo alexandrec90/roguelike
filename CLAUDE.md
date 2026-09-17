@@ -248,6 +248,11 @@ pinned capture at 1× and enlarged, and the checklist of what to actually look a
 art on two grounds at once — dark beside light — because a sprite that reads on charcoal
 and disappears on bone is a fault you only see with both on screen at the same moment.
 
+**Rendering on demand is also why it is the fallback for an input change.** A
+live-loop check needs the tab **foregrounded** — backgrounded, Chrome freezes rAF and
+the Phaser loop stops, so the capture shows a game that is not running. `/art-check`
+step 3 has the tell and the remedy.
+
 Everything it shows is in the URL, so a capture can be reopened exactly:
 
 | Key | Meaning |
