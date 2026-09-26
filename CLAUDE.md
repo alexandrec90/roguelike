@@ -483,8 +483,9 @@ the page.
 
 Baseline guardrails — including the instruction-file feedback loop (**never silently
 work around a bad instruction**) — are in `.claude/rules/engineering.md`. Rules for
-writing skills and rules themselves are in `.claude/rules/authoring.md`. Cross-reference
-this project's own scoped rules here, one line each.
+writing skills and rules themselves are in `.claude/rules/authoring.md`. Where a session
+stops — no commit, push or PR, finish with `/ship` — is `.claude/rules/session-scope.md`.
+Cross-reference this project's own scoped rules here, one line each.
 
 - **`.claude/rules/art-pipeline.md`** (`src/game/**/*.ts`) — how to draw and animate:
   pick the cheapest mechanism that makes the picture, and never hand-draw a frame you
