@@ -120,7 +120,19 @@ jobs:
       - name: Install locked game dependencies
         run: npm ci
       - name: Test and build game
-        run: npm run check
+        # Into a file as well as the job log: a red gate is read from its artifacts, and
+        # with none uploaded a fixer was told nothing came down and had to find the
+        # failure through `gh run view --log-failed`. `pipefail`, or `tee` masks the exit.
+        run: |
+          mkdir -p logs
+          set -o pipefail
+          npm run check 2>&1 | tee logs/game-check.log
+      - name: Upload game-check artifact
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: game-check
+          path: logs/game-check.log
 
   devkit-drift:
     name: Vendored harness drift
