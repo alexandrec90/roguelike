@@ -11,6 +11,7 @@
     "OTEL_RESOURCE_ATTRIBUTES": "service.name=roguelike,service.instance.id=roguelike,deployment.environment=local",
     "PY_COLORS": "0",
     "TTY_COMPATIBLE": "0",
-    "TTY_INTERACTIVE": "0"
+    "TTY_INTERACTIVE": "0",
+    "PYTHON_COLORS": "0"
   }
 }
