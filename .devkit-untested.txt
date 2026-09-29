@@ -56,8 +56,12 @@ scripts/report-workflow-failure.py::run_facts
 scripts/report-workflow-failure.py::stopped_body
 scripts/report-workflow-failure.py::sweep
 scripts/run-tests.py::cap_failure_blocks
+scripts/run-tests.py::changed_paths
+scripts/run-tests.py::default_branch
 scripts/run-tests.py::filter_output
 scripts/run-tests.py::main
+scripts/run-tests.py::tests_for
+scripts/run-tests.py::with_basetemp
 scripts/ship.py::backoff_delays
 scripts/ship.py::current_branch
 scripts/sync-codex-hooks.py::adapter_command
