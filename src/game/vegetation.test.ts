@@ -9,6 +9,7 @@ import {
   sampleGrassFrames,
   sampleTreeFrames,
   treeCloud,
+  tuftSeed,
   WIND_PERIOD_MS,
   windOffset,
 } from "./vegetation";
@@ -39,6 +40,16 @@ describe("procedural grass", () => {
       expect(cloud.filter((pixel) => pixel.y === 0).length).toBeGreaterThanOrEqual(5);
       expect(cloudBounds(cloud)?.bottom).toBe(0);
     }
+  });
+
+  it("seeds a tuft from its planet point, so the field and the lip grow the same blades", () => {
+    expect(tuftSeed(12, 40)).toBe(tuftSeed(12, 40));
+    // Points inside one planet cell share a tuft; neighbouring cells do not.
+    expect(tuftSeed(12.2, 39.9)).toBe(tuftSeed(12, 40));
+    expect(tuftSeed(13, 40)).not.toBe(tuftSeed(12, 40));
+    expect(tuftSeed(12, 41)).not.toBe(tuftSeed(12, 40));
+    expect(Number.isInteger(tuftSeed(-7, -300))).toBe(true);
+    expect(tuftSeed(-7, -300)).toBeGreaterThanOrEqual(0);
   });
 
   it("samples stable, rasterizable canvases for the asset lab", () => {

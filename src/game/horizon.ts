@@ -5,8 +5,9 @@
  * right camera for a tile grid — a tile reads the same wherever it sits —
  * but a flat plane that simply stops at the top edge of the screen reads as a
  * cropped floor, not as outdoors. So the top slice of the frame is given over
- * to the world curving away: a few scanlines of ground compressed into nothing,
- * a horizon line, sky above it, and distant silhouettes standing on it.
+ * to the world curving away: the lip of a treadmill, where the flat field bends
+ * over and its rows compress into nothing, a horizon line, sky above it, and
+ * distant silhouettes standing on it.
  *
  * The split is one number, `skyFraction`, and everything else is derived:
  *
@@ -21,8 +22,8 @@
  *     +---------------------------+  y = height
  *
  * `bandHeight = skyHeight + rollHeight` is the fraction of the screen that is
- * *not* flat. At the default 0.12 on a 180px target that is 22 pixels: 15 of
- * sky and 7 of roll. Nothing in the playfield changes when it moves, which is the
+ * *not* flat. At the default 0.22 on a 180px target that is 40 pixels: 16 of
+ * sky and 24 of roll. Nothing in the playfield changes when it moves, which is the
  * point — the split is a framing decision, not a projection one, and it is
  * meant to be retuned by eye.
  *
@@ -30,21 +31,26 @@
  * drawn over it, so a tree on the far row keeps its crown against the sky, and
  * the world past the field is projected onto the roll by `rollPlacement`:
  * `ROLL_ROWS` rows of it, each a little higher and a little smaller, until the
- * horizon line, past which it has curved out of sight. What is on the horizon
+ * horizon line, past which it has curved out of sight. The roll meets the
+ * field without a crease — its first row is as tall as a flat one — which is
+ * why it needs two dozen scanlines rather than the seven a hard fold got by on. What is on the horizon
  * is therefore real — walk toward it and it grows and comes down onto the field.
  */
 
 import { mixHex, sampleRamp } from "./color";
+import { TILE_DEPTH } from "./projection";
 
 /**
  * Share of the screen height given to sky plus roll.
  *
- * Twelve percent rather than the five the sliver-of-sky version had, because
- * the sky now has things standing in it: a tree on the horizon line is drawn
- * at `HORIZON_SCALE` of its height, and needed more headroom than six
- * scanlines to keep its crown on screen. Retune it by eye with `?horizon=`.
+ * The sky's share of it has to hold a tree standing on the horizon line, drawn
+ * at `HORIZON_SCALE` of its height, with its crown on screen - about fifteen
+ * scanlines. The roll's share has to hold the lip: it starts at the flat
+ * field's full row height and eases off, so anything under about two rows'
+ * worth of scanlines bends too tightly to read as a curve and reads as a fold
+ * again. Twenty-two percent gives both. Retune it by eye with `?horizon=`.
  */
-export const DEFAULT_SKY_FRACTION = 0.12;
+export const DEFAULT_SKY_FRACTION = 0.22;
 
 /**
  * Past this the "flat playfield with a sliver of sky" read is gone and it is a
@@ -53,7 +59,7 @@ export const DEFAULT_SKY_FRACTION = 0.12;
 export const MAX_SKY_FRACTION = 0.5;
 
 /** How much of the band is ground curving away rather than open sky. */
-export const ROLL_SHARE = 1 / 3;
+export const ROLL_SHARE = 0.6;
 
 /**
  * World rows beyond the flat field before the ground has curved out of sight.
@@ -62,8 +68,8 @@ export const ROLL_SHARE = 1 / 3;
  * many rows past the field's far edge stands on the horizon line, one row
  * nearer stands a fraction of a scanline below it and a fraction larger, and a
  * row further is gone over the curve. Walk toward it and it grows and comes
- * down the roll onto the flat field. The ground folds the same rows into the
- * roll's few scanlines (`rollBands`), so what a body stands on and where it is
+ * down the lip onto the flat field. The ground folds the same rows into the
+ * roll's scanlines (`roll-ground.ts`), so what a body stands on and where it is
  * drawn come from one curve.
  */
 export const ROLL_ROWS = 48;
@@ -76,40 +82,105 @@ export const ROLL_ROWS = 48;
 export const HORIZON_SCALE = 0.18;
 
 /**
- * Size of a body `rowsBeyond` rows past the field's far edge, 0..1.
+ * The roll is the lip of a treadmill: the belt runs perfectly flat, then bends
+ * over the drum and out of sight.
  *
- * Perspective's own `1 / distance`, with the constant chosen so the curve is
- * exactly 1 at the seam and exactly `horizonScale` at the horizon. Nothing in
- * the flat field shrinks — it is affine on purpose — so this is the one place
- * the projection is allowed to make a thing smaller for being far away.
+ * What that means in pixels is that the lip starts with the flat field's own
+ * slope - one row past the seam is `TILE_DEPTH` scanlines tall, exactly like
+ * the row before it - and eases off from there, so there is no crease where
+ * the field stops and the curve begins. A row `r` past the seam is
+ * `TILE_DEPTH / (1 + (r / knee)²)` scanlines tall: flat at the seam (the
+ * compression starts with zero slope), steepest around the knee, and a long
+ * tail that folds the last few dozen rows into the scanlines under the
+ * horizon line. Its integral is an arctangent, which is `rollLift`.
+ *
+ * The knee is not a knob. Matching the flat field's slope *and* landing
+ * `ROLL_ROWS` out on the horizon line fixes it once the roll's height is
+ * known, so a taller roll is a gentler lip and a shorter one a tighter bend.
+ */
+export function rollKnee(rollHeight: number, rows: number = ROLL_ROWS): number {
+  if (rollHeight <= 0 || rows <= 0) {
+    return 0;
+  }
+  const key = `${rollHeight}:${rows}`;
+  const cached = knees.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  // `k · atan(rows / k)` climbs from 0 toward `rows` as the knee widens, so a
+  // bisection always lands. A roll taller than the rows could ever fill at the
+  // flat field's slope has no lip at all; it saturates at the widest knee.
+  const target = Math.min(rollHeight / TILE_DEPTH, rows * 0.999);
+  let low = 0;
+  let high = rows * 1000;
+  for (let step = 0; step < 64; step += 1) {
+    const mid = (low + high) / 2;
+    if (mid * Math.atan(rows / mid) < target) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  const knee = (low + high) / 2;
+  knees.set(key, knee);
+  return knee;
+}
+
+const knees = new Map<string, number>();
+
+/**
+ * How far up the roll a row `rowsBeyond` the field lands, 0 at the seam and 1
+ * at the horizon line. Past the horizon it keeps climbing, so a caller can
+ * tell "on the line" from "over it".
+ */
+export function rollLift(rowsBeyond: number, rollHeight: number, rows: number = ROLL_ROWS): number {
+  if (rowsBeyond <= 0) {
+    return 0;
+  }
+  const knee = rollKnee(rollHeight, rows);
+  if (knee === 0) {
+    return 1;
+  }
+  return Math.atan(rowsBeyond / knee) / Math.atan(rows / knee);
+}
+
+/** The inverse of `rollLift`: which row past the seam a share of the roll shows. */
+export function rollRowAt(lift: number, rollHeight: number, rows: number = ROLL_ROWS): number {
+  const knee = rollKnee(rollHeight, rows);
+  if (lift <= 0 || knee === 0) {
+    return 0;
+  }
+  return knee * Math.tan(Math.min(lift, 1) * Math.atan(rows / knee));
+}
+
+/**
+ * Size of a body `rowsBeyond` rows past the field's far edge, 1..`horizonScale`.
+ *
+ * Perspective's own relation: a thing's size goes as the square root of how
+ * hard the ground under it is squashed, renormalised so the curve is exactly
+ * 1 at the seam and exactly `horizonScale` on the horizon line. Because the
+ * squash starts with zero slope, so does the shrink - a tree walking off the
+ * field keeps its size for the first stretch of the lip and only then starts
+ * to recede. Nothing in the flat field shrinks; this is the one place the
+ * projection is allowed to make a thing smaller for being far away.
  */
 export function rollScale(
   rowsBeyond: number,
+  rollHeight: number,
   rows: number = ROLL_ROWS,
   horizonScale: number = HORIZON_SCALE,
 ): number {
   if (rowsBeyond <= 0 || rows <= 0) {
     return 1;
   }
-  const steepness = (1 / horizonScale - 1) / rows;
-  return 1 / (1 + steepness * rowsBeyond);
-}
-
-/**
- * How far up the roll a row `rowsBeyond` the field lands, 0 at the seam and 1
- * at the horizon line.
- *
- * Derived from `rollScale` rather than drawn separately, so the ground under a
- * body and the body's size shrink together: steep at the near edge, flat at the
- * horizon, which is what a surface curving away looks like and why a dozen
- * world rows land on three scanlines rather than three rows on one each.
- */
-export function rollLift(
-  rowsBeyond: number,
-  rows: number = ROLL_ROWS,
-  horizonScale: number = HORIZON_SCALE,
-): number {
-  return (1 - rollScale(rowsBeyond, rows, horizonScale)) / (1 - horizonScale);
+  const knee = rollKnee(rollHeight, rows);
+  if (knee === 0) {
+    return horizonScale;
+  }
+  const squash = (row: number): number => 1 / (1 + (row / knee) ** 2);
+  const far = squash(rows);
+  const share = Math.max(0, (squash(rowsBeyond) - far) / (1 - far));
+  return horizonScale + (1 - horizonScale) * Math.sqrt(share);
 }
 
 export interface RollPlacement {
@@ -121,13 +192,16 @@ export interface RollPlacement {
   readonly beyond: boolean;
 }
 
-/** Where a row past the field's far edge lands on the roll, and how large. */
-export function rollPlacement(rowsBeyond: number, rows: number = ROLL_ROWS): RollPlacement {
-  const beyond = rowsBeyond > rows;
+/** Where a row past the field's far edge lands on a roll this tall, and how large. */
+export function rollPlacement(
+  rowsBeyond: number,
+  rollHeight: number,
+  rows: number = ROLL_ROWS,
+): RollPlacement {
   return {
-    lift: Math.min(rollLift(rowsBeyond, rows), 1),
-    scale: rollScale(rowsBeyond, rows),
-    beyond,
+    lift: Math.min(rollLift(rowsBeyond, rollHeight, rows), 1),
+    scale: rollScale(rowsBeyond, rollHeight, rows),
+    beyond: rowsBeyond > rows,
   };
 }
 
@@ -213,41 +287,6 @@ export function parseSkyFraction(
   return clampFraction(percent ? value / 100 : value);
 }
 
-export interface RollBand {
-  /** World rows beyond the playfield; 0 is the nearest, at the roll's foot. */
-  readonly row: number;
-  /** Screen y of the band's top scanline. */
-  readonly y: number;
-  /** Always at least 1 — rows that compress to nothing are dropped. */
-  readonly height: number;
-}
-
-/**
- * The scanlines of the roll, near-first.
- *
- * Distance above the playfield is `rollLift` — the same curve that places a
- * body standing out there, so the ground under a tree and the tree agree about
- * how far away they are. Rows that round to zero height are dropped instead of
- * being clamped to one, so the band never draws more scanlines than it has.
- */
-export function rollBands(rollHeight: number, rows: number = ROLL_ROWS): readonly RollBand[] {
-  if (rollHeight <= 0 || rows <= 0) {
-    return [];
-  }
-
-  const edge = (index: number): number => Math.round(rollHeight * rollLift(index, rows));
-
-  const bands: RollBand[] = [];
-  for (let row = 0; row < rows; row += 1) {
-    const near = edge(row);
-    const far = edge(row + 1);
-    if (far > near) {
-      bands.push({ row, y: rollHeight - far, height: far - near });
-    }
-  }
-  return bands;
-}
-
 /** Zenith to horizon: pitch black, with the faintest glow where ground meets sky. */
 export const SKY_RAMP: readonly string[] = [
   "#000000",
@@ -281,23 +320,19 @@ export const ROLL_NEAR_COLOR = "#04120b";
 export const ROLL_FAR_COLOR = "#0d1830";
 
 /**
- * Colour the roll's scanlines, given the bands `rollBands` produced.
+ * The haze over a row `rowsBeyond` the seam, near colour at the field and far
+ * colour on the horizon line.
  *
- * Keyed on the world row rather than the band index, so dropping a compressed
- * row does not make the surviving ones jump a step in the gradient.
+ * Keyed on the world row rather than the scanline, so the gradient travels
+ * with the ground as it scrolls instead of being painted on the glass.
  */
-export function rollColors(
-  bands: readonly RollBand[],
+export function rollHaze(
+  rowsBeyond: number,
   rows: number = ROLL_ROWS,
   near: string = ROLL_NEAR_COLOR,
   far: string = ROLL_FAR_COLOR,
-): readonly ScanBand[] {
-  const span = Math.max(rows - 1, 1);
-  return bands.map((band) => ({
-    y: band.y,
-    height: band.height,
-    color: mixHex(near, far, band.row / span),
-  }));
+): string {
+  return mixHex(near, far, Math.min(Math.max(rowsBeyond / Math.max(rows, 1), 0), 1));
 }
 
 export interface RidgeOptions {

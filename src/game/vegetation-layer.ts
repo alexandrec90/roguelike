@@ -28,13 +28,7 @@ import { drawCloud } from "./draw-cloud";
 import { fromLocal, type PlanetPose } from "./planet";
 import { RANK, rootedDepth } from "./projection";
 import { terrainAt } from "./terrain";
-import { grassTuftCloud } from "./vegetation";
-
-function tuftSeed(x: number, y: number): number {
-  let h = Math.imul(Math.round(x) + 1, 0x9e37) ^ Math.imul(Math.round(y) + 1, 0x85eb);
-  h ^= h >>> 13;
-  return h >>> 0;
-}
+import { grassTuftCloud, tuftSeed } from "./vegetation";
 
 /** One depth-sorted graphics object per screen row. */
 export class VegetationLayer {

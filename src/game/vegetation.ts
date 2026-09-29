@@ -39,6 +39,16 @@ function tuftLayout(seed: number): readonly { rootX: number; height: number }[] 
   }));
 }
 
+/**
+ * The seed of the tuft growing at a planet point, so every layer that draws the
+ * grass there - the field and the horizon lip - draws the same blades.
+ */
+export function tuftSeed(x: number, y: number): number {
+  let h = Math.imul(Math.round(x) + 1, 0x9e37) ^ Math.imul(Math.round(y) + 1, 0x85eb);
+  h ^= h >>> 13;
+  return h >>> 0;
+}
+
 /** Five authored-by-rule blades sharing the field's wind but not its phase. */
 export function grassTuftCloud(elapsedMs: number, seed: number, fieldX = 0, fieldY = 0): PixelCloud {
   const cloud: PixelCloud = [];

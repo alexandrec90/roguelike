@@ -14,6 +14,7 @@ import {
 } from "./planet";
 import { TILE_WIDTH, type ScreenPoint } from "./projection";
 import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./spark-emitter";
+import { RollGroundLayer } from "./roll-ground-layer";
 import { SkyLayer } from "./sky-layer";
 import { RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
 import { openGround } from "./terrain";
@@ -80,6 +81,7 @@ export class DemoScene extends Phaser.Scene {
 
   private readonly hero: HeroLayer;
   private readonly sky = new SkyLayer();
+  private readonly rollGround = new RollGroundLayer();
   private readonly ground = new GroundLayer();
   private readonly vegetation = new VegetationLayer();
   private readonly scenery = new SceneryLayer();
@@ -104,6 +106,7 @@ export class DemoScene extends Phaser.Scene {
 
     installSceneTextures(this);
     this.sky.create(this, this.layout, WIDTH);
+    this.rollGround.create(this, this.frame(), WIDTH);
     this.hero.create(this, this.layout.groundTop, this.anchor);
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
@@ -142,6 +145,7 @@ export class DemoScene extends Phaser.Scene {
     const frame = this.frame();
     const pose = this.hero.groundPose();
     this.ground.draw(frame, pose);
+    this.rollGround.draw(frame, pose, this.elapsedMs);
     this.vegetation.animate(frame, pose, this.elapsedMs);
     this.scenery.animate(frame, pose, delta, this.elapsedMs);
     this.water.relocate(frame, pose, localReach(this.bounds));

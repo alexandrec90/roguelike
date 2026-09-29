@@ -24,7 +24,8 @@
  *
  * The layers, back to front:
  *
- *     sky bands + roll       opaque; over the ground, under everything standing
+ *     sky bands              opaque; over the ground, under everything standing
+ *     (roll ground)          the lip, same depth - `roll-ground-layer.ts`
  *     stars                  scroll with the bearing
  *     far ridge              seamless noise profile, scrolls
  *     near ridge             the same, darker and shorter
@@ -35,8 +36,6 @@ import Phaser from "phaser";
 import { hexToInt } from "./color";
 import {
   horizonLayout,
-  rollBands,
-  rollColors,
   skyBands,
   starField,
   type HorizonLayout,
@@ -94,9 +93,6 @@ export class SkyLayer {
     const bands = scene.add.graphics().setDepth(BAND_DEPTH);
     for (const band of skyBands(layout.skyHeight)) {
       bands.fillStyle(hexToInt(band.color)).fillRect(0, band.y, width, band.height);
-    }
-    for (const band of rollColors(rollBands(layout.rollHeight))) {
-      bands.fillStyle(hexToInt(band.color)).fillRect(0, layout.horizonY + band.y, width, band.height);
     }
 
     this.starGfx = scene.add.graphics().setDepth(BAND_DEPTH + 1);
