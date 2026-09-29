@@ -90,7 +90,7 @@ class WeepingWillow implements SceneryInstance {
     const cloud: PixelCloud = [];
     this.drawTrunk(cloud);
     this.fronds.forEach((frond, index) => {
-      for (const pixel of chainCloud(frond, "deep")) {
+      for (const pixel of chainCloud(frond, "leaf-2")) {
         cloud.push(pixel);
       }
       dressFrond(cloud, frond, this.seed + index, env.elapsedMs);
@@ -108,7 +108,7 @@ class WeepingWillow implements SceneryInstance {
       strokeLine(wood, { x: shoulderX, y: anchor.y - 4 }, { x: anchor.x, y: anchor.y }, "steel");
     }
     for (const pixel of wood) {
-      cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, this.seed, INK_RAMPS.bone) });
+      cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, this.seed, INK_RAMPS.bark) });
     }
   }
 }

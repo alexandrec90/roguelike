@@ -3,11 +3,13 @@
  *
  * The split this file defends is the one `CLAUDE.md` asks for - the movement
  * simulation is deterministic and knows nothing about the presentation. So the
- * four interesting parts live elsewhere and none of them import Phaser:
+ * interesting parts live elsewhere and none of them import Phaser:
  * `keybindings.ts` says what an input means, `controls.ts` says what is held,
- * `planet.ts` says what a step does to a pose on a round world, and `player.ts`
- * says what the hero does about it. What is left here is the wiring: DOM events
- * into the control state, and a posed rig into a `Graphics`.
+ * `planet.ts` says what a step does to a pose on a round world, `player.ts`
+ * says what the hero does about it, `hero/hero-actions.ts` says what his blows
+ * and spells are, and `hero/hero-look.ts` says what all of it looks like. What
+ * is left here is the wiring: DOM events into the control state, and a frame's
+ * pixels into two `PixelSurface`s — him, and his shadow under him.
  *
  * One thing did change shape when the world went round. The hero no longer moves
  * across the screen - he *is* the screen's origin, nailed to `footX, footY`
@@ -15,12 +17,19 @@
  * place the rest of the scene comes to ask where the world has got to: it holds
  * the pose, and hands out the three views of it (`groundPose`, `phase`, `turn`)
  * that `camera.ts` and `panorama.ts` need.
+ *
+ * Two calls a frame. `animate(delta, elapsed)` runs the simulation — it must
+ * come first, because the scene builds its camera frame from `phase()`. Then
+ * `update(ctx)` draws with the frame's light, pushes the burning blade's light
+ * into `ctx.lights`, and ages the effects. A scene that never calls `update`
+ * still gets a drawn hero from `animate` alone, under a default sun.
  */
 
 // `Phaser` is an ambient *type* namespace, so annotations alone compile without
 // this import - but `Phaser.Core.Events.BLUR` below is a value read at runtime.
 import Phaser from "phaser";
 
+import type { Strike } from "./combat";
 import {
   createControls,
   nextHeading,
@@ -30,13 +39,24 @@ import {
   releaseButton,
   releaseKey,
   spendAttack,
+  spendCast,
+  spendFrost,
+  spendEnchant,
   spendHeading,
   wantsAttack,
+  wantsCast,
+  wantsFrost,
+  wantsEnchant,
 } from "./controls";
-import { drawCloud } from "./draw-cloud";
+import type { FrameContext } from "./frame-context";
+import { castEvent, swingStrike, type CastEvent } from "./hero/hero-actions";
+import { heroFigure } from "./hero/hero-figure";
+import { HeroLook } from "./hero/hero-look";
+import type { ShadowLight } from "./hero/hero-shadow";
 import type { PixelCloud } from "./ink";
 import { mouseButtonOf } from "./keybindings";
-import { HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
+import { HERO_EQUIPPED } from "./models";
+import { PixelSurface } from "./pixel-surface";
 import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPose } from "./planet";
 import {
   advancePlayer,
@@ -45,14 +65,13 @@ import {
   livePose,
   scrollPhase,
   stepProgress,
-  walkClipMs,
   type PlayerState,
   type World,
 } from "./player";
 import { RANK, rowAtFoot, TILE_WIDTH } from "./projection";
-import { renderModel, samplePose, type RigPose } from "./rig";
 import { MAX_STEP_MS } from "./spark-emitter";
 import { isRockAt } from "./terrain";
+import type { WindOptions } from "./wind";
 
 export interface Foot {
   readonly x: number;
@@ -67,23 +86,35 @@ export interface Foot {
  * stale number to disagree with the drawing.
  */
 export function heroHeight(): number {
-  const cloud = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, {
-    facing: "front",
-    flipX: false,
-  });
+  const cloud = heroFigure(HERO_EQUIPPED.basePose).cloud;
   return cloud.reduce((tallest, pixel) => Math.max(tallest, -pixel.y), 0) + 1;
 }
 
+/** His surface: room for a raised blade, its flames and a trail. Foot at (36, 56). */
+const BODY = { width: 72, height: 64, footX: 36, footY: 56 } as const;
+/** His shadow's: long at dusk, flat on the ground. Foot at (40, 6). */
+const SHADOW = { width: 80, height: 18, footX: 40, footY: 6 } as const;
+
+/** The sun until a scene hands one over: high over the left shoulder. */
+const DEFAULT_SUN: ShadowLight = { light: { x: -0.6, y: -0.8 }, elevation: 0.7 };
+
 export class HeroLayer {
   private readonly controls = createControls();
+  private readonly look = new HeroLook();
   private player: PlayerState;
   private world: World;
   private groundTop = 0;
   private foot: Foot = { x: 0, y: 0 };
-  private gfx!: Phaser.GameObjects.Graphics;
+  private body!: PixelSurface;
+  private shade!: PixelSurface;
   private cloud: PixelCloud = [];
-  /** Kept so a resize can redraw the idle pose it was already holding. */
+  private strikes: Strike[] = [];
+  private casts: CastEvent[] = [];
+  private hits = 0;
+  /** Set once a scene calls `update`; from then on `animate` leaves drawing to it. */
+  private driven = false;
   private lastElapsedMs = 0;
+  private lastDeltaMs = 0;
 
   constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
     this.player = createPlayer(start);
@@ -93,30 +124,29 @@ export class HeroLayer {
   create(scene: Phaser.Scene, groundTop: number, foot: Foot): void {
     this.groundTop = groundTop;
     this.foot = foot;
-    this.gfx = scene.add.graphics();
+    this.shade = new PixelSurface(scene, SHADOW.width, SHADOW.height, "hero-shadow");
+    this.body = new PixelSurface(scene, BODY.width, BODY.height, "hero");
     this.bindInput(scene);
-    this.redraw(0);
+    this.draw(DEFAULT_SUN, 1, undefined);
   }
 
   /**
    * Move the anchor after the window changed how much playfield there is.
    *
-   * This is the whole of the resize story now. There is no field to be fenced
-   * out of and no near edge to be carried over - a round planet has neither - so
-   * a shorter window re-centres the hero rather than clamping him back inside
-   * something.
+   * A round planet has no field to be fenced out of, so a shorter window
+   * re-centres the hero rather than clamping him back inside something.
    */
   setAnchor(foot: Foot): void {
     if (foot.x === this.foot.x && foot.y === this.foot.y) {
       return;
     }
     this.foot = foot;
-    this.redraw(this.lastElapsedMs);
+    this.place();
   }
 
   /**
-   * One frame: read what is held, let the simulation commit to an action, then
-   * draw whatever pose that leaves.
+   * One frame of simulation: read what is held, let each track commit to an
+   * action, and turn the beats that fired into strikes and casts.
    *
    * The delta is clamped for the same reason an emitter's is - a backgrounded
    * tab must not resolve four seconds of walking in a single step.
@@ -125,18 +155,80 @@ export class HeroLayer {
     const step = Math.min(Math.max(delta, 0), MAX_STEP_MS);
     const tick = advancePlayer(
       this.player,
-      { heading: nextHeading(this.controls), attack: wantsAttack(this.controls) },
+      {
+        heading: nextHeading(this.controls),
+        attack: wantsAttack(this.controls),
+        cast: wantsCast(this.controls),
+        frost: wantsFrost(this.controls),
+        enchant: wantsEnchant(this.controls),
+      },
       step,
       this.world,
     );
     this.player = tick.player;
-    if (tick.attacked) {
-      spendAttack(this.controls);
+    this.spend(tick);
+    const at = scrollPhase(this.player);
+    if (tick.struck) {
+      this.strikes.push(swingStrike(this.player.heading, at, this.player.enchanted));
     }
-    if (tick.usedHeading) {
-      spendHeading(this.controls);
+    if (tick.released) {
+      this.casts.push(castEvent(this.player.heading, at, this.player.school));
     }
-    this.redraw(elapsedMs);
+    this.lastElapsedMs = elapsedMs;
+    this.lastDeltaMs = step;
+    if (!this.driven) {
+      this.draw(DEFAULT_SUN, 1, undefined);
+    }
+  }
+
+  /**
+   * Draw this frame under the scene's sky: its light direction and sun height
+   * shade him and throw his shadow, its shadow strength darkens that, and the
+   * burning blade's light goes into `ctx.lights`.
+   */
+  update(ctx: FrameContext): void {
+    this.driven = true;
+    this.lastElapsedMs = ctx.elapsedMs;
+    this.lastDeltaMs = ctx.deltaMs;
+    const sun: ShadowLight = { light: ctx.atmosphere.light, elevation: ctx.atmosphere.elevation };
+    this.draw(sun, ctx.atmosphere.shadowStrength, ctx.wind);
+    const light = this.look.light(this.player, this.foot.x, this.foot.y, ctx.elapsedMs);
+    if (light !== undefined) {
+      ctx.lights.push(light);
+    }
+  }
+
+  /** Blows landed at the swing's contact beat since the last call, local tiles. */
+  drainStrikes(): Strike[] {
+    const strikes = this.strikes;
+    this.strikes = [];
+    return strikes;
+  }
+
+  /** Spells released at the cast's release beat since the last call. */
+  drainCasts(): CastEvent[] {
+    const casts = this.casts;
+    this.casts = [];
+    return casts;
+  }
+
+  /**
+   * Tell the hero one of his strikes connected. He answers with a burst off the
+   * blade's tip; the camera's answer (hit stop, shake) is the scene's to give,
+   * through `ctx.impulse`, because only the scene knows how hard the hit was.
+   */
+  reportHit(): void {
+    this.hits += 1;
+    this.look.hit(this.player.enchanted);
+  }
+
+  /** How many hits have been reported — a counter a scene or a test can diff. */
+  hitsLanded(): number {
+    return this.hits;
+  }
+
+  isEnchanted(): boolean {
+    return this.player.enchanted;
   }
 
   /** The pose the world is sampled from - frozen for the length of a step. */
@@ -155,13 +247,8 @@ export class HeroLayer {
   }
 
   /**
-   * The whole of the pose, for the debug map only.
-   *
-   * The scene is deliberately given `groundPose`/`phase`/`turn` and nothing
-   * else, because those three are all a *renderer* may know. The map is not a
-   * renderer — its entire job is to show where those three disagree with the
-   * simulation — so it is the one caller allowed to see the live pose and the
-   * step in flight together.
+   * The whole of the pose, for the debug map only - the one caller allowed to
+   * see the live pose and the step in flight together.
    */
   debugState(): {
     readonly live: PlanetPose;
@@ -177,7 +264,7 @@ export class HeroLayer {
     };
   }
 
-  /** The hero as pixels, for anything that wants to reflect or transform him. */
+  /** The hero as pixels (body only), for anything that wants to reflect or transform him. */
   cloudNow(): PixelCloud {
     return this.cloud;
   }
@@ -187,41 +274,47 @@ export class HeroLayer {
     return this.foot;
   }
 
-  private redraw(elapsedMs: number): void {
-    this.lastElapsedMs = elapsedMs;
-    this.cloud = renderModel(HERO_EQUIPPED, this.pose(elapsedMs), {
-      facing: this.player.facing,
-      flipX: this.player.flipX,
-    });
-
-    this.gfx.setDepth(
-      Math.round(rowAtFoot(this.foot.y, this.groundTop)) * TILE_WIDTH + RANK.actor,
-    );
-    this.gfx.clear();
-    drawCloud(this.gfx, this.cloud, this.foot.x, this.foot.y);
+  private spend(tick: ReturnType<typeof advancePlayer>): void {
+    if (tick.attacked) {
+      spendAttack(this.controls);
+    }
+    if (tick.cast) {
+      spendCast(this.controls);
+      spendFrost(this.controls);
+    }
+    if (tick.toggled) {
+      spendEnchant(this.controls);
+    }
+    if (tick.usedHeading) {
+      spendHeading(this.controls);
+    }
   }
 
-  /**
-   * Which clips, sampled where - plural, because he can swing while he walks.
-   *
-   * The two are *layered* rather than chosen between, which `samplePose` gives
-   * for free: unkeyed channels fall through to the pose handed in as the base.
-   * `SWING` keys only the sword arm, the sword and the torso, so laying it over
-   * a walk sample leaves the legs striding and the root bobbing underneath it -
-   * one line for a combination that would otherwise be a whole second clip.
-   *
-   * A step samples half a walk cycle so one press is one stride, and the next
-   * press leads with the other leg.
-   */
-  private pose(elapsedMs: number): RigPose {
-    const base = HERO_EQUIPPED.basePose;
-    const moving =
-      this.player.motion === "step"
-        ? samplePose(WALK, base, walkClipMs(this.player, WALK.durationMs))
-        : samplePose(IDLE, base, elapsedMs);
+  private draw(sun: ShadowLight, shadowStrength: number, wind: WindOptions | undefined): void {
+    const frame = this.look.frame({
+      player: this.player,
+      elapsedMs: this.lastElapsedMs,
+      deltaMs: this.lastDeltaMs,
+      sun,
+      wind,
+    });
+    this.cloud = frame.figure;
+    this.body.clear().paint(frame.scene, BODY.footX, BODY.footY).commit();
+    this.shade.clear();
+    if (shadowStrength > 0.02) {
+      this.shade.paint(frame.shadow, SHADOW.footX, SHADOW.footY, Math.min(shadowStrength * 1.1, 1));
+    }
+    this.shade.commit();
+    this.place();
+  }
 
-    const attackMs = this.player.attackMs;
-    return attackMs === undefined ? moving : samplePose(SWING, moving, attackMs);
+  private place(): void {
+    const row = Math.round(rowAtFoot(this.foot.y, this.groundTop));
+    this.body.image.setPosition(this.foot.x - BODY.footX, this.foot.y - BODY.footY);
+    this.body.image.setDepth(row * TILE_WIDTH + RANK.actor);
+    this.shade.image.setPosition(this.foot.x - SHADOW.footX, this.foot.y - SHADOW.footY);
+    // Over the grass of his own row, not under it: a shadow darkens the blades it falls on.
+    this.shade.image.setDepth(row * TILE_WIDTH + RANK.grass + 0.5);
   }
 
   /**
@@ -247,7 +340,7 @@ export class HeroLayer {
       });
     }
 
-    // Right-click is an attack here, so the context menu is in the way.
+    // Right-click is the cast, so the context menu is in the way.
     scene.input.mouse?.disableContextMenu();
     scene.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       pressButton(this.controls, mouseButtonOf(pointer.button));

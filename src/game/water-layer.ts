@@ -1,80 +1,58 @@
 /**
  * Everything the scene does *because there is water on the field*, in one
- * place.
+ * place: the puddles in reach, their still bodies, and everything that moves
+ * on them — the sky's glint, reflections, rain rings, a lightning flash.
  *
- * This used to be six methods and seven fields on `DemoScene`, which made that
- * class two jobs wearing one name: the overworld, and the pond in it. The seam
- * is clean - nothing here reads the hero, the slime, the sky or the storm
- * except through arguments - so it is a layer the scene owns rather than a
- * concern spread through it. `structure_check` is what noticed; the split is
- * worth having on its own merits.
+ * The shapes and the maths belong to `puddles.ts` and `water/`. What lives here
+ * is only the Phaser side: two `PixelSurface`s and when each is repainted.
  *
- * The shapes and the maths all belong to `puddles.ts`. What lives here is only
- * the Phaser side of it: which `Graphics` object each layer lands on, in what
- * order, and at what alpha.
+ * - **The body** (`PUDDLE_DEPTH`) is baked, not drawn: re-painted only when the
+ *   puddles are re-grown (once a step), when the sky they mirror has visibly
+ *   moved on, or when the ground's wetness has swollen or shrunk them.
+ * - **The surface** (`PUDDLE_DEPTH + 1`) is repainted every frame there is
+ *   water on screen — a few hundred pixels, one texture upload.
  *
  * **Two coordinate systems meet here, and mixing them is the bug to watch for.**
  * Water is part of the ground, so every puddle, ripple and reflection is built
- * on the *zero-phase* grid and the whole set of layers is then slid by
- * `scrollOffset` - one `setPosition` per layer, and nothing can drift against
- * the tile it is lying on. But the hero and the rain are drawn in *screen*
- * coordinates, because neither of them scrolls: the hero is the anchor and the
- * rain falls in front of the world. So anything crossing from one to the other
- * - where a drop went in, where the hero's reflection hangs - has the offset
- * taken off it on the way, and that subtraction is the whole of the trick.
+ * on the *zero-phase* grid and both surfaces are then slid by `scrollOffset` -
+ * one `setPosition` each, and nothing can drift against the tile it is lying
+ * on. But the hero and the rain are drawn in *screen* coordinates, because
+ * neither of them scrolls: the hero is the anchor and the rain falls in front
+ * of the world. So anything crossing from one to the other - where a drop went
+ * in, where a reflected thing's feet are - has the offset taken off it on the
+ * way, and that subtraction is the whole of the trick.
  */
 
-// `Phaser` is an ambient *type* namespace, so the annotations below compile
-// without it - but `Phaser.BlendModes.ADD` is a value read at runtime, and
-// without this import the scene dies on the first frame with `Phaser is not
-// defined`. `tsc` cannot see it; the browser can.
-import Phaser from "phaser";
+import type Phaser from "phaser";
 
-import { localFoot, scrollOffset, type CameraFrame } from "./camera";
-import { drawCloud } from "./draw-cloud";
+import { atmosphereAt, clockHours, type Atmosphere } from "./atmosphere";
+import { localFoot, localReach, scrollOffset, visibleLocal, type CameraFrame } from "./camera";
+import type { FrameContext } from "./frame-context";
 import type { PixelCloud } from "./ink";
-import { quantizedWave } from "./pixel-art";
+import { PixelSurface } from "./pixel-surface";
 import { toLocal, type PlanetPose } from "./planet";
 import type { ScreenPoint } from "./projection";
-import {
-  clipToPuddle,
-  createPuddle,
-  puddleGlints,
-  puddleHolds,
-  puddleReflection,
-  puddleSurface,
-  rainImpact,
-  type Puddle,
-} from "./puddles";
-import {
-  createRippleField,
-  rippleAlpha,
-  rippleCloud,
-  spawnRipple,
-  stepRipples,
-  type RippleField,
-} from "./ripples";
+import { createPuddle, puddleHolds, rainImpact, type Puddle } from "./puddles";
+import { createRippleField, spawnRipple, stepRipples, type RippleField } from "./ripples";
 import { MAX_STEP_MS, type EmitterState } from "./spark-emitter";
 import { puddlesNear } from "./terrain";
+import { createMask, fillMask, maskAt, type WaterMask } from "./water/mask";
+import { paintBodies, paintSurface, type WaterScene } from "./water/paint";
+import type { Landing } from "./water/rain";
+import { puddleScale } from "./water/schedule";
+import type { Reflectable } from "./water/reflect";
+import { reflectionKey, skyKey, skyReflection, type SkyReflection } from "./water/sky-inks";
+
+export type { Reflectable } from "./water/reflect";
 
 /**
  * Under everything that stands on the ground: water is *in* the ground, and a
  * puddle that painted over the hero's feet would read as a hole he is behind.
  */
-const PUDDLE_DEPTH = -900;
+export const PUDDLE_DEPTH = -900;
 
-/** How hard the sky's shimmer is lit, on top of the ink's own opacity. */
-const GLINT_ALPHA = 0.5;
-
-/** A reflection is dimmer than the thing it reflects, always. */
-const REFLECTION_ALPHA = 0.5;
-const TORCH_REFLECTION_ALPHA = 0.55;
-
-/** How far a torch's light smears down the water below it. */
-const TORCH_REFLECTION_ROWS = 14;
-
-/** Lightning lights water harder than it lights grass. */
-const LIGHTNING_WATER_GAIN = 0.55;
+/** Slack round the render target, so a puddle is painted before it scrolls on. */
+const MARGIN = 20;
 
 /** A foot position on the ground - where a thing stands, so where it reflects. */
 export interface Foot {
@@ -82,33 +60,45 @@ export interface Foot {
   readonly y: number;
 }
 
+/** What stands over the water this frame. */
+export interface WaterActors {
+  readonly hero?: Reflectable;
+  readonly reflectables?: readonly Reflectable[];
+}
+
 export class WaterLayer {
   private puddles: Puddle[] = [];
-  private ripples!: RippleField;
+  private ripples: RippleField = createRippleField();
+  private mask!: WaterMask;
+  private body!: PixelSurface;
+  private surface!: PixelSurface;
+  private sky: SkyReflection = skyReflection(atmosphereAt(13));
   private sampled: PlanetPose | undefined;
+  private bakedKey = "";
+  private atmosphereKey = "";
+  private scale = 1;
+  private rain = 0;
+  private strike = 0;
+  private surfaceDirty = false;
 
-  private bodyGfx!: Phaser.GameObjects.Graphics;
-  private glintGfx!: Phaser.GameObjects.Graphics;
-  private reflectionGfx!: Phaser.GameObjects.Graphics;
-  private rippleGfx!: Phaser.GameObjects.Graphics;
-  private flashGfx!: Phaser.GameObjects.Graphics;
+  /** The two surfaces. What is on them arrives with the first `update`. */
+  create(scene: Phaser.Scene, width = 320, height = 180): void {
+    this.mask = createMask(width, height, MARGIN);
+    this.body = new PixelSurface(scene, this.mask.width, this.mask.height, "water-body");
+    this.body.image.setDepth(PUDDLE_DEPTH);
+    this.surface = new PixelSurface(scene, this.mask.width, this.mask.height, "water-surface");
+    this.surface.image.setDepth(PUDDLE_DEPTH + 1);
+  }
 
-  /** The five layers. What is on them arrives with the first `relocate`. */
-  create(scene: Phaser.Scene): void {
-    this.bodyGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH);
-    this.glintGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 1);
-    this.reflectionGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 2);
-    this.rippleGfx = scene.add.graphics().setDepth(PUDDLE_DEPTH + 3);
-
-    // Stamped at full strength and then held at alpha 0; a strike only turns it
-    // up, so a flash costs one property set rather than a redraw.
-    this.flashGfx = scene.add
-      .graphics()
-      .setDepth(PUDDLE_DEPTH + 4)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setAlpha(0);
-
-    this.ripples = createRippleField();
+  /**
+   * One frame of water: re-grow the puddles if the pose moved on, re-bake the
+   * bodies if the sky or the wetness changed, then paint what moves.
+   * `actors` are in screen pixels, feet where they are drawn.
+   */
+  update(ctx: FrameContext, actors: WaterActors = {}): void {
+    const flat: CameraFrame = { ...ctx.frame, phaseX: 0, phaseY: 0 };
+    this.relocate(ctx.frame, ctx.pose, localReach(visibleLocal(flat, ctx.width, ctx.height)));
+    this.draw(ctx.frame, ctx.atmosphere, ctx.elapsedMs, ctx.deltaMs, actors);
   }
 
   /**
@@ -124,172 +114,175 @@ export class WaterLayer {
       return;
     }
     this.sampled = pose;
+    this.bakedKey = "";
     const flat: CameraFrame = { ...frame, phaseX: 0, phaseY: 0 };
-
     this.puddles = puddlesNear(pose, reach).map((site) => {
       const foot = localFoot(flat, toLocal(pose, site));
-      return {
-        ...createPuddle({
-          id: `${Math.round(site.x)}:${Math.round(site.y)}`,
-          centerX: foot.x,
-          centerY: foot.y,
-          radius: site.size,
-          seed: site.seed,
-        }),
-      };
+      return createPuddle({
+        id: `${Math.round(site.x)}:${Math.round(site.y)}`,
+        centerX: foot.x,
+        centerY: foot.y,
+        radius: Math.max(2, site.size * this.scale),
+        seed: site.seed,
+      });
     });
+    fillMask(this.mask, this.puddles);
+  }
 
-    this.bodyGfx.clear();
-    this.flashGfx.clear();
-    for (const puddle of this.puddles) {
-      drawCloud(this.bodyGfx, puddleSurface(puddle), 0, 0);
-      const lit: PixelCloud = puddle.water.map((pixel) => ({ ...pixel, ink: "deep" }));
-      drawCloud(this.flashGfx, lit, 0, 0);
+  /** How hard it is raining (roughens reflections) and how soaked the ground is (sizes puddles). */
+  setWeather(rain: number, wetness: number): void {
+    this.rain = rain;
+    const scale = puddleScale(wetness);
+    if (scale !== this.scale) {
+      this.scale = scale;
+      this.sampled = undefined;
     }
+  }
+
+  /** How hard the storm is lighting the water this instant; 0 is no strike. */
+  setStrike(alpha: number): void {
+    this.strike = alpha;
+  }
+
+  /**
+   * A drop that reached the ground: if it came down into water, ring the
+   * puddle and report it caught. The drop's last segment goes to `rainImpact`
+   * — where along it the ring belongs is that function's problem, and the
+   * comment there is the one worth reading. The scroll offset comes off both
+   * ends because rain falls in screen space and puddles do not.
+   */
+  catchDrop(landing: Landing, frame: CameraFrame): boolean {
+    if (this.puddles.length === 0) {
+      return false;
+    }
+    const offset = scrollOffset(frame);
+    const impact = rainImpact(
+      this.puddles,
+      landing.fromX - offset.x,
+      landing.fromY - offset.y,
+      landing.x - offset.x,
+      landing.y - offset.y,
+    );
+    if (impact === null) {
+      return false;
+    }
+    spawnRipple(this.ripples, impact.x, impact.y);
+    return true;
   }
 
   /** Whichever puddle a screen-space foot is standing in, if any. */
   puddleUnder(point: Foot, offset: ScreenPoint): Puddle | undefined {
-    return this.puddles.find((puddle) =>
-      puddleHolds(puddle, point.x - offset.x, point.y - offset.y),
-    );
+    return this.puddles.find((puddle) => puddleHolds(puddle, point.x - offset.x, point.y - offset.y));
   }
 
   /**
-   * Retire every drop that crossed water this step, and ring the puddle where
-   * it went in.
-   *
-   * The drop's own velocity reconstructs where it was before the step; where
-   * along that segment the ring belongs is `rainImpact`'s problem, and the
-   * comment there is the one worth reading. The offset comes off both ends of
-   * the segment because rain falls in screen space and puddles do not.
+   * Is this screen pixel standing water right now? One array read — cheap
+   * enough for a grass or decal layer to ask per tuft, so nothing grows in a
+   * puddle or scorches its surface.
+   */
+  holdsWater(point: Foot, frame: CameraFrame): boolean {
+    const offset = scrollOffset(frame);
+    return maskAt(this.mask, point.x - offset.x, point.y - offset.y) !== 0;
+  }
+
+  /** The puddles in reach, zero-phase screen pixels. */
+  puddlesInReach(): readonly Puddle[] {
+    return this.puddles;
+  }
+
+  /**
+   * The old per-emitter entry point, for a scene still driving the curtain
+   * rain of `createRain`: every drop that crossed water this step rings it.
    */
   landRain(rain: EmitterState, delta: number, frame: CameraFrame): void {
     const step = Math.min(Math.max(delta, 0), MAX_STEP_MS);
-    const offset = scrollOffset(frame);
     for (const particle of rain.particles) {
       if (!particle.active) {
         continue;
       }
-      const impact = rainImpact(
-        this.puddles,
-        particle.x - particle.vx * step - offset.x,
-        particle.y - particle.vy * step - offset.y,
-        particle.x - offset.x,
-        particle.y - offset.y,
-      );
-      if (impact !== null) {
-        spawnRipple(this.ripples, impact.x, impact.y);
+      const landing = {
+        sheet: 1 as const,
+        fromX: particle.x - particle.vx * step,
+        fromY: particle.y - particle.vy * step,
+        x: particle.x,
+        y: particle.y,
+      };
+      if (this.catchDrop(landing, frame)) {
         particle.active = false;
       }
     }
   }
 
   /**
-   * Everything drawn on water, in the order light reaches the eye: the sky's
-   * shimmer, then what is standing over it, then the rings the rain punched.
-   *
-   * The puddle sees whatever the hero is doing, transforms included, and gives
-   * it back in the hero's own inks - a frozen hero reflects ice. He only gets a
-   * reflection when he is actually standing in water now, which on a planet
-   * whose puddles are generated rather than placed is the honest answer: walk
-   * into one and it appears under you.
+   * The pre-`FrameContext` entry point, kept so a scene that has not moved to
+   * `update(ctx, actors)` still draws water. It reads the default clock for
+   * the sky; the torch is no longer reflected here — pass it (or the campfire)
+   * as a `glow` reflectable through `update`.
    */
   animate(
     delta: number,
     elapsedMs: number,
     hero: { readonly cloud: PixelCloud; readonly foot: Foot },
-    torchFoot: Foot,
+    _torchFoot: Foot,
     frame: CameraFrame,
   ): void {
-    stepRipples(this.ripples, Math.min(delta, 40));
-    const offset = scrollOffset(frame);
-    for (const layer of [
-      this.bodyGfx,
-      this.glintGfx,
-      this.reflectionGfx,
-      this.rippleGfx,
-      this.flashGfx,
-    ]) {
-      layer.setPosition(offset.x, offset.y);
-    }
-
-    this.glintGfx.clear();
-    for (const puddle of this.puddles) {
-      drawCloud(this.glintGfx, puddleGlints(puddle, elapsedMs), 0, 0, GLINT_ALPHA);
-    }
-
-    this.reflectionGfx.clear();
-    this.drawReflections(hero, torchFoot, offset, elapsedMs);
-
-    this.rippleGfx.clear();
-    for (const ripple of this.ripples.ripples) {
-      if (!ripple.active) {
-        continue;
-      }
-      drawCloud(this.rippleGfx, this.overWater(rippleCloud(ripple)), 0, 0, rippleAlpha(ripple));
-    }
+    this.draw(frame, atmosphereAt(clockHours(elapsedMs)), elapsedMs, delta, { hero });
   }
 
-  /** How hard the storm is lighting the water this instant; 0 is no strike. */
-  setStrike(alpha: number): void {
-    this.flashGfx.setAlpha(LIGHTNING_WATER_GAIN * alpha);
-  }
-
-  private drawReflections(
-    hero: { readonly cloud: PixelCloud; readonly foot: Foot },
-    torchFoot: Foot,
-    offset: ScreenPoint,
+  private draw(
+    frame: CameraFrame,
+    atmosphere: Atmosphere,
     elapsedMs: number,
+    deltaMs: number,
+    actors: WaterActors,
   ): void {
-    const heroPuddle = this.puddleUnder(hero.foot, offset);
-    if (heroPuddle !== undefined) {
-      const reflection = puddleReflection(
-        heroPuddle,
-        hero.cloud,
-        hero.foot.x - offset.x,
-        hero.foot.y - offset.y,
-        elapsedMs,
-      );
-      drawCloud(this.reflectionGfx, reflection, 0, 0, REFLECTION_ALPHA);
+    stepRipples(this.ripples, Math.min(Math.max(deltaMs, 0), 40));
+    const offset = scrollOffset(frame);
+    this.body.image.setPosition(offset.x - MARGIN, offset.y - MARGIN);
+    this.surface.image.setPosition(offset.x - MARGIN, offset.y - MARGIN);
+
+    const scene: WaterScene = { puddles: this.puddles, mask: this.mask, sky: this.sky };
+    this.bake(atmosphere, scene);
+    if (this.puddles.length === 0) {
+      this.blankSurface();
+      return;
     }
 
-    const torchPuddle = this.puddleUnder(torchFoot, offset);
-    if (torchPuddle !== undefined) {
-      const base = { x: torchFoot.x - offset.x, y: torchFoot.y - offset.y };
-      drawCloud(
-        this.reflectionGfx,
-        this.torchReflection(torchPuddle, base, elapsedMs),
-        0,
-        0,
-        TORCH_REFLECTION_ALPHA,
-      );
-    }
+    const things = [...(actors.hero === undefined ? [] : [actors.hero]), ...(actors.reflectables ?? [])];
+    const reflect = things.map((thing) => ({
+      ...thing,
+      foot: { x: thing.foot.x - offset.x, y: thing.foot.y - offset.y },
+    }));
+    this.surface.clear();
+    paintSurface(this.surface.buffer, { ...scene, sky: this.sky }, this.ripples, reflect, {
+      elapsedMs,
+      rain: this.rain,
+      strike: this.strike,
+    });
+    this.surface.commit();
+    this.surfaceDirty = true;
   }
 
-  /** Rings spread past the rim they started inside; the water is the frame. */
-  private overWater(cloud: PixelCloud): PixelCloud {
-    return cloud.filter((pixel) =>
-      this.puddles.some((puddle) => puddleHolds(puddle, pixel.x, pixel.y)),
-    );
+  /** Re-paint the still bodies when the puddles, their size or the sky they mirror changed. */
+  private bake(atmosphere: Atmosphere, scene: WaterScene): void {
+    const atmosphereKey = skyKey(atmosphere);
+    if (atmosphereKey !== this.atmosphereKey) {
+      this.atmosphereKey = atmosphereKey;
+      this.sky = skyReflection(atmosphere);
+    }
+    const key = reflectionKey(this.sky);
+    if (key === this.bakedKey) {
+      return;
+    }
+    this.bakedKey = key;
+    paintBodies(this.body.buffer, { ...scene, sky: this.sky });
+    this.body.touch().commit();
   }
 
-  /**
-   * The torch on the water - a swaying column of light, not a mirrored sprite.
-   *
-   * A flame has no silhouette worth flipping; what a puddle actually shows of
-   * one is a smeared streak that breaks up with distance, which is three lines
-   * of wave rather than a second set of torch frames.
-   */
-  private torchReflection(puddle: Puddle, foot: Foot, elapsedMs: number): PixelCloud {
-    const cloud: PixelCloud = [];
-    for (let dy = 0; dy < TORCH_REFLECTION_ROWS; dy += 1) {
-      const sway = quantizedWave(elapsedMs + dy * 130, 1100, 2, dy * 0.4);
-      const half = dy < 5 ? 1 : 0;
-      for (let dx = -half; dx <= half; dx += 1) {
-        cloud.push({ x: foot.x + dx + sway, y: foot.y + dy, ink: dx === 0 ? "amber" : "ember" });
-      }
+  private blankSurface(): void {
+    if (this.surfaceDirty) {
+      this.surface.clear().commit();
+      this.surfaceDirty = false;
     }
-    return clipToPuddle(puddle, cloud);
   }
 }

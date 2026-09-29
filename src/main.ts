@@ -2,26 +2,22 @@ import Phaser from "phaser";
 
 import "./style.css";
 import { DemoScene, GAME_SIZE } from "./game/demo-scene";
-import { parseSkyFraction } from "./game/horizon";
-import { parseStrafeRadius } from "./game/planet";
+import { readSceneOptions } from "./game/scene-options";
 import { coverOffset, integerCoverScale } from "./game/integer-scale";
 import { MapOverlay, wantsMap } from "./game/map-overlay";
 import { visibleHeight } from "./game/viewport";
 
-// Two framing decisions, both retunable without a rebuild. `?horizon=0.08` (or
-// `?horizon=8%`) moves the 88/12 sky split; `?radius=64` widens the circle a
-// sideways walk runs around, which is what sets how hard the world turns under
-// a strafe. An unreadable value falls back rather than blanking the game.
+// Every knob the address bar can turn — the sky split, the strafe radius, the
+// time of day and the weather — is read in `scene-options.ts`. An unreadable
+// value falls back rather than blanking the game.
 const query = new URLSearchParams(window.location.search);
-const skyFraction = parseSkyFraction(query.get("horizon"));
-const strafeRadius = parseStrafeRadius(query.get("radius"));
 // `?map=1` stacks the debug instrument over the canvas. Off on every other
 // load, because the page is the game world and nothing else unless asked.
 const showMap = wantsMap(query.get("map"));
 
 // Held rather than built inline: the layout below has to tell it how much of
 // the render target survived the window's crop.
-const scene = new DemoScene(skyFraction, strafeRadius);
+const scene = new DemoScene(readSceneOptions(query));
 
 /**
  * The one place the renderer's context is decided.
@@ -126,6 +122,11 @@ game.events.once(Phaser.Core.Events.READY, () => {
     scene.setMap(MapOverlay.attach(host, showMap));
   }
 });
+
+// A handle for a browser-driving agent profiling the dev build; never shipped.
+if (import.meta.env.DEV) {
+  (window as unknown as { __game: Phaser.Game }).__game = game;
+}
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => game.destroy(true));

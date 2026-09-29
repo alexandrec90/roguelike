@@ -52,7 +52,7 @@ export interface Feature {
   readonly size: number;
 }
 
-interface FeatureSpec {
+export interface FeatureSpec {
   readonly seed: number;
   /** Share of planet cells that carry one. */
   readonly density: number;
@@ -193,7 +193,7 @@ export function openGround(near: PlanetPoint): PlanetPoint {
  * which way the hero happens to be facing - a tree must not pop into being
  * because he turned round.
  */
-function featuresNear(centre: PlanetPoint, reach: number, spec: FeatureSpec): Feature[] {
+export function featuresNear(centre: PlanetPoint, reach: number, spec: FeatureSpec): Feature[] {
   const found: Feature[] = [];
   const left = Math.floor(centre.x - reach);
   const top = Math.floor(centre.y - reach);

@@ -22,10 +22,12 @@
 import {
   actionForButton,
   actionForKey,
+  COMMANDS,
   DEFAULT_KEYBINDINGS,
   DIRECTION_AXES,
   HEADING_VECTOR,
   headingOf,
+  type Command,
   type Direction,
   type GameAction,
   type Heading,
@@ -42,11 +44,12 @@ export interface ControlState {
   /** A monotonic counter; wall-clock time would tie on a same-frame press. */
   sequence: number;
   /**
-   * An attack pressed while the player was mid-action, kept until it is spent.
-   * A tap that lands during a 520 ms swing is a queued follow-up, not a
-   * discarded input.
+   * Commands pressed and not yet acted on, kept until they are spent. A tap on
+   * attack that lands during a 520 ms swing is a queued follow-up, not a
+   * discarded input; the same holds for a cast, and a tap on enchant is only
+   * ever a press — it toggles, so holding it must not flicker the blade.
    */
-  attackQueued: boolean;
+  readonly queued: Set<Command>;
   /**
    * The heading last pressed, kept on the same terms.
    *
@@ -68,7 +71,7 @@ export function createControls(bindings: Keybindings = DEFAULT_KEYBINDINGS): Con
     held: new Map(),
     pressedAt: new Map(),
     sequence: 0,
-    attackQueued: false,
+    queued: new Set(),
     queuedHeading: undefined,
   };
 }
@@ -106,7 +109,7 @@ export function releaseButton(state: ControlState, button: MouseButton | undefin
 export function releaseAll(state: ControlState): void {
   state.held.clear();
   state.pressedAt.clear();
-  state.attackQueued = false;
+  state.queued.clear();
   state.queuedHeading = undefined;
 }
 
@@ -175,11 +178,45 @@ export function spendHeading(state: ControlState): void {
  * starts, so a tap during a swing survives until it can be used.
  */
 export function wantsAttack(state: ControlState): boolean {
-  return state.attackQueued || isHeld(state, "attack");
+  return state.queued.has("attack") || isHeld(state, "attack");
 }
 
 export function spendAttack(state: ControlState): void {
-  state.attackQueued = false;
+  state.queued.delete("attack");
+}
+
+/** Whether the player wants to cast: held or queued, exactly like the sword. */
+export function wantsCast(state: ControlState): boolean {
+  return state.queued.has("cast") || isHeld(state, "cast");
+}
+
+export function spendCast(state: ControlState): void {
+  state.queued.delete("cast");
+}
+
+/** Whether the player wants the frost nova: held or queued, like a cast. */
+export function wantsFrost(state: ControlState): boolean {
+  return state.queued.has("frost") || isHeld(state, "frost");
+}
+
+export function spendFrost(state: ControlState): void {
+  state.queued.delete("frost");
+}
+
+/**
+ * Whether a toggle of the blade's fire is owed. Queued only, never held: one
+ * press is one toggle, however long the key stays down.
+ */
+export function wantsEnchant(state: ControlState): boolean {
+  return state.queued.has("enchant");
+}
+
+export function spendEnchant(state: ControlState): void {
+  state.queued.delete("enchant");
+}
+
+function isCommand(action: GameAction): action is Command {
+  return (COMMANDS as readonly GameAction[]).includes(action);
 }
 
 function press(state: ControlState, action: GameAction | undefined, source: string): boolean {
@@ -195,8 +232,8 @@ function press(state: ControlState, action: GameAction | undefined, source: stri
   if (fresh) {
     state.sequence += 1;
     state.pressedAt.set(action, state.sequence);
-    if (action === "attack") {
-      state.attackQueued = true;
+    if (isCommand(action)) {
+      state.queued.add(action);
     } else {
       state.queuedHeading = joinQueued(state.queuedHeading, action);
     }

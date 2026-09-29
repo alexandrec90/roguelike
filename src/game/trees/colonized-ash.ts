@@ -82,7 +82,7 @@ class ColonizedAsh implements SceneryInstance {
       );
     }
     for (const pixel of wood) {
-      cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, this.seed, INK_RAMPS.bone) });
+      cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, this.seed, INK_RAMPS.bark) });
     }
 
     this.tips.forEach((tip, index) => {

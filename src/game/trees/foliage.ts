@@ -81,7 +81,7 @@ export function castShadow(cloud: PixelCloud, options: ShadowOptions): PixelClou
       continue;
     }
     placed.add(key);
-    shadow.push({ x, y, ink: "void" });
+    shadow.push({ x, y, ink: distance > 0.55 ? "shadow-soft" : "shadow" });
   }
   return shadow;
 }
@@ -126,7 +126,9 @@ export function leafCluster(cloud: PixelCloud, options: LeafOptions): void {
       // straight to a three-step ramp puts most of the clump on the top step,
       // which is a white bush. The body belongs on the middle step, with the
       // highlight rare enough to still read as a highlight.
-      const level = (density - 0.5) * 1.15;
+      // With the six-step leaf ramp the body sits on the middle steps; the
+      // upper rows of a clump catch the sky, so they climb a step.
+      const level = 0.16 + (density - 0.5) * 1.2 - (dy / options.radiusY) * 0.14;
       cloud.push({
         x: options.x + dx,
         y: options.y + dy,

@@ -46,7 +46,7 @@ function ring(seed: number): Cap[] {
       // The ring is a circle on the ground, so its depth is foreshortened to
       // three quarters — the same ratio every ground shape in the game uses.
       y: Math.round(Math.sin(angle) * 4) - 2,
-      radius: 2.4 + pixelHash(index, 0, seed, 3) * 1.8,
+      radius: 1.8 + pixelHash(index, 0, seed, 3) * 1.3,
       stem: 2 + Math.round(pixelHash(index, 0, seed, 4) * 3),
       phase: pixelHash(index, 0, seed, 5),
     };
@@ -55,9 +55,16 @@ function ring(seed: number): Cap[] {
 
 class MushroomRing implements SceneryInstance {
   private readonly caps: readonly Cap[];
+  /**
+   * One ring in four is a fairy ring, and glows — the cycled arcane ramp. The
+   * rest are fly agarics: red caps, white flecks, which is what a ring of
+   * mushrooms in a meadow mostly is.
+   */
+  private readonly fairy: boolean;
 
   constructor(private readonly seed: number) {
     this.caps = ring(seed);
+    this.fairy = pixelHash(0, 1, seed, 9) < 0.25;
   }
 
   /**
@@ -86,22 +93,35 @@ class MushroomRing implements SceneryInstance {
           weld: 0,
           lobes: [{ x: cap.x, y: cap.y, toX: cap.x, toY: cap.y - cap.stem, radius: 0.5 }],
         },
-        light: { ramp: ["bone"], ambient: 1, occlusion: 0, ...shading },
+        light: { ramp: ["earth-5", "petal-2"], ambient: 0.5, occlusion: 0, ...shading },
         clip: { bottom: 0 },
       });
+      // A dome, not a ball: a short horizontal capsule with its underside cut
+      // flat just below the centre line, which is the silhouette of a cap.
+      const capY = cap.y - cap.stem - cap.radius * 0.2;
       parts.push({
         spec: {
-          lobes: [{ x: cap.x, y: cap.y - cap.stem - cap.radius * 0.4, radius: cap.radius }],
+          lobes: [
+            {
+              x: cap.x - cap.radius * 0.45,
+              y: capY,
+              toX: cap.x + cap.radius * 0.45,
+              toY: capY,
+              radius: cap.radius * 0.8,
+            },
+          ],
           weld: 0.6,
-          warp: { amplitudeX: 1.2, amplitudeY: 0.8, scale: 2.4, seed: this.seed, drift: 0, octaves: 1 },
+          warp: { amplitudeX: 0.8, amplitudeY: 0.5, scale: 2.4, seed: this.seed, drift: 0, octaves: 1 },
         },
         light: {
-          ramp: cycleRamp(INK_RAMPS.arcane, env.elapsedMs / 260 + cap.phase * 4),
+          ramp: this.fairy
+            ? cycleRamp(INK_RAMPS.arcane, env.elapsedMs / 260 + cap.phase * 4)
+            : INK_RAMPS.crimson,
           ambient: 0.35,
-          occlusion: 0.24,
+          occlusion: 0.2,
           ...shading,
         },
-        clip: { bottom: 0 },
+        clip: { bottom: Math.min(0, Math.round(capY + 1)) },
       });
     }
     return parts;
@@ -114,7 +134,23 @@ class MushroomRing implements SceneryInstance {
         cloud.push(pixel);
       }
     }
+    if (!this.fairy) {
+      this.flecks(cloud);
+    }
     return cloud;
+  }
+
+  /** The white flecks of a fly agaric: two or three, on the upper cap. */
+  private flecks(cloud: PixelCloud): void {
+    this.caps.forEach((cap, index) => {
+      const capY = Math.round(cap.y - cap.stem - cap.radius * 0.2);
+      const count = 2 + Math.floor(pixelHash(index, 3, this.seed, 11) * 2);
+      for (let fleck = 0; fleck < count; fleck += 1) {
+        const dx = Math.round((pixelHash(index, fleck, this.seed, 12) * 2 - 1) * cap.radius * 0.8);
+        const dy = -Math.round(pixelHash(index, fleck, this.seed, 13) * cap.radius * 0.6);
+        cloud.push({ x: cap.x + dx, y: capY + dy, ink: "petal-2" });
+      }
+    });
   }
 }
 

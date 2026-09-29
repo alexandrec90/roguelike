@@ -105,12 +105,12 @@ class SnowConifer implements SceneryInstance {
     const skyward = -normal.y;
     const depth = Math.min(-distance / 6, 1);
     if (skyward > 0.28 && this.settled > 0 && skyward * this.settled > 0.22 + depth * 0.5) {
-      return rampInk(INK_RAMPS.tide, 0.7 + skyward * 0.3, { x, y });
+      return rampInk(INK_RAMPS.frost, 0.7 + skyward * 0.3, { x, y });
     }
     // Rain darkens the needles by pulling the level down a step; a wet conifer
     // is nearly black except where the light skims it.
-    const level = 0.25 + skyward * 0.5 - depth * 0.35 - wet * 0.22;
-    return rampInk(INK_RAMPS.canopy, Math.max(level, 0.04), { x, y });
+    const level = 0.38 + skyward * 0.5 - depth * 0.3 - wet * 0.22;
+    return rampInk(INK_RAMPS.pine, Math.max(level, 0.04), { x, y });
   }
 }
 

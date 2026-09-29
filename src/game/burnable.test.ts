@@ -158,7 +158,7 @@ describe("inking the fire onto the cloud", () => {
     igniteAt(burnable, 0, -6);
     burn(burnable, 800);
     const lit = burnInk(burnable, cloud);
-    expect(lit.some((pixel) => pixel.ink === "ember" || pixel.ink === "amber")).toBe(true);
+    expect(lit.some((pixel) => pixel.ink.startsWith("fire-"))).toBe(true);
   });
 
   it("chars burnt-out cells to a dark ink, never to the background", () => {
@@ -169,7 +169,7 @@ describe("inking the fire onto the cloud", () => {
     expect(burnable.field.nodes.some((_node, index) => isSpent(burnable.field, index))).toBe(true);
     // `void` would delete the object rather than blacken it.
     expect(burnInk(burnable, cloud).every((pixel) => pixel.ink !== "void")).toBe(true);
-    expect(burnInk(burnable, cloud).some((pixel) => pixel.ink === "deep")).toBe(true);
+    expect(burnInk(burnable, cloud).some((pixel) => pixel.ink === "bark-0")).toBe(true);
   });
 
   it("leaves a pixel outside the graph alone", () => {

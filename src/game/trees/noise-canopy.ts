@@ -63,7 +63,7 @@ class NoiseCanopy implements SceneryInstance {
     strokeLine(wood, { x: lean, y: CROWN_Y + 8 }, { x: lean - 8, y: CROWN_Y - 1 }, "steel", 2);
     strokeLine(wood, { x: lean, y: CROWN_Y + 8 }, { x: lean + 9, y: CROWN_Y + 1 }, "steel", 2);
     for (const pixel of wood) {
-      cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, this.seed, INK_RAMPS.bone) });
+      cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, this.seed, INK_RAMPS.bark) });
     }
   }
 
@@ -80,7 +80,7 @@ class NoiseCanopy implements SceneryInstance {
         }
         // Spread over a wide window and biased low: bone is a highlight on a
         // handful of top leaves, never the body of the canopy.
-        const level = Math.min(Math.max((density - LEAF_THRESHOLD) / 0.85, 0), 1);
+        const level = Math.min(Math.max(0.22 + (density - LEAF_THRESHOLD) / 0.75, 0), 1);
         cloud.push({ x, y, ink: rampInk(INK_RAMPS.canopy, level, { x, y }) });
       }
     }

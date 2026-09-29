@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionForButton,
   actionForKey,
+  COMMANDS,
   DEFAULT_KEYBINDINGS,
   DIRECTION_AXES,
   DIRECTIONS,
@@ -24,10 +25,15 @@ describe("the default control map", () => {
     expect(["KeyD", "ArrowRight"].map((code) => actionForKey(code))).toEqual(["east", "east"]);
   });
 
-  it("attacks on space and on either mouse button", () => {
+  it("attacks on space and the left button, and casts on Q and the right button", () => {
     expect(actionForKey("Space")).toBe("attack");
     expect(actionForButton("left")).toBe("attack");
-    expect(actionForButton("right")).toBe("attack");
+    expect(actionForKey("KeyQ")).toBe("cast");
+    expect(actionForButton("right")).toBe("cast");
+  });
+
+  it("lights the blade on F", () => {
+    expect(actionForKey("KeyF")).toBe("enchant");
   });
 
   it("leaves the scroll wheel alone — a stray middle click is not a swing", () => {
@@ -35,13 +41,15 @@ describe("the default control map", () => {
   });
 
   it("claims nothing it was not given", () => {
-    expect(actionForKey("KeyQ")).toBeUndefined();
+    expect(actionForKey("KeyR")).toBeUndefined();
     expect(actionForKey("F5")).toBeUndefined();
   });
 
   it("binds every action, and binds no input twice", () => {
     expect(validateKeybindings(DEFAULT_KEYBINDINGS)).toEqual([]);
-    expect(GAME_ACTIONS).toHaveLength(DIRECTIONS.length + 1);
+    expect(GAME_ACTIONS).toHaveLength(DIRECTIONS.length + COMMANDS.length);
+    expect(COMMANDS).toEqual(["attack", "cast", "frost", "enchant"]);
+    expect(actionForKey("KeyE")).toBe("frost");
   });
 
   it("names the mouse buttons the DOM numbers", () => {

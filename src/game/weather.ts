@@ -1,14 +1,32 @@
 /**
  * Weather: rain and lightning, both seeded, both particle- or line-shaped.
  *
- * Rain is the same pooled emitter the torch sparks use (`spark-emitter.ts`)
- * with the velocity turned downward and a steady wind on it — one emitter
- * implementation, two skies.
+ * `createRain` is the original curtain of rain — the pooled spark emitter
+ * turned downward with a steady wind on it — and is kept for anything that
+ * wants one sheet of drops falling the height of a frame. The game's rain is
+ * `water/rain.ts`: three sheets of drops that each land on their own band of
+ * the field. Both lean by the one number below, `RAIN_SLANT`.
+ *
  * Lightning is a seeded jagged polyline plus a deterministic schedule, so two
- * captures of the same second of the scene show the same bolt.
+ * captures of the same second of the scene show the same bolt; `water/bolt.ts`
+ * dresses the polyline in a core, a glow and branches. And *whether* it is
+ * raining at all is `water/schedule.ts` — `weatherAt(elapsed, seed)`, re-exported
+ * here — so the whole sky is still a pure function of the clock.
  */
 
 import { createEmitter, type EmitterConfig, type EmitterState } from "./spark-emitter";
+import type { WeatherState } from "./water/schedule";
+
+export {
+  parseWeather,
+  stepWetness,
+  WEATHER_CYCLE_MS,
+  WEATHER_PRESETS,
+  WEATHER_SEED,
+  weatherAt,
+  type WeatherPreset,
+  type WeatherState,
+} from "./water/schedule";
 
 /** Fall speed of a drop, in logical pixels per millisecond. */
 export const RAIN_FALL_SPEED = 0.16;
@@ -139,4 +157,14 @@ export function lightningAt(elapsedMs: number, seed: number): LightningState {
     boltSeed: Math.imul(window + 1, 0x9e3779b9) ^ seed,
     xUnit: hashUnit(window, seed ^ 0x85ebca6b),
   };
+}
+
+const CALM: LightningState = { active: false, alpha: 0, boltSeed: 0, xUnit: 0 };
+
+/**
+ * The storm schedule, gated by the weather: a sky that is not a storm never
+ * strikes, whatever `lightningAt` would have said for that instant.
+ */
+export function stormLightningAt(elapsedMs: number, seed: number, weather: WeatherState): LightningState {
+  return weather.storm ? lightningAt(elapsedMs, seed) : CALM;
 }
