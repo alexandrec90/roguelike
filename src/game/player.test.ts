@@ -14,6 +14,7 @@ import {
   ATTACK_MS,
   createPlayer,
   DIAGONAL_STEP_MS,
+  facingYaw,
   gaitOf,
   groundPose,
   livePose,
@@ -130,7 +131,7 @@ describe("advancePlayer", () => {
 
     expect(blocked.player.motion).toBe("idle");
     expect(blocked.player.pose).toEqual(START);
-    expect(blocked.player.facing).toBe("back");
+    expect(blocked.player.facing).toBe("north");
     expect(blocked.usedHeading).toBe(true);
   });
 
@@ -168,11 +169,11 @@ describe("the four presses", () => {
     expect(Math.abs(wrapDelta(round.pose.y, START.y))).toBeLessThan(0.6);
   });
 
-  it("face the way they were pressed, mirroring rather than drawing a third view", () => {
-    expect(hold(north, 1).facing).toBe("back");
-    expect(hold(south, 1).facing).toBe("front");
-    expect(hold(east, 1)).toMatchObject({ facing: "front", flipX: false });
-    expect(hold(west, 1)).toMatchObject({ facing: "front", flipX: true });
+  it("face the way they were pressed when nothing is aiming", () => {
+    expect(hold(north, 1).facing).toBe("north");
+    expect(hold(south, 1).facing).toBe("south");
+    expect(hold(east, 1).facing).toBe("east");
+    expect(hold(west, 1).facing).toBe("west");
   });
 });
 
@@ -239,18 +240,71 @@ describe("stepping diagonally", () => {
     expect(corner.usedHeading).toBe(true);
   });
 
-  it("reuses the same two drawings for the diagonals", () => {
-    const expected = [
-      ["northeast", { facing: "back", flipX: false }],
-      ["northwest", { facing: "back", flipX: true }],
-      ["southeast", { facing: "front", flipX: false }],
-      ["southwest", { facing: "front", flipX: true }],
-    ] as const;
-
-    for (const [heading, orientation] of expected) {
+  it("faces the diagonal it walks", () => {
+    for (const heading of ["northeast", "northwest", "southeast", "southwest"] as const) {
       const player = advancePlayer(createPlayer(START), walk(heading), 0, OPEN).player;
-      expect(player).toMatchObject(orientation);
+      expect(player.facing).toBe(heading);
     }
+  });
+});
+
+describe("facingYaw", () => {
+  it("turns the rig a quarter per cardinal, clockwise from facing the viewer", () => {
+    expect(facingYaw("south")).toBeCloseTo(0, 9);
+    expect(facingYaw("east")).toBeCloseTo(Math.PI / 2, 9);
+    expect(facingYaw("north")).toBeCloseTo(Math.PI, 9);
+    expect(facingYaw("west")).toBeCloseTo(-Math.PI / 2, 9);
+  });
+
+  it("puts every diagonal an eighth between its two cardinals", () => {
+    expect(facingYaw("southeast")).toBeCloseTo(Math.PI / 4, 9);
+    expect(facingYaw("northeast")).toBeCloseTo((3 * Math.PI) / 4, 9);
+    expect(facingYaw("northwest")).toBeCloseTo((-3 * Math.PI) / 4, 9);
+    expect(facingYaw("southwest")).toBeCloseTo(-Math.PI / 4, 9);
+  });
+});
+
+describe("aiming", () => {
+  it("faces the aim instead of the heading, so he can walk one way and look another", () => {
+    const tick = advancePlayer(
+      createPlayer(START),
+      { heading: "north", aim: "south", attack: false },
+      0,
+      OPEN,
+    );
+    expect(tick.player.facing).toBe("south");
+    // The legs do not care: he still steps north.
+    expect(tick.player.motion).toBe("step");
+    expect(tick.player.pose.y).toBeCloseTo(129, 9);
+    expect(tick.usedHeading).toBe(true);
+  });
+
+  it("turns to the aim while standing still", () => {
+    const tick = advancePlayer(createPlayer(START), { aim: "northwest", attack: false }, 16, OPEN);
+    expect(tick.player.facing).toBe("northwest");
+    expect(tick.player.motion).toBe("idle");
+    expect(tick.usedHeading).toBe(false);
+  });
+
+  it("keeps facing the aim for the whole of a held walk", () => {
+    const backpedal: Intent = { heading: "south", aim: "north", attack: false };
+    expect(hold(backpedal, 3).facing).toBe("north");
+  });
+
+  it("keeps the last facing when neither aim nor heading says anything", () => {
+    const aimed = advancePlayer(createPlayer(START), { aim: "east", attack: false }, 0, OPEN);
+    expect(advancePlayer(aimed.player, NOTHING, 16, OPEN).player.facing).toBe("east");
+  });
+
+  it("faces the aim when walking into rock, not the rock", () => {
+    const blocked = advancePlayer(
+      createPlayer(START),
+      { heading: "north", aim: "west", attack: false },
+      0,
+      WALLED,
+    );
+    expect(blocked.player.facing).toBe("west");
+    expect(blocked.usedHeading).toBe(true);
   });
 });
 
@@ -261,7 +315,7 @@ describe("facing", () => {
 
     // He is still sliding east - the committed step is not interrupted - but he
     // already faces north, which is what a player reads as the game hearing him.
-    expect(turned.facing).toBe("back");
+    expect(turned.facing).toBe("north");
     expect(turned.motion).toBe("step");
     expect(turned.pose).toEqual(stepping.pose);
   });
@@ -408,7 +462,7 @@ describe("attacking while moving", () => {
     expect(tick.player.attackMs).toBe(0);
     expect(tick.player.motion).toBe("step");
     expect(tick.player.pose.y).toBeCloseTo(129, 9);
-    expect(tick.player.facing).toBe("back");
+    expect(tick.player.facing).toBe("north");
     // The swing no longer costs him the step, so the heading is spent too.
     expect(tick.usedHeading).toBe(true);
   });

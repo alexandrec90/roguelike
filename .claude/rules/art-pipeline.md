@@ -69,13 +69,13 @@ other module; the API table below covers the calls.
 | A recolour of anything at all | a `PaletteVariant` | `src/game/asset-registry.ts` |
 | A new creature | reuse `HUMANOID_SKELETON` if it is bipedal; else a new `SkeletonDef` | `src/game/models.ts` |
 | A rock, a tree, a tile — it never moves | an authored mask | `src/game/sprites.ts`, `src/game/tiles.ts` |
-| The same model facing **left** | nothing — pass `flipX` | — |
-| The same model facing **away** | nothing — pass `facing: "back"` | — |
+| Eyes, a badge — a mark that turns with the body | a `stamp` with an `offset` and `facing: "front"` | `src/game/models.ts` |
+| The same model facing **left**, **away**, or on a diagonal | nothing — pass `yaw` (`facingYaw(heading)` for one of the eight) | — |
 | A melting / frozen / burning **frame** | nothing — call the transform at a progress | — |
 | A **shaded** copy of a frame you have | nothing — `shadeCloud` at a light direction | — |
 | A reflection in water | nothing — `reflectCloud` | — |
 
-The last five rows are there because they are the five things an agent reflexively draws
+The last four rows are there because they are the four things an agent reflexively draws
 and must not.
 
 ## The API, in one table
@@ -100,7 +100,7 @@ The three shapes worth having in front of you, field names only:
 
 ```ts
 Keyframe { t: 0..1; bones?: { [name]: Vec3 }; root?: Vec3 }   // sparse — key only what moves
-RigPart  { kind: "stamp"; bone; at; mask; anchor; ink; facing? }
+RigPart  { kind: "stamp"; bone; at; mask; anchor; ink; facing?; offset? }
          | { kind: "bone"; bone: BoneDef; ink; thickness?; direction? }
          | { kind: "reink"; bones: string[]; ink }
 ```
@@ -233,8 +233,11 @@ because every extra bone is one another clip can no longer play underneath it.
   plane is the thing this pipeline exists to avoid.
 - **Clouds are foot-anchored.** `(0, 0)` is the foot on the ground; y is negative going
   up. "The ground" is `y = 0` in every transform.
-- **Front and back only.** Back negates depth and drops `facing: "front"` stamps. Left
-  and right are `flipX`. There is no third drawing.
+- **Facing is a turn, not a drawing.** `yaw` rotates the rig about its vertical axis,
+  so all eight facings are one skeleton and the sword never changes hands; a `front`
+  stamp shows only while its `offset` faces the viewer. `flipX` is a mirror, kept for art
+  that wants one — never use it to fake a turn, because a mirror swaps hands. There is
+  no second drawing.
 - **Seeded or it does not ship.** Every random draw goes through `pixelHash` or an
   emitter seed, because the lab must reproduce a capture byte for byte.
 - The projection and pixel-grid contracts in `CLAUDE.md` still bind — in particular,

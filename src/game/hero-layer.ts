@@ -22,7 +22,9 @@
 import Phaser from "phaser";
 
 import {
+  aimAt,
   createControls,
+  currentAim,
   nextHeading,
   pressButton,
   pressKey,
@@ -35,12 +37,14 @@ import {
 } from "./controls";
 import { drawCloud } from "./draw-cloud";
 import type { PixelCloud } from "./ink";
+import { logicalPoint } from "./integer-scale";
 import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPose } from "./planet";
 import {
   advancePlayer,
   createPlayer,
+  facingYaw,
   groundPose,
   livePose,
   scrollPhase,
@@ -67,10 +71,7 @@ export interface Foot {
  * stale number to disagree with the drawing.
  */
 export function heroHeight(): number {
-  const cloud = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, {
-    facing: "front",
-    flipX: false,
-  });
+  const cloud = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose);
   return cloud.reduce((tallest, pixel) => Math.max(tallest, -pixel.y), 0) + 1;
 }
 
@@ -84,6 +85,8 @@ export class HeroLayer {
   private cloud: PixelCloud = [];
   /** Kept so a resize can redraw the idle pose it was already holding. */
   private lastElapsedMs = 0;
+  /** Aim is taken from his chest, not his feet, so the cursor on his body is on centre. */
+  private readonly chestHeight = heroHeight() / 2;
 
   constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
     this.player = createPlayer(start);
@@ -125,7 +128,11 @@ export class HeroLayer {
     const step = Math.min(Math.max(delta, 0), MAX_STEP_MS);
     const tick = advancePlayer(
       this.player,
-      { heading: nextHeading(this.controls), attack: wantsAttack(this.controls) },
+      {
+        heading: nextHeading(this.controls),
+        aim: currentAim(this.controls),
+        attack: wantsAttack(this.controls),
+      },
       step,
       this.world,
     );
@@ -190,8 +197,7 @@ export class HeroLayer {
   private redraw(elapsedMs: number): void {
     this.lastElapsedMs = elapsedMs;
     this.cloud = renderModel(HERO_EQUIPPED, this.pose(elapsedMs), {
-      facing: this.player.facing,
-      flipX: this.player.flipX,
+      yaw: facingYaw(this.player.facing),
     });
 
     this.gfx.setDepth(
@@ -249,7 +255,11 @@ export class HeroLayer {
 
     // Right-click is an attack here, so the context menu is in the way.
     scene.input.mouse?.disableContextMenu();
+    scene.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      this.aimFrom(pointer, scene);
+    });
     scene.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.aimFrom(pointer, scene);
       pressButton(this.controls, mouseButtonOf(pointer.button));
     });
     scene.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
@@ -258,5 +268,27 @@ export class HeroLayer {
 
     // A key released while the tab is in the background never sends its keyup.
     scene.game.events.on(Phaser.Core.Events.BLUR, () => releaseAll(this.controls));
+  }
+
+  /**
+   * Point the aim at the cursor, measured from his chest.
+   *
+   * The page position is mapped back through the canvas's own box rather than
+   * read from Phaser's pointer coordinates: the canvas is sized by CSS under
+   * `Scale.NONE`, so Phaser's idea of the display scale is not the one to trust.
+   */
+  private aimFrom(pointer: Phaser.Input.Pointer, scene: Phaser.Scene): void {
+    const event = pointer.event;
+    if (!("clientX" in event)) {
+      return;
+    }
+    const at = logicalPoint(
+      event.clientX,
+      event.clientY,
+      scene.game.canvas.getBoundingClientRect(),
+      scene.scale.width,
+      scene.scale.height,
+    );
+    aimAt(this.controls, at.x - this.foot.x, at.y - (this.foot.y - this.chestHeight));
   }
 }

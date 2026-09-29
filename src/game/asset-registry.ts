@@ -16,8 +16,10 @@ import {
   type PaletteVariant,
 } from "./asset-types";
 import { INK_COLORS } from "./ink";
+import type { Heading } from "./keybindings";
 import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import type { PixelSpriteSource } from "./pixel-art";
+import { facingYaw } from "./player";
 import { samplePuddleFrames } from "./puddles";
 import { validateRegistry as checkRegistry } from "./registry-validation";
 import { sampleRippleFrames } from "./ripples";
@@ -34,6 +36,18 @@ export { AUTHORED, AUTHORED_VARIANT_ID } from "./asset-types";
 
 /** One swap shared by every rig entry: the bone ink re-inked to ice. */
 const FROST: PaletteVariant = { id: "frost", label: "Frozen", overrides: { w: "#a8ecff" } };
+
+/** Clockwise from facing the viewer, so the filmstrip plays as one slow turn. */
+const COMPASS: readonly Heading[] = [
+  "south",
+  "southeast",
+  "east",
+  "northeast",
+  "north",
+  "northwest",
+  "west",
+  "southwest",
+];
 
 export const ASSET_REGISTRY: readonly AssetEntry[] = [
   {
@@ -77,16 +91,32 @@ export const ASSET_REGISTRY: readonly AssetEntry[] = [
     category: "actor",
     frames: sampleClipFrames(HERO_EQUIPPED, WALK, 8),
     frameDurationMs: 80,
-    notes: "The stride swings through the depth axis; back facing and x-flip come free.",
+    notes: "The stride swings through the depth axis, so every other facing is a turn of it.",
     variants: [AUTHORED, FROST],
   },
   {
     id: "hero-walk-back",
     label: "Hero — walk, back view (rig)",
     category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, WALK, 8, { facing: "back" }),
+    frames: sampleClipFrames(HERO_EQUIPPED, WALK, 8, { yaw: facingYaw("north") }),
     frameDurationMs: 80,
-    notes: "Same clip, back facing: depth negated, front-only stamps (the eyes) dropped.",
+    notes:
+      "Same clip, turned half round: the sword stays in the same hand, so it crosses to the " +
+      "other side of the screen, and the eyes are round the back where they cannot show.",
+    variants: [AUTHORED, FROST],
+  },
+  {
+    id: "hero-facings",
+    label: "Hero — eight facings (rig)",
+    category: "actor",
+    frames: COMPASS.flatMap((facing) =>
+      sampleClipFrames(HERO_EQUIPPED, IDLE, 1, { yaw: facingYaw(facing) }),
+    ),
+    frameDurationMs: 400,
+    notes:
+      "One skeleton turned an eighth at a time, clockwise from facing the viewer. No view " +
+      "was drawn: the eyes slide round the head and hide behind it, and the sword never " +
+      "changes hands.",
     variants: [AUTHORED, FROST],
   },
   {

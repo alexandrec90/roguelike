@@ -1,6 +1,35 @@
 import { describe, expect, it } from "vitest";
 
-import { coverOffset, integerCoverScale, integerScale, letterbox } from "./integer-scale";
+import {
+  coverOffset,
+  integerCoverScale,
+  integerScale,
+  letterbox,
+  logicalPoint,
+} from "./integer-scale";
+
+describe("logicalPoint", () => {
+  const box = { left: 0, top: 0, width: 1280, height: 720 };
+
+  it("divides a page position back down to a logical pixel", () => {
+    expect(logicalPoint(640, 360, box, 320, 180)).toEqual({ x: 160, y: 90 });
+    expect(logicalPoint(0, 0, box, 320, 180)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("follows a cropped canvas whose box starts off the page", () => {
+    // A cover-scaled canvas wider than the window is centred, so it begins left of 0.
+    const cropped = { left: -160, top: 0, width: 1600, height: 900 };
+    expect(logicalPoint(640, 450, cropped, 320, 180)).toEqual({ x: 160, y: 90 });
+  });
+
+  it("keeps the fraction, because aim is a direction", () => {
+    expect(logicalPoint(2, 2, box, 320, 180)).toEqual({ x: 0.5, y: 0.5 });
+  });
+
+  it("rejects a canvas with no size", () => {
+    expect(() => logicalPoint(0, 0, { ...box, width: 0 }, 320, 180)).toThrow(/positive/);
+  });
+});
 
 describe("integerScale", () => {
   it("picks the largest whole factor that fits", () => {

@@ -10,11 +10,33 @@ import {
   HEADING_VECTOR,
   HEADINGS,
   headingOf,
+  headingToward,
   isDiagonal,
   mouseButtonOf,
   validateKeybindings,
   type Keybindings,
 } from "./keybindings";
+
+describe("headingToward", () => {
+  it("names each of the eight headings from its own vector", () => {
+    for (const heading of HEADINGS) {
+      const { dx, dy } = HEADING_VECTOR[heading];
+      expect(headingToward(dx * 7, dy * 7)).toBe(heading);
+    }
+  });
+
+  it("snaps to the nearest eighth, so a slightly-off aim still reads as ahead", () => {
+    expect(headingToward(10, 2)).toBe("east");
+    expect(headingToward(10, -2)).toBe("east");
+    expect(headingToward(10, 6)).toBe("southeast");
+    expect(headingToward(-1, -10)).toBe("north");
+    expect(headingToward(-10, 0.5)).toBe("west");
+  });
+
+  it("points nowhere for the zero vector", () => {
+    expect(headingToward(0, 0)).toBeUndefined();
+  });
+});
 
 describe("the default control map", () => {
   it("moves on WASD and on the arrows, which are the same four actions", () => {

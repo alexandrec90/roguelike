@@ -1,5 +1,5 @@
 /** Skeleton rigs in camera-compatible 3D: x right, y toward the viewer, z up.
- * Clips key sparse bone directions; facing negates depth and mirroring handles left/right. */
+ * Clips key sparse bone directions; facing is a turn about z, and mirroring is a separate flip. */
 
 import {
   mirrorMask,
@@ -259,6 +259,7 @@ export function samplePose(clip: Clip, base: RigPose, timeMs: number): RigPose {
   return { root, bones };
 }
 
+/** Which side of the body a stamp sits on: shown only while that side is toward the viewer. */
 export type Facing = "front" | "back";
 
 export interface BoneStyle {
@@ -277,6 +278,14 @@ export type RigPart =
       readonly anchor: { readonly x: number; readonly y: number };
       readonly ink: InkId;
       readonly facing?: Facing | "both";
+      /**
+       * Where on the body's surface the stamp sits, in the model's own frame
+       * (x right, y out of its front). It turns with the body, so a stamp slides
+       * across the silhouette as he turns, and a `front` one hides once its
+       * offset swings round the far side. Absent means dead centre, facing out
+       * of the chest.
+       */
+      readonly offset?: Vec3;
     }
   | {
       readonly kind: "bone";
@@ -344,23 +353,33 @@ export function effectiveSkeleton(model: RigModel): SkeletonDef {
 }
 
 export interface RenderOptions {
-  readonly facing?: Facing;
+  /**
+   * The turn about the vertical axis, in radians: 0 faces the viewer, a quarter
+   * turn faces screen right, a half turn faces away. A rotation rather than a
+   * mirror, so the sword stays in the same hand from every side.
+   */
+  readonly yaw?: number;
+  /** A mirror across the screen's vertical, applied after the turn. */
   readonly flipX?: boolean;
 }
-function facingPose(pose: RigPose, facing: Facing, flipX: boolean): RigPose {
-  if (facing === "front" && !flipX) {
+
+/** A rig-space vector turned by `yaw` about z, then mirrored if asked. */
+function orient(v: Vec3, yaw: number, flipX: boolean): Vec3 {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const x = v.x * cos + v.y * sin;
+  return { x: flipX ? -x : x, y: -v.x * sin + v.y * cos, z: v.z };
+}
+
+function facingPose(pose: RigPose, yaw: number, flipX: boolean): RigPose {
+  if (yaw === 0 && !flipX) {
     return pose;
   }
-  const ySign = facing === "back" ? -1 : 1;
-  const xSign = flipX ? -1 : 1;
   const bones: Record<string, Vec3> = {};
   for (const [name, direction] of Object.entries(pose.bones)) {
-    bones[name] = { x: direction.x * xSign, y: direction.y * ySign, z: direction.z };
+    bones[name] = orient(direction, yaw, flipX);
   }
-  return {
-    root: { x: pose.root.x * xSign, y: pose.root.y * ySign, z: pose.root.z },
-    bones,
-  };
+  return { root: orient(pose.root, yaw, flipX), bones };
 }
 
 interface Drawable {
@@ -407,10 +426,32 @@ function boneDrawables(
   return drawables;
 }
 
+/** Out of the chest: which way a stamp with no `offset` faces. */
+const FORWARD: Vec3 = { x: 0, y: 1, z: 0 };
+
+/** Closer to zero depth than this, a stamp is edge-on and on neither side. */
+const EDGE_ON = 1e-6;
+
+function stampShows(facing: Facing | "both" | undefined, depth: number): boolean {
+  if (facing === "front") {
+    return depth > EDGE_ON;
+  }
+  if (facing === "back") {
+    return depth < -EDGE_ON;
+  }
+  return true;
+}
+
+/**
+ * Stamps are flat, screen-facing masks riding a joint. The turn slides one
+ * sideways by its offset and decides whether it shows; the offset's depth is
+ * not projected, because foreshortening a one-pixel eye by a fraction of a
+ * pixel only buys rounding noise between two eyes that should share a row.
+ */
 function stampDrawables(
   model: RigModel,
   solved: SolvedPose,
-  facing: Facing,
+  yaw: number,
   flipX: boolean,
 ): Drawable[] {
   const drawables: Drawable[] = [];
@@ -418,18 +459,22 @@ function stampDrawables(
     if (part.kind !== "stamp") {
       continue;
     }
-    const visible = part.facing === undefined || part.facing === "both" || part.facing === facing;
     const segment = solved[part.bone];
-    if (!visible || segment === undefined) {
+    const outward = orient(part.offset ?? FORWARD, yaw, flipX);
+    if (segment === undefined || !stampShows(part.facing, outward.y)) {
       continue;
     }
     const joint = part.at === "start" ? segment.start : segment.end;
     const at = projectRigPoint(joint);
+    const slide = part.offset === undefined ? 0 : Math.round(outward.x);
     const mask = flipX ? mirrorMask(part.mask) : part.mask;
     const anchorX = flipX ? part.mask.width - 1 - part.anchor.x : part.anchor.x;
+    // A stamp on the near surface draws over one at the joint itself (eyes over the head).
+    const nearer = part.offset === undefined ? 0 : Math.max(outward.y, 0);
     drawables.push({
-      depth: joint.y + 0.01,
-      draw: (cloud) => stampMask(cloud, mask, at.x - anchorX, at.y - part.anchor.y, part.ink),
+      depth: joint.y + 0.01 + nearer,
+      draw: (cloud) =>
+        stampMask(cloud, mask, at.x + slide - anchorX, at.y - part.anchor.y, part.ink),
     });
   }
   return drawables;
@@ -441,22 +486,22 @@ export function renderModel(
   pose: RigPose,
   options: RenderOptions = {},
 ): PixelCloud {
-  const facing = options.facing ?? "front";
+  const yaw = options.yaw ?? 0;
   const flipX = options.flipX ?? false;
 
   const skeleton = effectiveSkeleton(model);
-  const oriented = facingPose(pose, facing, flipX);
-  const base = facingPose(model.basePose, facing, flipX);
+  const oriented = facingPose(pose, yaw, flipX);
+  const base = facingPose(model.basePose, yaw, flipX);
 
   // Gear bones without a keyed or default direction extend their parent.
   const withGearDefaults: RigPose = {
     root: oriented.root,
-    bones: { ...gearDefaults(model, oriented, base, facing, flipX), ...oriented.bones },
+    bones: { ...gearDefaults(model, oriented, base, yaw, flipX), ...oriented.bones },
   };
   const solved = solvePose(skeleton, withGearDefaults, base);
   const drawables = [
     ...boneDrawables(skeleton, solved, modelStyles(model)),
-    ...stampDrawables(model, solved, facing, flipX),
+    ...stampDrawables(model, solved, yaw, flipX),
   ];
   drawables.sort((a, b) => a.depth - b.depth);
   const cloud: PixelCloud = [];
@@ -470,7 +515,7 @@ function gearDefaults(
   model: RigModel,
   oriented: RigPose,
   base: RigPose,
-  facing: Facing,
+  yaw: number,
   flipX: boolean,
 ): Record<string, Vec3> {
   const defaults: Record<string, Vec3> = {};
@@ -479,12 +524,7 @@ function gearDefaults(
       continue;
     }
     if (part.direction !== undefined) {
-      const sign = { y: facing === "back" ? -1 : 1, x: flipX ? -1 : 1 };
-      defaults[part.bone.name] = {
-        x: part.direction.x * sign.x,
-        y: part.direction.y * sign.y,
-        z: part.direction.z,
-      };
+      defaults[part.bone.name] = orient(part.direction, yaw, flipX);
       continue;
     }
     const parent = part.bone.parent;

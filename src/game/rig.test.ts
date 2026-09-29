@@ -227,7 +227,7 @@ describe("renderModel", () => {
     expect(Math.max(...swordXs)).toBe(5);
   });
 
-  it("negates depth for the back facing and drops front-only stamps", () => {
+  it("turned half round, drops front-only stamps and leans the other way", () => {
     const eyed = equip(STICK_MODEL, {
       kind: "stamp",
       id: "eyes",
@@ -239,17 +239,91 @@ describe("renderModel", () => {
       facing: "front",
     });
     const front = renderModel(eyed, eyed.basePose);
-    const back = renderModel(eyed, eyed.basePose, { facing: "back" });
+    const back = renderModel(eyed, eyed.basePose, { yaw: Math.PI });
     expect(front.some((pixel) => pixel.ink === "void")).toBe(true);
     expect(back.some((pixel) => pixel.ink === "void")).toBe(false);
 
     const lean = { root: vec3(0, 0, 4), bones: { spine: vec3(0, 1, 1), arm: vec3(1, 0, 0) } };
     const leanFront = renderModel(STICK_MODEL, lean);
-    const leanBack = renderModel(STICK_MODEL, lean, { facing: "back" });
+    const leanBack = renderModel(STICK_MODEL, lean, { yaw: Math.PI });
     const topY = (cloud: ReturnType<typeof renderModel>) =>
       Math.min(...cloud.map((pixel) => pixel.y));
     // Leaning toward the camera drops the head lower on screen than leaning away.
     expect(topY(leanFront)).toBeGreaterThan(topY(leanBack));
+  });
+
+  it("turns rather than mirrors, so the hand holding the sword never changes", () => {
+    const swordXs = (yaw: number) =>
+      renderModel(armed, armed.basePose, { yaw })
+        .filter((pixel) => pixel.ink === "cyan")
+        .map((pixel) => pixel.x);
+
+    // The arm reaches screen right facing the viewer and screen left facing
+    // away - the same arm, seen from behind.
+    expect(Math.min(...swordXs(0))).toBeGreaterThan(0);
+    expect(Math.max(...swordXs(Math.PI))).toBeLessThan(0);
+    // A quarter turn swings it into depth: across nothing, drawn behind him.
+    expect(swordXs(Math.PI / 2).every((x) => x === 0)).toBe(true);
+  });
+
+  it("puts a quarter-turned arm behind the spine and the opposite turn's in front", () => {
+    const model: RigModel = {
+      ...STICK_MODEL,
+      style: { spine: { ink: "bone" }, arm: { ink: "cyan" } },
+    };
+    const armFirst = (yaw: number) => {
+      const cloud = renderModel(model, model.basePose, { yaw });
+      return cloud.findIndex((pixel) => pixel.ink === "cyan") <
+        cloud.findIndex((pixel) => pixel.ink === "bone");
+    };
+    expect(armFirst(Math.PI / 2)).toBe(true);
+    expect(armFirst(-Math.PI / 2)).toBe(false);
+  });
+
+  it("slides an offset stamp round with the turn and hides it on the far side", () => {
+    const dot = { width: 1, height: 1, pixels: [{ x: 0, y: 0 }] };
+    const eyed = equip(STICK_MODEL, {
+      kind: "stamp",
+      id: "eye",
+      bone: "spine",
+      at: "end",
+      mask: dot,
+      anchor: { x: 0, y: 0 },
+      ink: "void",
+      facing: "front",
+      offset: vec3(1, 1.2, 0),
+    });
+    const eyeX = (yaw: number) =>
+      renderModel(eyed, eyed.basePose, { yaw })
+        .filter((pixel) => pixel.ink === "void")
+        .map((pixel) => pixel.x);
+
+    expect(eyeX(0)).toEqual([1]);
+    // Turning toward it carries it outward; turning away brings it to centre,
+    // then across to the other side as it becomes the near eye in profile.
+    expect(eyeX(Math.PI / 4)).toEqual([2]);
+    expect(eyeX(-Math.PI / 4)).toEqual([0]);
+    expect(eyeX(-Math.PI / 2)).toEqual([-1]);
+    // A quarter turn the other way puts it round the back of the head.
+    expect(eyeX(Math.PI / 2)).toEqual([]);
+    expect(eyeX(Math.PI)).toEqual([]);
+  });
+
+  it("shows a both-sided stamp from every direction", () => {
+    const hatted = equip(STICK_MODEL, {
+      kind: "stamp",
+      id: "hat",
+      bone: "spine",
+      at: "end",
+      mask: { width: 1, height: 1, pixels: [{ x: 0, y: 0 }] },
+      anchor: { x: 0, y: 0 },
+      ink: "magenta",
+      facing: "both",
+    });
+    for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+      const cloud = renderModel(hatted, hatted.basePose, { yaw });
+      expect(cloud.some((pixel) => pixel.ink === "magenta")).toBe(true);
+    }
   });
 
   it("mirrors the whole model with flipX", () => {

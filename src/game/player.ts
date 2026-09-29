@@ -2,6 +2,10 @@
  * The player as movement simulation: where on the planet, facing which way, and
  * what he is doing with his sword arm while he gets there.
  *
+ * Where he faces and where he goes are separate inputs - this is a twin-stick
+ * game - so `Intent` carries an `aim` beside the `heading`, and facing reads
+ * the aim whenever there is one.
+ *
  * **Two tracks, aged independently.** Locomotion and the swing are separate
  * timers over one skeleton, so an attack never costs a step and a step never
  * delays an attack - which is the whole of "attack while moving", and the
@@ -49,7 +53,6 @@ import {
   type PlanetPoint,
   type PlanetPose,
 } from "./planet";
-import type { Facing } from "./rig";
 
 /** One cell step, in ms. Short enough to feel like input, long enough to read. */
 export const STEP_MS = 180;
@@ -85,31 +88,24 @@ export function gaitOf(heading: Heading): Gait {
 }
 
 /**
- * How the hero is drawn for each of the eight headings, out of the two drawings
- * that exist.
+ * How far the rig is turned to face a heading on screen: the one place a
+ * heading becomes a facing.
  *
- * The rig has a front and a back and no third view, so the horizontal component
- * is a mirror (`flipX`) and the vertical one picks the drawing: anything with
- * north in it shows his back, anything else his front. Pure east and west are
- * the front view, mirrored - the placeholder that keeps all eight readable
- * without a side view being drawn.
+ * A turn, not a choice between drawings. The rig is 3D, so every one of the
+ * eight is the same skeleton rotated about its vertical axis - south faces the
+ * viewer, east is a quarter turn, north a half - and the sword stays in the
+ * same hand all the way round, because a rotation cannot swap hands the way a
+ * mirror does.
  *
  * Facing is about the *sprite*, not the pose: the camera is bolted to the
  * heading, so the hero is drawn stepping sideways out of a frame that is itself
  * swinging round. The two are allowed to disagree, and a hero who turned his
  * shoulders to walk right would fight a camera that had already turned.
  */
-const ORIENTATION: Readonly<Record<Heading, { readonly facing: Facing; readonly flipX: boolean }>> =
-  {
-    north: { facing: "back", flipX: false },
-    south: { facing: "front", flipX: false },
-    west: { facing: "front", flipX: true },
-    east: { facing: "front", flipX: false },
-    northeast: { facing: "back", flipX: false },
-    northwest: { facing: "back", flipX: true },
-    southeast: { facing: "front", flipX: false },
-    southwest: { facing: "front", flipX: true },
-  };
+export function facingYaw(facing: Heading): number {
+  const { dx, dy } = HEADING_VECTOR[facing];
+  return Math.atan2(dx, dy);
+}
 
 export interface PlayerState {
   /** Where the current step lands; equal to `from` whenever one is not running. */
@@ -118,8 +114,8 @@ export interface PlayerState {
   readonly from: PlanetPose;
   /** What the running step is walking; absent whenever one is not running. */
   readonly gait?: Gait;
-  readonly facing: Facing;
-  readonly flipX: boolean;
+  /** Which way the sprite looks on screen - the aim, or failing one the heading. */
+  readonly facing: Heading;
   readonly motion: Motion;
   /** Elapsed ms in the current step; 0 whenever none is running. */
   readonly motionMs: number;
@@ -143,7 +139,14 @@ export interface World {
 }
 
 export interface Intent {
+  /** Where he is told to go. */
   readonly heading?: Heading;
+  /**
+   * Where he is told to look - the second stick. When present it owns facing
+   * outright, so he can walk north while facing south; when absent he faces
+   * the way he walks.
+   */
+  readonly aim?: Heading;
   readonly attack: boolean;
 }
 
@@ -168,8 +171,7 @@ export function createPlayer(pose: PlanetPose): PlayerState {
   return {
     pose,
     from: pose,
-    facing: "front",
-    flipX: false,
+    facing: "south",
     motion: "idle",
     motionMs: 0,
     steps: 0,
@@ -280,8 +282,7 @@ export function advancePlayer(
   const delta = Math.max(deltaMs, 0);
   // Turning is free and immediate. Waiting for the foot to land before the hero
   // even *looks* the way he was told to is the difference a player reads as lag.
-  const oriented =
-    intent.heading === undefined ? player : { ...player, ...ORIENTATION[intent.heading] };
+  const oriented = { ...player, facing: intent.aim ?? intent.heading ?? player.facing };
 
   const swung = advanceSwing(oriented, intent, delta);
   const moved = advanceMotion(swung.player, intent, delta, world);

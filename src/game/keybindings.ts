@@ -82,6 +82,23 @@ export function headingOf(dx: number, dy: number): Heading | undefined {
   );
 }
 
+/**
+ * The heading nearest a free direction - a mouse or a stick, not a key.
+ *
+ * Eight equal sectors, 45 degrees each, centred on the headings, so a cursor
+ * dead ahead and one nudged a few degrees off both read as ahead. Screen
+ * convention like `HEADING_VECTOR`: +dy is south. `undefined` only for the zero
+ * vector, which points nowhere.
+ */
+export function headingToward(dx: number, dy: number): Heading | undefined {
+  if (dx === 0 && dy === 0) {
+    return undefined;
+  }
+  const eighth = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+  const angle = (eighth * Math.PI) / 4;
+  return headingOf(Math.round(Math.cos(angle)), Math.round(Math.sin(angle)));
+}
+
 export function isDiagonal(heading: Heading): boolean {
   const vector = HEADING_VECTOR[heading];
   return vector.dx !== 0 && vector.dy !== 0;
