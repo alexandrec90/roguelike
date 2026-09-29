@@ -68,6 +68,16 @@ describe("the page shell", () => {
     expect(css).not.toContain("::before");
   });
 
+  it("keeps the controls reminder out of the way until it is asked for", () => {
+    // The one sanctioned overlay: a hint that fades, and a panel that starts
+    // hidden. Both are DOM over the canvas, never pixels in the world.
+    const overlay = readFileSync(resolve(root, "src/game/help-overlay.ts"), "utf8");
+    expect(main).toContain("HelpOverlay.attach(");
+    expect(overlay).toContain("this.panel.hidden = true");
+    expect(overlay).toContain("help-hint--faded");
+    expect(ruleBody(css, ".help-hint--faded")).toContain("opacity: 0");
+  });
+
   it("draws no caption inside the canvas either", () => {
     // Removing the DOM chrome and leaving a label rendered into the world would
     // satisfy every assertion above while looking identical on screen.

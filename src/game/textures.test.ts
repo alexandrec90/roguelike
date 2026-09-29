@@ -106,8 +106,10 @@ describe("installAssetTextures", () => {
     const keys = installAssetTextures(host);
 
     expect(keys.length).toBeGreaterThanOrEqual(expected);
-    expect(textures.has(textureKey("slime", "void", 3))).toBe(true);
-    expect(textures.has(textureKey("hero", "frost", 0))).toBe(true);
+    for (const entry of ASSET_REGISTRY.slice(0, 12)) {
+      const last = entry.variants[entry.variants.length - 1]!;
+      expect(textures.has(textureKey(entry.id, last.id, entry.frames.length - 1))).toBe(true);
+    }
   });
 
   it("composes a tiled sheet for terrain, so seams are visible", () => {
@@ -115,9 +117,10 @@ describe("installAssetTextures", () => {
 
     installAssetTextures(host);
 
-    // Ground tiles are 16 wide by TILE_DEPTH tall, because they are authored in
+    // Ground tiles are 16 wide by TILE_DEPTH tall, because they are made in
     // the camera's projection rather than squashed into it at draw time.
-    const tiled = textures.get(textureKey("grass", "authored", 0, TILE_PREVIEW_SUFFIX));
+    const tile = ASSET_REGISTRY.find((entry) => entry.category === "tile")!;
+    const tiled = textures.get(textureKey(tile.id, "authored", 0, TILE_PREVIEW_SUFFIX));
     expect(tiled?.width).toBe(TILE_WIDTH * TILE_PREVIEW_COLUMNS);
     expect(tiled?.height).toBe(TILE_DEPTH * TILE_PREVIEW_ROWS);
   });
@@ -127,7 +130,7 @@ describe("installAssetTextures", () => {
 
     installAssetTextures(host);
 
-    expect(textures.has(textureKey("hero", "authored", 0, TILE_PREVIEW_SUFFIX))).toBe(false);
+    expect(textures.has(textureKey("hero-body-idle", "authored", 0, TILE_PREVIEW_SUFFIX))).toBe(false);
   });
 
   it("is safe to run twice", () => {

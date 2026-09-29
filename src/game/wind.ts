@@ -38,6 +38,13 @@ export interface WindOptions {
   /** 0 is a steady breeze, 1 is squalls with lulls between them. */
   readonly gustiness?: number;
   readonly seed?: number;
+  /**
+   * Hold the signed wind at exactly this value (before `strength`), everywhere
+   * and always. What a bake uses to pose a body at a chosen lean: step a species
+   * under a fixed wind until its spring settles, and the cloud it returns is
+   * that body leaning that far — with no per-species API for it.
+   */
+  readonly fixed?: number;
 }
 
 /**
@@ -67,6 +74,9 @@ export function gustAt(elapsedMs: number, options: WindOptions = {}): number {
  */
 export function windAt(elapsedMs: number, x = 0, y = 0, options: WindOptions = {}): number {
   const strength = options.strength ?? 1;
+  if (options.fixed !== undefined) {
+    return strength * options.fixed;
+  }
   const seed = options.seed ?? WIND_SEED;
   const gust = gustAt(elapsedMs, options);
   // The travelling term: subtracting x from time is what moves the wave

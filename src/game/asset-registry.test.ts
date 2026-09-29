@@ -46,7 +46,7 @@ describe("ASSET_REGISTRY", () => {
 
 describe("findAsset / findVariant", () => {
   it("looks entries up by id", () => {
-    expect(findAsset("hero")?.category).toBe("actor");
+    expect(findAsset("hero-body-idle")?.category).toBe("actor");
     expect(findAsset("nope")).toBeUndefined();
   });
 

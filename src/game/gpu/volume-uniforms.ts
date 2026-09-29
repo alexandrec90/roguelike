@@ -302,7 +302,7 @@ export function withQuad(
 }
 
 function charColor(): [number, number, number] {
-  const { r, g, b } = hexToRgb(INK_COLORS.deep);
+  const { r, g, b } = hexToRgb(INK_COLORS["bark-0"]);
   return [r / 255, g / 255, b / 255];
 }
 
@@ -312,8 +312,8 @@ const NO_BURN: BurnUniforms = {
   u_heatOrigin: [0, 0],
   u_heatSize: [1, 1],
   u_heatCell: 1,
-  u_emberRamp: packRamp(INK_RAMPS.ember),
-  u_emberSteps: INK_RAMPS.ember.length,
+  u_emberRamp: packRamp(INK_RAMPS.fire),
+  u_emberSteps: INK_RAMPS.fire.length,
   u_charColor: charColor(),
   u_heatFlicker: 0,
 };

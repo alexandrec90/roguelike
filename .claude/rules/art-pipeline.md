@@ -68,7 +68,8 @@ other module; the API table below covers the calls.
 | Where the water, trees and rock *are* | a seeded field over planet coordinates | `src/game/terrain.ts` |
 | A recolour of anything at all | a `PaletteVariant` | `src/game/asset-registry.ts` |
 | A new creature | reuse `HUMANOID_SKELETON` if it is bipedal; else a new `SkeletonDef` | `src/game/models.ts` |
-| A rock, a tree, a tile — it never moves | an authored mask | `src/game/sprites.ts`, `src/game/tiles.ts` |
+| A ground tile, a rock face, a grass tuft | a generator baked once — never an authored mask | `src/game/ground/` |
+| A tree, a bush, a boulder | a species: seed + pose, baked by lean | `src/game/trees/`, `src/game/props/` |
 | The same model facing **left** | nothing — pass `flipX` | — |
 | The same model facing **away** | nothing — pass `facing: "back"` | — |
 | A melting / frozen / burning **frame** | nothing — call the transform at a progress | — |
@@ -152,8 +153,9 @@ shadeCloud(cloud, {
 `only` is the part that decides whether the result reads. Shade the flesh and the
 armour; leave the cyan blade, the magenta hat and the `void` eyes alone, or the model
 loses the three pixels that said which character it was. Pass it through
-`sampleClipFrames`'s `mapCloud` to light a whole clip — `hero-lit` in the registry is
-exactly that, and not one shaded frame was drawn. `dither: false` gives flat cel bands
+`sampleClipFrames`'s `mapCloud` to light a whole clip. The dressed hero goes one step
+further — `hero/rig-volume.ts` lights each limb per pixel from its own SDF normal — and not
+one shaded frame was drawn for either. `dither: false` gives flat cel bands
 instead of a gradient, which is what a shield or a rune usually wants.
 
 **A puddle.** Nothing is placed and nothing is drawn. Water is a *point feature* of the
@@ -164,12 +166,13 @@ it. The four layers over it are `puddleSurface` (stamped once per pose), `puddle
 at *t* is repeatable. To change how much water a world has, change a density in
 `terrain.ts`; there is no list of sites to add a line to, because the planet is bigger
 than any list.
-What makes water read on pitch black is the lit rim, the glints and what it gives back —
-never a darker fill, which on this background is a hole.
+What makes water read on a lush field is what it gives back — the sky's own colour at
+this hour (painted pre-divided by the ambient, like the sky, so the lighting pass lands
+it exactly), a dark far lip, a damp ring on the grass round it, and the glints.
 
-**Rain that lands.** The wind is one number, `RAIN_SLANT`: the emitter's `windX` derives
-from it and `RAIN_STREAK` is drawn leaning by exactly it, so the trail always points where
-the drop is going. To make weather leave a mark, hand the drop's segment — its position
+**Rain that lands.** The wind is one number, `RAIN_SLANT`: every drop is stroked along its
+own velocity at `RAIN_SLANT` × the wind, so the trail always points where the drop is
+going. To make weather leave a mark, hand the drop's segment — its position
 now, and `vx`/`vy` times the clamped delta back — to `rainImpact`, rather than testing its
 current pixel; a drop moving several pixels a frame otherwise steps straight over a puddle.
 

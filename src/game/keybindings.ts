@@ -34,7 +34,18 @@ export type Heading =
   | "southeast"
   | "southwest";
 
-export type GameAction = Direction | "attack";
+/**
+ * Everything a player can ask for. `attack` swings the sword; `cast` throws a
+ * fireball and `frost` calls a frost nova — two schools on the one pair of
+ * casting hands, so they share a track; and `enchant` sets the blade alight (or
+ * puts it out) — a toggle, so it is a press and never a hold.
+ */
+export type GameAction = Direction | "attack" | "cast" | "frost" | "enchant";
+
+/** The actions that are not a push on an axis. */
+export type Command = Exclude<GameAction, Direction>;
+
+export const COMMANDS: readonly Command[] = ["attack", "cast", "frost", "enchant"];
 
 export type MouseButton = "left" | "middle" | "right";
 
@@ -52,7 +63,7 @@ export const DIRECTION_AXES: readonly (readonly Direction[])[] = [
   ["north", "south"],
 ];
 
-export const GAME_ACTIONS: readonly GameAction[] = [...DIRECTIONS, "attack"];
+export const GAME_ACTIONS: readonly GameAction[] = [...DIRECTIONS, ...COMMANDS];
 
 export interface Vector {
   readonly dx: number;
@@ -96,8 +107,13 @@ export interface ActionBinding {
 export type Keybindings = Readonly<Record<GameAction, ActionBinding>>;
 
 /**
- * WASD to move, with the arrows as a redundant second set; space to attack,
- * with either mouse button as a redundant second set.
+ * WASD to move, with the arrows as a redundant second set; space or the left
+ * button to attack; Q or the right button to cast; E for the frost nova; F to
+ * light the blade.
+ *
+ * The right button used to be a second attack. It is the cast now, because a
+ * twin-stick hand wants its two fingers on two different things, and the one
+ * under the index finger is the sword.
  *
  * The middle button is deliberately unbound — it is a scroll wheel on most
  * hardware and binding it to an attack fires one on every accidental click.
@@ -107,8 +123,23 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
   south: { keys: ["KeyS", "ArrowDown"] },
   west: { keys: ["KeyA", "ArrowLeft"] },
   east: { keys: ["KeyD", "ArrowRight"] },
-  attack: { keys: ["Space"], buttons: ["left", "right"] },
+  attack: { keys: ["Space"], buttons: ["left"] },
+  cast: { keys: ["KeyQ"], buttons: ["right"] },
+  frost: { keys: ["KeyE"] },
+  enchant: { keys: ["KeyF"] },
 };
+
+/**
+ * The keys that show or hide the controls reminder. Not a `GameAction`: it
+ * changes nothing in the world, so the simulation never sees it — but it is a
+ * key, so it is named here and nowhere else. `validateKeybindings` refuses a
+ * map that also binds one of these to an action.
+ */
+export const HELP_KEYS: readonly string[] = ["KeyH", "Slash", "F1"];
+
+export function isHelpKey(code: string): boolean {
+  return HELP_KEYS.includes(code);
+}
 
 /** `MouseEvent.button` / Phaser's `Pointer.button`, named. */
 const BUTTON_BY_INDEX: readonly MouseButton[] = ["left", "middle", "right"];
@@ -164,6 +195,10 @@ export function validateKeybindings(bindings: Keybindings): string[] {
       }
       claimedButtons.set(button, action);
     }
+  }
+  const helpClashes = HELP_KEYS.filter((key) => claimedKeys.has(key));
+  for (const key of helpClashes) {
+    problems.push(`key ${key} opens the controls reminder, so it cannot also be ${claimedKeys.get(key)}`);
   }
   return problems;
 }

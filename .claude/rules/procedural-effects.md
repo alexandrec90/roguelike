@@ -34,10 +34,21 @@ a tenth thing.
 | **Decal** | a cloud stamped into the ground layer, fading over time | scorch marks, blood pools, footprints, frost |
 | **Impulse** | a scalar over time applied to the camera or the clock | screen shake, hit stop, punch-in, chromatic kick |
 
-Two of these exist today: `src/game/spark-emitter.ts` is the emitter, and
-`src/game/weather.ts` is a branch (`lightningBolt`) plus a schedule. The ramp is
-`src/game/shading.ts`. **The rest are unbuilt, and building one is the right answer to
-the first effect that needs it** — write the primitive, not the one-off.
+Most of these exist now, and a new effect should be assembled from them:
+
+| Primitive | Where |
+| --- | --- |
+| Emitter | `src/game/fx/particles.ts` — the general pool (ramps, gravity, drag, wobble, floors) |
+| Field / noise | `src/game/procgen/noise.ts` (`fbm3`, `curlFlow`), `src/game/wind.ts` |
+| Automaton | `src/game/wildfire.ts` (fire in grass), `src/game/fire/flame.ts` (a flame's body), `src/game/procgen/heat.ts` |
+| SDF shape | `src/game/procgen/sdf.ts`; the shock rings in `fire/explosion.ts`, `fire/frost-nova.ts` |
+| Branch | `lightningBolt` in `src/game/weather.ts` |
+| Ramp | `src/game/shading.ts` |
+| Decal | `src/game/fire/decals.ts` (scorch, goo, frost); `wildfire-art.ts` scars |
+| Impulse | `src/game/impulse.ts` — hit stop and shake, through `ctx.impulse` |
+
+**Building a missing one is still the right answer to the first effect that needs it** —
+write the primitive, not the one-off.
 
 ## What an effect is made of
 
@@ -92,9 +103,10 @@ sprite, and it is easier to break here because particle code is written in float
 
 ## The effect field — the direction worth building toward
 
-**This does not exist yet.** It is written down because it is where the elemental part
-of the game should go, and because an agent asked for "fire that spreads" should build
-a piece of it rather than an animation of it.
+**One column of it exists:** `src/game/wildfire.ts` is fire in grass — a sparse automaton
+over planet cells that any fire strike ignites (`encounter.ts` routes them), spreading a
+few generations with the wind, doused by rain and by frost, leaving scars that regrow.
+Build the rest on the same pattern, rather than as animations.
 
 Under the tiles, one grid of cell state — fire, water, ice, electricity, poison,
 corruption — stepped as an automaton beside `src/game/terrain.ts`, with combination rules

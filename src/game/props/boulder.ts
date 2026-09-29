@@ -81,7 +81,7 @@ class Boulder implements SceneryInstance {
             octaves: detail.warpOctaves,
           },
         },
-        light: { ramp: INK_RAMPS.bone, ambient: 0.1, occlusion: 0.16, ...shading },
+        light: { ramp: INK_RAMPS.stone, ambient: 0.1, occlusion: 0.16, ...shading },
         clip: { bottom: 0 },
       },
     ];
@@ -92,7 +92,7 @@ class Boulder implements SceneryInstance {
           weld: 1.4,
           warp: { amplitudeX: 3.2, amplitudeY: 2.4, scale: 3, seed: this.seed + 5, drift: 0, octaves: 1 },
         },
-        light: { ramp: INK_RAMPS.canopy, ambient: 0.2, occlusion: 0.3, ...shading },
+        light: { ramp: INK_RAMPS.moss, ambient: 0.2, occlusion: 0.3, ...shading },
         clip: { bottom: -2 },
       });
     }
