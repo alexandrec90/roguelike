@@ -218,7 +218,8 @@ ways no screenshot shows: reach for it before reasoning about turning, scrolling
 where a feature is, and prefer adding a panel to it over adding a `console.log`.
 
 There is no on-screen caption printing the resulting pixel counts — **the page is the game
-world and nothing else**, so judge a split against the frame itself and read the numbers
+world and nothing else** (the one exception is the controls reminder, `help-overlay.ts`: H, ?
+or F1, generated from the binding table), so judge a split against the frame itself and read the numbers
 from `horizonLayout()` in the console or from `horizon.test.ts`. Read
 `horizonLayout()` for `groundTop` — never hard-code a y for the horizon, and never
 assume the flat field starts at 22px, because that number moves the moment the knob does.

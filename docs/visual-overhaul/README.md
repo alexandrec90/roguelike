@@ -13,6 +13,10 @@ of the 320×180 target, on the Intel HD 530 dev machine.
 
 ## Controls
 
+Press **H** (or **?** / **F1**) in the game for the reminder — [capture](6-controls-reminder.png).
+It is generated from `DEFAULT_KEYBINDINGS` in `src/game/keybindings.ts`, the one file to
+edit to rebind anything.
+
 WASD / arrows move · Space or left mouse swings · **F** lights the blade · **Q** or right
 mouse throws a fireball · **E** calls a frost nova (it also puts grass fires out).
 

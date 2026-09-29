@@ -129,6 +129,18 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
   enchant: { keys: ["KeyF"] },
 };
 
+/**
+ * The keys that show or hide the controls reminder. Not a `GameAction`: it
+ * changes nothing in the world, so the simulation never sees it — but it is a
+ * key, so it is named here and nowhere else. `validateKeybindings` refuses a
+ * map that also binds one of these to an action.
+ */
+export const HELP_KEYS: readonly string[] = ["KeyH", "Slash", "F1"];
+
+export function isHelpKey(code: string): boolean {
+  return HELP_KEYS.includes(code);
+}
+
 /** `MouseEvent.button` / Phaser's `Pointer.button`, named. */
 const BUTTON_BY_INDEX: readonly MouseButton[] = ["left", "middle", "right"];
 
@@ -183,6 +195,10 @@ export function validateKeybindings(bindings: Keybindings): string[] {
       }
       claimedButtons.set(button, action);
     }
+  }
+  const helpClashes = HELP_KEYS.filter((key) => claimedKeys.has(key));
+  for (const key of helpClashes) {
+    problems.push(`key ${key} opens the controls reminder, so it cannot also be ${claimedKeys.get(key)}`);
   }
   return problems;
 }

@@ -10,8 +10,10 @@ import {
   GAME_ACTIONS,
   HEADING_VECTOR,
   HEADINGS,
+  HELP_KEYS,
   headingOf,
   isDiagonal,
+  isHelpKey,
   mouseButtonOf,
   validateKeybindings,
   type Keybindings,
@@ -38,6 +40,16 @@ describe("the default control map", () => {
 
   it("leaves the scroll wheel alone — a stray middle click is not a swing", () => {
     expect(actionForButton("middle")).toBeUndefined();
+  });
+
+  it("keeps the reminder's keys apart from every action", () => {
+    expect(isHelpKey("KeyH")).toBe(true);
+    expect(isHelpKey("KeyW")).toBe(false);
+    for (const key of HELP_KEYS) {
+      expect(actionForKey(key)).toBeUndefined();
+    }
+    const clash = { ...DEFAULT_KEYBINDINGS, frost: { keys: ["KeyH"] } };
+    expect(validateKeybindings(clash).join()).toMatch(/controls reminder/);
   });
 
   it("claims nothing it was not given", () => {

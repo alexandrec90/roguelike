@@ -4,6 +4,7 @@ import "./style.css";
 import { DemoScene, GAME_SIZE } from "./game/demo-scene";
 import { readSceneOptions } from "./game/scene-options";
 import { coverOffset, integerCoverScale } from "./game/integer-scale";
+import { HelpOverlay } from "./game/help-overlay";
 import { MapOverlay, wantsMap } from "./game/map-overlay";
 import { visibleHeight } from "./game/viewport";
 
@@ -120,6 +121,7 @@ game.events.once(Phaser.Core.Events.READY, () => {
   const host = game.canvas.parentElement;
   if (host !== null) {
     scene.setMap(MapOverlay.attach(host, showMap));
+    HelpOverlay.attach(host);
   }
 });
 
