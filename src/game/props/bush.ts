@@ -109,8 +109,8 @@ class Bush implements SceneryInstance {
         light: {
           ramp: INK_RAMPS.canopy,
           light: env.light,
-          ambient: 0.06,
-          occlusion: 0.2,
+          ambient: 0.32,
+          occlusion: 0.09,
           dither: detail.dither,
           normalEpsilon: detail.normalEpsilon,
           flat: detail.flat,
@@ -126,7 +126,7 @@ class Bush implements SceneryInstance {
 
   /** The embers: pooled particles, which no distance field can express. */
   overlay(): PixelCloud {
-    return this.burning === null ? [] : moteCloud(this.embers, INK_RAMPS.ember);
+    return this.burning === null ? [] : moteCloud(this.embers, INK_RAMPS.fire);
   }
 
   cloud(env: SceneryEnv): PixelCloud {
@@ -167,8 +167,8 @@ class Bush implements SceneryInstance {
       {
         ramp: INK_RAMPS.canopy,
         light,
-        ambient: 0.06,
-        occlusion: 0.2,
+        ambient: 0.32,
+        occlusion: 0.09,
         dither: detail.dither,
         normalEpsilon: detail.normalEpsilon,
         flat: detail.flat,

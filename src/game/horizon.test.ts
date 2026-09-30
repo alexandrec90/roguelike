@@ -9,10 +9,7 @@ import {
   MAX_SKY_FRACTION,
   parseSkyFraction,
   ridgeProfile,
-  ROLL_FAR_COLOR,
-  ROLL_NEAR_COLOR,
   ROLL_ROWS,
-  rollHaze,
   rollKnee,
   rollLift,
   rollPlacement,
@@ -233,14 +230,6 @@ describe("the band's colours", () => {
     expect(bands.map((band) => band.y)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(bands[0]?.color).toBe(SKY_RAMP[0]);
     expect(bands[5]?.color).toBe(SKY_RAMP[SKY_RAMP.length - 1]);
-  });
-
-  it("hazes the roll from the near colour at the seam to the far one on the horizon", () => {
-    expect(rollHaze(0)).toBe(ROLL_NEAR_COLOR);
-    expect(rollHaze(ROLL_ROWS)).toBe(ROLL_FAR_COLOR);
-    expect(rollHaze(-4)).toBe(ROLL_NEAR_COLOR);
-    expect(rollHaze(ROLL_ROWS * 2)).toBe(ROLL_FAR_COLOR);
-    expect(rollHaze(ROLL_ROWS / 2)).not.toBe(rollHaze(0));
   });
 
   it("draws no sky when the band is zero", () => {

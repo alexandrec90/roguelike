@@ -3,14 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   actionForButton,
   actionForKey,
+  COMMANDS,
   DEFAULT_KEYBINDINGS,
   DIRECTION_AXES,
   DIRECTIONS,
   GAME_ACTIONS,
   HEADING_VECTOR,
   HEADINGS,
+  HELP_KEYS,
   headingOf,
   isDiagonal,
+  isHelpKey,
   mouseButtonOf,
   validateKeybindings,
   type Keybindings,
@@ -24,24 +27,41 @@ describe("the default control map", () => {
     expect(["KeyD", "ArrowRight"].map((code) => actionForKey(code))).toEqual(["east", "east"]);
   });
 
-  it("attacks on space and on either mouse button", () => {
+  it("attacks on space and the left button, and casts on Q and the right button", () => {
     expect(actionForKey("Space")).toBe("attack");
     expect(actionForButton("left")).toBe("attack");
-    expect(actionForButton("right")).toBe("attack");
+    expect(actionForKey("KeyQ")).toBe("cast");
+    expect(actionForButton("right")).toBe("cast");
+  });
+
+  it("lights the blade on F", () => {
+    expect(actionForKey("KeyF")).toBe("enchant");
   });
 
   it("leaves the scroll wheel alone — a stray middle click is not a swing", () => {
     expect(actionForButton("middle")).toBeUndefined();
   });
 
+  it("keeps the reminder's keys apart from every action", () => {
+    expect(isHelpKey("KeyH")).toBe(true);
+    expect(isHelpKey("KeyW")).toBe(false);
+    for (const key of HELP_KEYS) {
+      expect(actionForKey(key)).toBeUndefined();
+    }
+    const clash = { ...DEFAULT_KEYBINDINGS, frost: { keys: ["KeyH"] } };
+    expect(validateKeybindings(clash).join()).toMatch(/controls reminder/);
+  });
+
   it("claims nothing it was not given", () => {
-    expect(actionForKey("KeyQ")).toBeUndefined();
+    expect(actionForKey("KeyR")).toBeUndefined();
     expect(actionForKey("F5")).toBeUndefined();
   });
 
   it("binds every action, and binds no input twice", () => {
     expect(validateKeybindings(DEFAULT_KEYBINDINGS)).toEqual([]);
-    expect(GAME_ACTIONS).toHaveLength(DIRECTIONS.length + 1);
+    expect(GAME_ACTIONS).toHaveLength(DIRECTIONS.length + COMMANDS.length);
+    expect(COMMANDS).toEqual(["attack", "cast", "frost", "enchant"]);
+    expect(actionForKey("KeyE")).toBe("frost");
   });
 
   it("names the mouse buttons the DOM numbers", () => {

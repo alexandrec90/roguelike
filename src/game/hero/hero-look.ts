@@ -1,0 +1,187 @@
+/**
+ * Everything the hero looks like this frame, from the simulation's state: the
+ * lit body, the scarf's tail, the swing's crescent, the burning blade's flames
+ * and embers, his shadow, and the light the blade throws.
+ *
+ * Phaser-free and deterministic, so it is testable and the lab could drive it;
+ * `hero-layer.ts` only paints what this returns. It owns the few pieces of
+ * presentation state that have memory — the particle pool, the scarf chain,
+ * where the blade was last frame — and none of them can reach back into the
+ * simulation: a flame never decides whether a blow landed.
+ */
+
+import { createPool, particleCloud, stepParticles, type ParticlePool } from "../fx/particles";
+import type { PixelCloud } from "../ink";
+import { HEADING_VECTOR } from "../keybindings";
+import type { LightSource } from "../lights";
+import { BLADE_SPAN, CAST, HERO_EQUIPPED, WALK } from "../models";
+import { solveModel, type SolvedPose } from "../rig";
+import { stepDurationMs, walkClipMs, type PlayerState } from "../player";
+import { TILE_DEPTH, TILE_WIDTH } from "../projection";
+import { windAt, type WindOptions } from "../wind";
+import {
+  bladeLight,
+  createFireEmitter,
+  emitBladeFire,
+  emitHitBurst,
+  type BladeSegment,
+  type FireEmitter,
+} from "./blade-fire";
+import { heroFigure, layeredPose } from "./hero-figure";
+import { heroShadow, type ShadowLight } from "./hero-shadow";
+import { boneSpan } from "./rig-volume";
+import { createScarf, scarfPrims, settleScarf, stepScarf, type Scarf } from "./scarf";
+import { trailCloud, trailSegments } from "./swing-trail";
+
+export interface LookInput {
+  readonly player: PlayerState;
+  readonly elapsedMs: number;
+  readonly deltaMs: number;
+  readonly sun: ShadowLight;
+  readonly wind?: WindOptions;
+}
+
+export interface LookFrame {
+  /** Just him — what a puddle reflects and a transform melts. */
+  readonly figure: PixelCloud;
+  /** Him and everything around him, in draw order, foot-relative. */
+  readonly scene: PixelCloud;
+  /** On the ground under him, foot-relative. */
+  readonly shadow: PixelCloud;
+  /** The blade's outer span this frame, foot-relative screen pixels. */
+  readonly blade: BladeSegment | undefined;
+}
+
+/** How hard walking drags the scarf's tail, px/ms². */
+const SCARF_DRAG = 0.0006;
+const SCARF_WIND = 0.00014;
+const SCARF_GROUP = 1000;
+/** How far behind (or, turned away, in front of) the spine the tail hangs. */
+const SCARF_DEPTH = 2.9;
+
+export class HeroLook {
+  private readonly pool: ParticlePool;
+  private readonly fire: FireEmitter;
+  private readonly scarf: Scarf;
+  private settled = false;
+  private lastBlade: BladeSegment | undefined;
+
+  constructor(seed = 0x4e50) {
+    this.pool = createPool(180, seed);
+    this.fire = createFireEmitter(seed + 1);
+    this.scarf = createScarf(seed + 2);
+  }
+
+  /** Sparks (or flame) off the blade's tip — a blow landed. */
+  hit(burning: boolean): void {
+    const blade = this.lastBlade;
+    if (blade !== undefined) {
+      emitHitBurst(this.pool, blade.bx, blade.by, burning);
+    }
+  }
+
+  /** The blade's light, if it is burning, in screen pixels. */
+  light(player: PlayerState, footX: number, footY: number, elapsedMs: number): LightSource | undefined {
+    const blade = this.lastBlade;
+    return player.enchanted && blade !== undefined ? bladeLight(blade, footX, footY, elapsedMs) : undefined;
+  }
+
+  frame(input: LookInput): LookFrame {
+    const { player } = input;
+    const pose = layeredPose(tracksOf(player, input.elapsedMs));
+    const orient = { facing: player.facing, flipX: player.flipX };
+    const skeleton = solveModel(HERO_EQUIPPED, pose, orient);
+    this.stepScarf(skeleton, input);
+
+    const front = player.facing === "front";
+    const figure = heroFigure(pose, {
+      ...orient,
+      gaze: front ? HEADING_VECTOR[player.heading].dx : 0,
+      enchanted: player.enchanted,
+      timeMs: input.elapsedMs,
+      light: { x: input.sun.light.x, y: input.sun.light.y, ambient: 0.24 },
+      extras: scarfPrims(this.scarf, depthOf(skeleton, front), SCARF_GROUP),
+    });
+
+    const blade = bladeOf(figure.solved);
+    this.stepParticles(player, blade, input.deltaMs);
+    const trail =
+      player.attackMs === undefined
+        ? { behind: [], front: [] }
+        : trailCloud(trailSegments(player.attackMs, layeredPose({ ...tracksOf(player, input.elapsedMs), swingMs: undefined }), orient), player.enchanted);
+    const scene = [...trail.behind, ...figure.cloud, ...trail.front, ...particleCloud(this.pool)];
+    return { figure: figure.cloud, scene, shadow: heroShadow(figure.cloud, input.sun), blade };
+  }
+
+  private stepScarf(solved: SolvedPose, input: LookInput): void {
+    const neck = boneSpan(solved, "torso", 0.88, 0.88)?.a;
+    if (neck === undefined) {
+      return;
+    }
+    const anchor = { x: neck.x, y: neck.y + 0.5 };
+    if (!this.settled) {
+      settleScarf(this.scarf, anchor);
+      this.settled = true;
+    }
+    const { player } = input;
+    const gait = player.motion === "step" ? player.gait : undefined;
+    const wind = windAt(input.elapsedMs, 0, 0, input.wind ?? {}) * SCARF_WIND;
+    const drive = {
+      x: -(gait?.strafe ?? 0) * SCARF_DRAG + wind,
+      y: (gait?.forward ?? 0) * SCARF_DRAG,
+    };
+    stepScarf(this.scarf, anchor, input.deltaMs, drive);
+  }
+
+  /**
+   * Age the flames, slide them with the world, and feed the blade's fire.
+   *
+   * The hero never moves on screen — the planet slides under him — so a flame
+   * that has left the blade must slide with the planet or it would be carried
+   * along beside him like a banner.
+   */
+  private stepParticles(player: PlayerState, blade: BladeSegment | undefined, deltaMs: number): void {
+    const delta = Math.min(Math.max(deltaMs, 0), 50);
+    const gait = player.motion === "step" ? player.gait : undefined;
+    if (gait !== undefined) {
+      const share = delta / stepDurationMs(player);
+      const dx = -gait.strafe * TILE_WIDTH * share;
+      const dy = gait.forward * TILE_DEPTH * share;
+      for (const particle of this.pool.particles) {
+        particle.x += dx;
+        particle.y += dy;
+      }
+    }
+    stepParticles(this.pool, delta);
+    if (blade !== undefined && player.enchanted) {
+      const last = this.lastBlade ?? blade;
+      const scale = delta > 0 ? 1 / delta : 0;
+      const velocity = {
+        x: ((blade.ax + blade.bx - last.ax - last.bx) / 2) * scale,
+        y: ((blade.ay + blade.by - last.ay - last.by) / 2) * scale,
+      };
+      emitBladeFire(this.pool, this.fire, blade, delta, velocity);
+    }
+    this.lastBlade = blade;
+  }
+}
+
+/** Which clips are playing where, read off the simulation's clocks. */
+export function tracksOf(player: PlayerState, elapsedMs: number): Parameters<typeof layeredPose>[0] {
+  return {
+    idleMs: elapsedMs,
+    walkMs: player.motion === "step" ? walkClipMs(player, WALK.durationMs) : undefined,
+    castMs: player.castMs !== undefined && player.castMs < CAST.durationMs ? player.castMs : undefined,
+    swingMs: player.attackMs,
+  };
+}
+
+function bladeOf(solved: SolvedPose): BladeSegment | undefined {
+  const span = boneSpan(solved, "sword", BLADE_SPAN.from, 0.97);
+  return span === undefined ? undefined : { ax: span.a.x, ay: span.a.y, bx: span.b.x, by: span.b.y };
+}
+
+function depthOf(solved: SolvedPose, front: boolean): number {
+  const neck = solved["torso"]?.end.y ?? 0;
+  return front ? neck - SCARF_DEPTH : neck + SCARF_DEPTH;
+}

@@ -44,7 +44,7 @@
 
 /** Fixed-size uniform arrays: GLSL ES 3.00 needs a compile-time bound. */
 export const MAX_LOBES = 12;
-export const MAX_RAMP = 6;
+export const MAX_RAMP = 8;
 export const MAX_OCTAVES = 4;
 
 /**
@@ -284,7 +284,7 @@ vec3 rampInk(float level, int x, int y) {
 // scatter of pixels reaches white.
 vec3 emberInk(float heat, int x, int y) {
   float jitter = pixelHash(x, y, u_heatFlicker, 4) * 0.28;
-  float level = clamp(0.18 + heat * 0.42 + jitter, 0.0, 1.0);
+  float level = clamp(0.3 + heat * 0.5 + jitter, 0.0, 1.0);
   float scaled = level * float(u_emberSteps - 1);
   float base = floor(scaled);
   int index = int(base) + ((scaled - base) > ditherThreshold(x, y) ? 1 : 0);

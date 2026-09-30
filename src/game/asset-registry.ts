@@ -16,294 +16,32 @@ import {
   type PaletteVariant,
 } from "./asset-types";
 import { INK_COLORS } from "./ink";
-import { CAST, HERO_EQUIPPED, IDLE, SWING, WALK } from "./models";
 import type { PixelSpriteSource } from "./pixel-art";
 import { samplePuddleFrames } from "./puddles";
+import { HERO_EQUIPPED, SWING, WALK } from "./models";
 import { validateRegistry as checkRegistry } from "./registry-validation";
+import { sampleClipFrames } from "./rig-frames";
+import { AREA_ASSETS } from "./registry";
 import { sampleRippleFrames } from "./ripples";
-import { sampleClipFrames, sampleMeltFrames } from "./rig-frames";
-import { INK_RAMPS, shadeCloud } from "./shading";
 import { swapPalette } from "./sprite-ops";
-import { SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
-import { DIRT_PATH, GRASS, WALL_FACE, WALL_SHELF, WALL_TOP } from "./tiles";
+import { SPARK } from "./sprites";
 import { TREE_ASSETS } from "./tree-assets";
-import { sampleGrassFrames, sampleTreeFrames } from "./vegetation";
 
 export type { AssetCategory, AssetEntry, EffectId, PaletteVariant } from "./asset-types";
 export { AUTHORED, AUTHORED_VARIANT_ID } from "./asset-types";
 
-/** One swap shared by every rig entry: the bone ink re-inked to ice. */
-const FROST: PaletteVariant = { id: "frost", label: "Frozen", overrides: { w: "#a8ecff" } };
-
 export const ASSET_REGISTRY: readonly AssetEntry[] = [
+  ...AREA_ASSETS,
   {
-    id: "hero",
-    label: "Hero — idle (rig)",
+    id: "hero-skeleton",
+    label: "Hero — bare skeleton, swing over walk",
     category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, IDLE, 8),
-    frameDurationMs: 175,
+    frames: sampleClipFrames(HERO_EQUIPPED, SWING, 10, { under: WALK }),
+    frameDurationMs: 60,
     notes:
-      "Not drawn: rendered from the humanoid rig in models.ts with its sword equipped. " +
-      "Edit the clip or the gear, and these frames follow.",
-    variants: [AUTHORED, FROST],
-  },
-  {
-    id: "hero-lit",
-    label: "Hero — idle, lit (shaded rig)",
-    category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, IDLE, 8, {
-      mapCloud: (cloud) =>
-        shadeCloud(cloud, {
-          ramp: INK_RAMPS.bone,
-          light: { x: -0.6, y: -0.8 },
-          ambient: 0.2,
-          only: ["bone", "steel"],
-        }),
-    }),
-    frameDurationMs: 175,
-    notes:
-      "The same idle clip as 'hero', re-inked by shadeCloud(): one light direction, a four-step " +
-      "ink ramp, and a 4x4 ordered dither locked to the pixel grid. No shaded frame was drawn. " +
-      "The identity inks — cyan blade and void eyes — are held out of the light pass, " +
-      "which is why the silhouette still reads at 1x.",
-    variants: [
-      AUTHORED,
-      { id: "ember-blade", label: "Ember blade", overrides: { c: INK_COLORS.ember } },
-    ],
-  },
-  {
-    id: "hero-walk",
-    label: "Hero — walk (rig)",
-    category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, WALK, 8),
-    frameDurationMs: 80,
-    notes: "The stride swings through the depth axis; back facing and x-flip come free.",
-    variants: [AUTHORED, FROST],
-  },
-  {
-    id: "hero-walk-back",
-    label: "Hero — walk, back view (rig)",
-    category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, WALK, 8, { facing: "back" }),
-    frameDurationMs: 80,
-    notes: "Same clip, back facing: depth negated, front-only stamps (the eyes) dropped.",
-    variants: [AUTHORED, FROST],
-  },
-  {
-    id: "hero-swing",
-    label: "Hero — sword swing (rig)",
-    category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, SWING, 8),
-    frameDurationMs: 65,
-    notes: "Anticipation behind the head, contact across the front, overshoot, settle — all keyed in 3D.",
-    variants: [AUTHORED, FROST],
-  },
-  {
-    id: "hero-swing-walk",
-    label: "Hero — swing while walking (rig)",
-    category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, SWING, 8, { under: WALK }),
-    frameDurationMs: 65,
-    notes:
-      "Two tracks, one skeleton: SWING sampled onto a WALK sample. No combined clip was "
-      + "authored — the legs stride because SWING keys nothing below the waist.",
-    variants: [AUTHORED, FROST],
-  },
-  {
-    id: "hero-cast",
-    label: "Hero — cast (rig)",
-    category: "actor",
-    frames: sampleClipFrames(HERO_EQUIPPED, CAST, 8),
-    frameDurationMs: 88,
-    notes: "Gather and release toward the camera. The projectile is the scene's business.",
-    variants: [AUTHORED, FROST],
-  },
-  {
-    id: "hero-melt",
-    label: "Hero — melt (transform)",
-    category: "actor",
-    frames: sampleMeltFrames(HERO_EQUIPPED, 8, 0xa11ce),
-    frameDurationMs: 110,
-    notes:
-      "No melting frames were drawn: this is meltCloud() applied to the rendered rig. " +
-      "The same transform melts anything that renders to a pixel cloud.",
-    variants: [AUTHORED, FROST],
-  },
-  {
-    id: "slime",
-    label: "Slime",
-    category: "actor",
-    frames: SLIME_FRAMES,
-    frameDurationMs: 140,
-    notes: "Anticipation, contact, overshoot, settle — four silhouettes, no tweening.",
-    variants: [
-      AUTHORED,
-      {
-        id: "ember",
-        label: "Ember",
-        overrides: {
-          g: "#ff5a2b",
-          G: "#170502",
-          l: "#3a0f05",
-          w: "#ffe0a8",
-          d: "#000000",
-          s: "#1f0d08",
-        },
-      },
-      {
-        id: "void",
-        label: "Void",
-        overrides: {
-          g: "#a06bff",
-          G: "#0e0618",
-          l: "#241040",
-          w: "#e0d8ff",
-          d: "#000000",
-          s: "#150f22",
-        },
-      },
-    ],
-  },
-  {
-    id: "torch",
-    label: "Wall torch",
-    category: "prop",
-    frames: TORCH_FRAMES,
-    frameDurationMs: 92,
-    notes: "Flame flicker. Fast enough that the eye reads light, not frames.",
-    variants: [
-      AUTHORED,
-      {
-        id: "arcane",
-        label: "Arcane",
-        overrides: { y: "#8fe0ff", Y: "#dff7ff", o: "#4a90d9", r: "#2b4f9a" },
-      },
-      {
-        id: "witchfire",
-        label: "Witchfire",
-        overrides: { y: "#b8ff8f", Y: "#e6ffd6", o: "#4fb04a", r: "#256b32" },
-      },
-    ],
-  },
-  {
-    id: "grass",
-    label: "Ground — grass",
-    category: "tile",
-    frames: [GRASS],
-    frameDurationMs: 200,
-    notes:
-      "16x12: authored already foreshortened by the camera pitch, so it draws 1:1. " +
-      "Check it tiled — noise this low-contrast is the difference between a field and wallpaper.",
-    variants: [
-      AUTHORED,
-      {
-        id: "autumn",
-        label: "Autumn",
-        overrides: { g: "#3a2410", G: "#000000", h: "#e8a33d", s: "#000000" },
-      },
-      {
-        id: "night",
-        label: "Night",
-        overrides: { g: "#0d2430", G: "#000000", h: "#35e8ff", s: "#000000" },
-      },
-    ],
-  },
-  {
-    id: "grass-sway",
-    label: "Grass — wind-swept tuft",
-    category: "prop",
-    frames: sampleGrassFrames(),
-    frameDurationMs: 600,
-    notes:
-      "Five rooted blades derived from one seeded wind field. Their tips move by whole pixels; " +
-      "the field draws a differently seeded tuft in every grass cell.",
-    variants: [
-      AUTHORED,
-      { id: "frost", label: "Frost", overrides: { g: INK_COLORS.ice } },
-    ],
-  },
-  {
-    id: "wind-tree",
-    label: "Tree — procedural broadleaf",
-    category: "prop",
-    frames: sampleTreeFrames(),
-    frameDurationMs: 600,
-    notes:
-      "A rooted trunk, independent branches, and seeded foliage clusters. Wind displacement " +
-      "increases with height, so the crown bends while the foot remains fixed.",
-    variants: [
-      AUTHORED,
-      { id: "autumn", label: "Autumn", overrides: { g: INK_COLORS.amber } },
-    ],
-  },
-  {
-    id: "dirt-path",
-    label: "Ground — dirt path",
-    category: "tile",
-    frames: [DIRT_PATH],
-    frameDurationMs: 200,
-    notes: "The trodden route through the field. Same 16x12 footprint as grass.",
-    variants: [
-      AUTHORED,
-      {
-        id: "ashen",
-        label: "Ashen",
-        overrides: { d: "#000000", D: "#141a22", e: "#000000", p: "#9db4d8" },
-      },
-    ],
-  },
-  {
-    id: "wall-top",
-    label: "Rock — top cap",
-    category: "tile",
-    frames: [WALL_TOP],
-    frameDurationMs: 200,
-    notes: "What the pitched-back camera sees of the top of a rock block. 16x12, like the ground.",
-    variants: [
-      AUTHORED,
-      {
-        id: "sandstone",
-        label: "Sandstone",
-        overrides: { r: "#000000", R: "#1c1710", k: "#e8c25a" },
-      },
-    ],
-  },
-  {
-    id: "wall-shelf",
-    label: "Rock — top, inside a mass",
-    category: "tile",
-    frames: [WALL_SHELF],
-    frameDurationMs: 200,
-    notes:
-      "The cap without its lit back lip, for a cell that has more rock behind it. Tiled "
-      + "three by three it must show no horizontal banding at all — that banding is the "
-      + "whole reason this tile exists.",
-    variants: [
-      AUTHORED,
-      {
-        id: "sandstone",
-        label: "Sandstone",
-        overrides: { r: "#000000", R: "#1c1710", k: "#e8c25a" },
-      },
-    ],
-  },
-  {
-    id: "wall-face",
-    label: "Rock — face",
-    category: "tile",
-    frames: [WALL_FACE],
-    frameDurationMs: 200,
-    notes:
-      "The side that rises up the screen, 16x16 and never foreshortened. Stacks upward, " +
-      "so it carries no band of its own — the shadow at its foot is drawn by what it stands on.",
-    variants: [
-      AUTHORED,
-      {
-        id: "sandstone",
-        label: "Sandstone",
-        overrides: { f: "#000000", F: "#1c1710", m: "#e8c25a" },
-      },
-    ],
+      "The bones the volumetric hero is dressed on, stroked as lines: the view for checking a " +
+      "clip's motion without the body in the way. The dressed hero is the hero-body entries.",
+    variants: [AUTHORED, { id: "ember", label: "Ember", overrides: { w: "#ff7a1f" } }],
   },
   {
     id: "puddle",

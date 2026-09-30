@@ -1,66 +1,55 @@
 import Phaser from "phaser";
 
-import { localFoot, localReach, localRow, visibleLocal, type CameraFrame, type LocalBounds } from "./camera";
+import { AmbientLayer } from "./ambient-layer";
+import { visibleLocal, type CameraFrame, type LocalBounds } from "./camera";
+import { cloudShadowsAt } from "./cloud-shadow";
+import { Encounter } from "./encounter";
+import { beginFrame, type FrameContext } from "./frame-context";
 import { GroundLayer } from "./ground-layer";
 import { HeroLayer, heroHeight } from "./hero-layer";
-import { DEFAULT_SKY_FRACTION, horizonLayout, type HorizonLayout } from "./horizon";
+import { horizonLayout, type HorizonLayout } from "./horizon";
+import { LightingLayer } from "./lighting-layer";
 import type { MapOverlay } from "./map-overlay";
-import { quantizedWave } from "./pixel-art";
-import {
-  DEFAULT_STRAFE_RADIUS,
-  toLocal,
-  type PlanetPoint,
-  type PlanetPose,
-} from "./planet";
-import { TILE_WIDTH, type ScreenPoint } from "./projection";
-import { createEmitter, particleAlpha, stepEmitter, type EmitterState } from "./spark-emitter";
+import { createOdometer, trackScroll } from "./odometer";
+import type { PlanetPoint, PlanetPose } from "./planet";
+import type { ScreenPoint } from "./projection";
 import { RollGroundLayer } from "./roll-ground-layer";
-import { SkyLayer } from "./sky-layer";
-import { RAIN_STREAK, SLIME_FRAMES, SPARK, TORCH_FRAMES } from "./sprites";
-import { openGround } from "./terrain";
-import { installPixelTexture } from "./textures";
+import { DEFAULT_SCENE_OPTIONS, type SceneOptions } from "./scene-options";
 import { SceneryLayer } from "./scenery-layer";
+import { SkyLayer } from "./sky-layer";
+import { openGround } from "./terrain";
 import { VegetationLayer } from "./vegetation-layer";
 import { anchorFoot, walkableBand } from "./viewport";
 import { WaterLayer } from "./water-layer";
+import { WEATHER_PRESETS } from "./weather";
 import { WeatherLayer } from "./weather-layer";
+import { scorchAt } from "./wildfire";
+import { WorldClock } from "./world-clock";
 
 const WIDTH = 320;
 const HEIGHT = 180;
 
-const RANK_ACTOR = 8;
 /**
- * Where on the planet this session opens, and the two landmarks beside it.
+ * Where on the planet this session opens, and the campfire beside it.
  *
  * Planet coordinates, not screen cells: they are places, and the hero walks
  * away from them and - the point of a round world - eventually back to them.
  * `openGround` nudges each off any outcrop the seed happened to put it in.
  */
 const START: PlanetPoint = { x: 128, y: 128 };
-const SLIME_AT: PlanetPoint = { x: 134, y: 131 };
-const TORCH_AT: PlanetPoint = { x: 131, y: 129 };
+const CAMPFIRE_AT: PlanetPoint = { x: 131, y: 129 };
 
 const STORM_SEED = 0x51a7;
-
-function installSceneTextures(scene: Phaser.Scene): void {
-  SLIME_FRAMES.forEach((frame, index) =>
-    installPixelTexture(scene.textures, `slime-${index}`, frame),
-  );
-  TORCH_FRAMES.forEach((frame, index) =>
-    installPixelTexture(scene.textures, `torch-${index}`, frame),
-  );
-  installPixelTexture(scene.textures, "spark", SPARK);
-  installPixelTexture(scene.textures, "rain", RAIN_STREAK);
-}
 
 /**
  * The sample outdoor scene, on a round planet.
  *
- * Nothing here decides the projection, the horizon split, what a key means, or
- * what a step does to a pose - it reads all four and draws. What it *does* own
- * is the one fact every layer needs and none of them may derive twice: the
- * `CameraFrame` for this instant, built from where the window put the hero and
- * how far through a stride he is.
+ * Nothing here decides the projection, the horizon split, what a key means,
+ * what a step does to a pose, what time it is or how anything is drawn — it
+ * reads all of them and hands them on. What it *does* own is the one fact every
+ * layer needs and none may derive twice: the `FrameContext` for this instant,
+ * built from where the window put the hero, how far through a stride he is, and
+ * what the clock and the sky say.
  *
  * The hero never moves. He is nailed to the middle of the walkable band and the
  * world slides and turns beneath him, which is what "the camera turns with the
@@ -72,48 +61,54 @@ export class DemoScene extends Phaser.Scene {
   private anchor: ScreenPoint = { x: WIDTH / 2, y: HEIGHT / 2 };
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
-  private slime!: Phaser.GameObjects.Image;
-  private torch!: Phaser.GameObjects.Image;
-  private torchGlow!: Phaser.GameObjects.Graphics;
-  private torchFoot: ScreenPoint = { x: -99, y: -99 };
-  private sparkImages: Phaser.GameObjects.Image[] = [];
-  private emitter!: EmitterState;
-
   private readonly hero: HeroLayer;
   private readonly sky = new SkyLayer();
   private readonly rollGround = new RollGroundLayer();
   private readonly ground = new GroundLayer();
   private readonly vegetation = new VegetationLayer();
   private readonly scenery = new SceneryLayer();
+  private readonly encounter = new Encounter();
   private readonly water = new WaterLayer();
-  private readonly weather = new WeatherLayer(STORM_SEED);
-  private elapsedMs = 0;
+  private readonly weather: WeatherLayer;
+  private readonly ambient = new AmbientLayer();
+  private readonly lighting = new LightingLayer();
+  private readonly clock: WorldClock;
+  private readonly odometer = createOdometer();
   /** Scanlines of the render target the window is showing; the rest is clipped. */
   private visible = HEIGHT;
   private built = false;
   /** The `?map=1` instrument, or null on an ordinary load. */
   private map: MapOverlay | null = null;
 
-  constructor(skyFraction: number = DEFAULT_SKY_FRACTION, radius: number = DEFAULT_STRAFE_RADIUS) {
+  constructor(options: SceneOptions = DEFAULT_SCENE_OPTIONS) {
     super("overworld-field");
-    this.skyFraction = skyFraction;
-    this.hero = new HeroLayer({ ...openGround(START), turn: 0 }, radius);
+    this.skyFraction = options.skyFraction;
+    this.hero = new HeroLayer({ ...openGround(START), turn: 0 }, options.radius);
+    this.clock = new WorldClock(options.pinnedHours, options.dayMs);
+    this.weather = new WeatherLayer(
+      STORM_SEED,
+      options.weather === undefined ? undefined : WEATHER_PRESETS[options.weather],
+    );
   }
 
   create(): void {
     this.layout = horizonLayout(HEIGHT, this.skyFraction);
     this.relayout();
 
-    installSceneTextures(this);
     this.sky.create(this, this.layout, WIDTH);
-    this.rollGround.create(this, this.frame(), WIDTH);
+    this.rollGround.create(this, this.frame(), WIDTH, this.bounds);
     this.hero.create(this, this.layout.groundTop, this.anchor);
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
     this.scenery.create(this, this.bounds, WIDTH);
-    this.water.create(this);
-    this.createProps();
+    this.encounter.create(this, WIDTH, HEIGHT, openGround(CAMPFIRE_AT));
+    // Burnt ground has no grass on it until it greens over again.
+    const fire = this.encounter.wildfire.fire;
+    this.vegetation.setBare((point) => scorchAt(fire, point) > 0.15);
+    this.water.create(this, WIDTH, HEIGHT);
     this.weather.create(this, WIDTH, HEIGHT, this.layout.horizonY);
+    this.ambient.create(this);
+    this.lighting.create(this, WIDTH, HEIGHT);
     this.built = true;
   }
 
@@ -139,30 +134,78 @@ export class DemoScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    this.elapsedMs += Math.min(delta, 40);
-    this.hero.animate(delta, this.elapsedMs);
+    const worldDelta = this.clock.tick(delta);
+    this.hero.animate(worldDelta, this.clock.elapsedMs);
 
     const frame = this.frame();
     const pose = this.hero.groundPose();
-    this.ground.draw(frame, pose);
-    this.rollGround.draw(frame, pose, this.elapsedMs);
-    this.vegetation.animate(frame, pose, this.elapsedMs);
-    this.scenery.animate(frame, pose, delta, this.elapsedMs);
-    this.water.relocate(frame, pose, localReach(this.bounds));
-    this.drawProps(frame, pose);
+    const ctx = this.context(frame, pose);
+    trackScroll(this.odometer, this.hero.phase(), pose);
 
-    this.updateSparks(delta);
-    // Before the water, so a drop that lands this frame rings this frame.
-    this.weather.animate(delta, this.elapsedMs, HEIGHT, frame, this.water);
-    this.water.animate(
-      delta,
-      this.elapsedMs,
-      { cloud: this.hero.cloudNow(), foot: this.hero.footNow() },
-      this.torchFoot,
-      frame,
-    );
-    this.sky.animate(this.hero.turn());
+    this.ground.update(ctx);
+    this.rollGround.update(ctx);
+    this.vegetation.update(ctx, this.grassPushers(ctx));
+    this.scenery.update(ctx);
+    this.hero.update(ctx);
+    this.encounter.update(ctx, this.hero);
+    this.drawWater(ctx);
+    this.sky.update(this.hero.turn(), ctx.atmosphere, ctx.elapsedMs);
+    this.ambient.update(ctx, this.odometer);
+    this.light(ctx);
     this.drawMap(frame, pose, delta);
+  }
+
+  /** Whatever walks through the grass and bends it aside: the hero, and the slimes. */
+  private grassPushers(ctx: FrameContext): { x: number; y: number; weight?: number }[] {
+    const feet = this.encounter.slimes.reflectables().map((slime) => ({ x: slime.x, y: slime.y, weight: 0.7 }));
+    return [{ x: ctx.frame.footX, y: ctx.frame.footY }, ...feet];
+  }
+
+  /** Rain, then the water it lands in — so a drop that lands this frame rings this frame. */
+  private drawWater(ctx: FrameContext): void {
+    this.weather.update(ctx, this.water);
+    const campfire = this.encounter.campfire;
+    this.water.update(ctx, {
+      hero: { cloud: this.hero.cloudNow(), foot: this.hero.footNow() },
+      reflectables: [
+        ...this.encounter.slimes.reflectables().map((slime) => ({
+          cloud: slime.cloud,
+          foot: { x: slime.x, y: slime.y },
+        })),
+        ...(campfire.visible ? [{ cloud: campfire.flameCloud(), foot: campfire.foot, glow: true }] : []),
+      ],
+    });
+  }
+
+  /** The lighting pass, and the camera's shake — the last things a frame does. */
+  private light(ctx: FrameContext): void {
+    this.lighting.draw({
+      ambient: ctx.atmosphere.ambient,
+      lights: ctx.lights,
+      flash: 0,
+      night: 1 - ctx.atmosphere.daylight,
+      clouds: cloudShadowsAt(this.odometer, ctx.elapsedMs, ctx.atmosphere),
+      skyRows: this.layout.horizonY,
+    });
+    const shake = this.clock.shake();
+    this.cameras.main.setScroll(shake.x, shake.y);
+  }
+
+  /** The one description of this frame every layer reads. */
+  private context(frame: CameraFrame, pose: PlanetPose): FrameContext {
+    const sky = this.weather.weatherState(this.clock.elapsedMs);
+    return beginFrame({
+      frame,
+      pose,
+      elapsedMs: this.clock.elapsedMs,
+      deltaMs: this.clock.deltaMs,
+      atmosphere: this.clock.atmosphere(sky.overcast),
+      wind: { strength: sky.wind, gustiness: 0.6 },
+      rain: sky.rain,
+      width: WIDTH,
+      height: HEIGHT,
+      impulse: this.clock.sink,
+    });
   }
 
   /**
@@ -212,97 +255,9 @@ export class DemoScene extends Phaser.Scene {
     }
     this.hero.setAnchor(this.anchor);
     this.ground.layout(flat, this.bounds);
+    this.rollGround.layout(flat, this.bounds);
     this.vegetation.layout(flat, this.bounds);
     this.scenery.layout(this.bounds, WIDTH);
-  }
-
-  private createProps(): void {
-    this.slime = this.add.image(-99, -99, "slime-0").setOrigin(0.5, 1);
-    this.torch = this.add.image(-99, -99, "torch-0").setOrigin(0.5, 1);
-
-    // Stamped around its own origin and then moved, because the torch scrolls
-    // now: a glow drawn at absolute coordinates would stay where it was lit.
-    this.torchGlow = this.add.graphics();
-    this.torchGlow.fillStyle(0xe66d2e, 0.025).fillCircle(0, 0, 60);
-    this.torchGlow.fillStyle(0xf08d3d, 0.045).fillCircle(0, 0, 40);
-    this.torchGlow.fillStyle(0xffc05a, 0.075).fillCircle(0, 0, 22);
-    this.torchGlow.setBlendMode(Phaser.BlendModes.ADD);
-
-    // The emitter runs around its own origin and is drawn wherever the flame
-    // currently is, so a pooled, seeded plume travels without being re-seeded.
-    this.emitter = createEmitter({ originX: 0, originY: 0 });
-    this.sparkImages = this.emitter.particles.map(() =>
-      this.add.image(-99, -99, "spark").setVisible(false).setBlendMode(Phaser.BlendModes.ADD),
-    );
-  }
-
-  /**
-   * The two landmarks, wherever the world has carried them to.
-   *
-   * Both are planet points read through the same frame the ground is, so they
-   * scroll and swing with the tile they are standing on rather than beside it.
-   */
-  private drawProps(frame: CameraFrame, pose: PlanetPose): void {
-    const slimeAt = toLocal(pose, openGround(SLIME_AT));
-    const slimeFoot = localFoot(frame, slimeAt);
-    const hop = Math.max(0, quantizedWave(this.elapsedMs, 1500, 3, -0.8));
-    const cycle = this.elapsedMs % 1500;
-    const slimeFrame = cycle < 150 ? 1 : cycle < 360 ? 2 : cycle > 1190 && cycle < 1320 ? 3 : 0;
-    this.slime
-      .setTexture(`slime-${slimeFrame}`)
-      .setPosition(slimeFoot.x, slimeFoot.y - hop)
-      .setDepth(Math.round(localRow(frame, slimeAt)) * TILE_WIDTH + RANK_ACTOR)
-      .setVisible(this.onScreen(slimeFoot));
-
-    const torchAt = toLocal(pose, openGround(TORCH_AT));
-    this.torchFoot = localFoot(frame, torchAt);
-    const depth = Math.round(localRow(frame, torchAt)) * TILE_WIDTH + RANK_ACTOR;
-    const visible = this.onScreen(this.torchFoot);
-    const flicker =
-      Math.sin(this.elapsedMs * 0.019) * 0.035 + Math.sin(this.elapsedMs * 0.047) * 0.018;
-
-    this.torch
-      .setTexture(`torch-${Math.floor(this.elapsedMs / 92) % TORCH_FRAMES.length}`)
-      .setPosition(this.torchFoot.x, this.torchFoot.y)
-      .setDepth(depth)
-      .setVisible(visible);
-    this.torchGlow
-      .setPosition(this.torchFoot.x, this.torchFoot.y - 9)
-      .setDepth(depth - 2)
-      .setScale(1 + flicker, 1 + flicker * 0.72)
-      .setVisible(visible);
-    this.torchGlow.alpha = 0.86 + flicker * 2.1;
-  }
-
-  private onScreen(point: ScreenPoint): boolean {
-    return point.x > -32 && point.x < WIDTH + 32 && point.y > -32 && point.y < HEIGHT + 32;
-  }
-
-  /**
-   * Sparks come from the shared seeded emitter - the same one the asset lab
-   * steps - so what the lab shows for `sparks` is what this scene draws. Its
-   * particles are in flame-relative coordinates; the flame's screen position is
-   * added on the way out.
-   */
-  private updateSparks(delta: number): void {
-    stepEmitter(this.emitter, delta);
-    const originY = this.torchFoot.y - 13;
-
-    this.emitter.particles.forEach((particle, index) => {
-      const image = this.sparkImages[index];
-      if (image === undefined) {
-        return;
-      }
-      if (!particle.active) {
-        image.setVisible(false);
-        return;
-      }
-      image
-        .setPosition(Math.round(this.torchFoot.x + particle.x), Math.round(originY + particle.y))
-        .setDepth(Math.round(localRow(this.frame(), { x: 0, y: 0 })) * TILE_WIDTH + RANK_ACTOR + 1)
-        .setAlpha(particleAlpha(particle))
-        .setVisible(true);
-    });
   }
 }
 

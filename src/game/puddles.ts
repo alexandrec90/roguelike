@@ -11,15 +11,17 @@
  * Everything the water shows flattens to a `PixelCloud` in absolute screen
  * pixels, so the scene's only job is to draw it:
  *
- * - `puddleSurface` — the body and its rim, still and static.
+ * - `puddleSurface` — the body, its lip and the wet ground round it; static
+ *   for a given sky.
  * - `puddleGlints` — the sky's shimmer sliding across it.
  * - `puddleReflection` — whatever stands over it, given back in its own inks.
  * - `rainImpact` — where a falling drop goes in, given the segment it fell down.
  *
- * The body is `water` ink, which is translucent by declaration (`INK_ALPHA`),
- * so the ground reads faintly through it. That is the whole difference between
- * a puddle and a hole cut in the grass, and it is why this module never picks
- * an alpha of its own.
+ * Most of the body is the sky, mirrored in real inks (`water/sky-inks.ts`); the
+ * shallow front edge is the legacy `water` ink, which is translucent by
+ * declaration (`INK_ALPHA`), and the damp ground round it is the sheer
+ * `shadow-soft`. That is the whole difference between a puddle and a hole cut
+ * in the grass, and it is why this module never picks an alpha of its own.
  *
  * What happens *after* the drop lands is `ripples.ts`: a ring knows its own age
  * and nothing about water, so the two halves are separate files.
@@ -29,8 +31,12 @@ import type { InkId, PixelCloud } from "./ink";
 import { cloudToSprite, type CloudFrame } from "./ink";
 import type { PixelSpriteSource } from "./pixel-art";
 import { quantizedWave } from "./pixel-art";
+import { atmosphereAt } from "./atmosphere";
 import { DEPTH_RATIO } from "./projection";
-import { pixelHash, reflectCloud } from "./transforms";
+import { pixelHash } from "./transforms";
+import { puddleBody } from "./water/body";
+import { reflectionCloud } from "./water/reflect";
+import { skyReflection, type SkyReflection } from "./water/sky-inks";
 
 export interface PuddleOptions {
   readonly id: string;
@@ -165,24 +171,19 @@ export function clipToPuddle(puddle: Puddle, cloud: PixelCloud): PixelCloud {
   return cloud.filter((pixel) => puddleHolds(puddle, pixel.x, pixel.y));
 }
 
-/**
- * The still surface: a translucent body, a dim rim, and a brighter lip along
- * the far edge where the sky's light lands.
- *
- * Static, so a scene draws this once rather than every frame.
- */
-export function puddleSurface(puddle: Puddle): PixelCloud {
-  const cloud: PixelCloud = puddle.water.map((pixel) => ({
-    x: pixel.x,
-    y: pixel.y,
-    ink: "water" as InkId,
-  }));
+/** What an unlit lab puddle mirrors: a clear noon. */
+const NOON_SKY = skyReflection(atmosphereAt(13));
 
-  const lipY = puddle.centerY - puddle.radiusY * 0.45;
-  for (const pixel of puddle.rim) {
-    cloud.push({ x: pixel.x, y: pixel.y, ink: pixel.y <= lipY ? "steel" : "deep" });
-  }
-  return cloud;
+/**
+ * The still surface, in full colour: damp ground around it, a dark far lip,
+ * the sky mirrored across it, and a sheer shallow edge at the front — see
+ * `water/body.ts`, which owns the recipe.
+ *
+ * `sky` is what the water mirrors (`skyReflection(atmosphere)`); left out, it
+ * is a clear noon. Static for a given sky, so a scene stamps it once per pose.
+ */
+export function puddleSurface(puddle: Puddle, sky: SkyReflection = NOON_SKY): PixelCloud {
+  return puddleBody(puddle, sky);
 }
 
 /** How many highlights the sky lays on one puddle. */
@@ -200,7 +201,7 @@ const GLINT_COUNT = 3;
  * A pure function of (puddle, time), so two captures of the same instant match
  * and the water still never holds still.
  */
-export function puddleGlints(puddle: Puddle, elapsedMs: number): PixelCloud {
+export function puddleGlints(puddle: Puddle, elapsedMs: number, ink: InkId = "ice"): PixelCloud {
   const cloud: PixelCloud = [];
 
   for (let index = 0; index < GLINT_COUNT; index += 1) {
@@ -215,10 +216,14 @@ export function puddleGlints(puddle: Puddle, elapsedMs: number): PixelCloud {
       Math.round(acrossUnit * puddle.radiusX * 0.35) -
       Math.floor(length / 2) +
       sway;
-    const downUnit = ((index + 0.5) / GLINT_COUNT) * 2 - 1;
-    const y = puddle.centerY + Math.round(downUnit * puddle.radiusY * 0.7);
-    for (let step = 0; step < length; step += 1) {
-      cloud.push({ x: startX + step, y, ink: "ice" });
+    // Kept to the far half and just past it: the back of the water is seen at
+    // a grazing angle, and that is where the sky's light skips off it.
+    const downUnit = ((index + 0.5) / GLINT_COUNT) * 1.2 - 0.85;
+    const y = puddle.centerY + Math.round(downUnit * puddle.radiusY * 0.8);
+    // A shimmer rather than a bar: the band breathes a pixel shorter and longer.
+    const breathe = quantizedWave(elapsedMs, periodMs * 0.37, 1, index * 2.1);
+    for (let step = Math.max(0, -breathe); step < length + Math.min(breathe, 0) + 1; step += 1) {
+      cloud.push({ x: startX + step, y, ink });
     }
   }
 
@@ -226,16 +231,12 @@ export function puddleGlints(puddle: Puddle, elapsedMs: number): PixelCloud {
 }
 
 /**
- * What the water gives back.
+ * What the water gives back of something standing over this puddle.
  *
- * `reflectCloud` does the flip; this adds the two things that make it read as
- * water rather than as a shadow — a per-row sideways wobble, and the source
- * inks kept rather than flattened to one tone, so a neon mark reflects in its
- * own colour. The scene draws the result at a reduced alpha; how sheer the
- * reflection is belongs to the scene's lighting, not to the geometry.
- *
- * `originX`/`originY` are where the reflected thing's feet are — the same
- * anchor the model itself was drawn at.
+ * `water/reflect.ts` does the work — flipped, a little squashed, stepped two
+ * places darker down each ink's own ramp, rippled row against row and faded
+ * with depth — and this clips it to the one puddle. `originX`/`originY` are
+ * where the reflected thing's feet are, the anchor the model was drawn at.
  */
 export function puddleReflection(
   puddle: Puddle,
@@ -243,14 +244,9 @@ export function puddleReflection(
   originX: number,
   originY: number,
   elapsedMs: number,
+  rain = 0,
 ): PixelCloud {
-  const reflected = reflectCloud(cloud, { ink: null });
-  const wobbled: PixelCloud = reflected.map((pixel) => ({
-    x: originX + pixel.x + quantizedWave(elapsedMs + pixel.y * 90, 1700, 1),
-    y: originY + pixel.y,
-    ink: pixel.ink,
-  }));
-  return clipToPuddle(puddle, wobbled);
+  return clipToPuddle(puddle, reflectionCloud(cloud, originX, originY, elapsedMs, { rain }));
 }
 
 /** Where a falling drop went into the water, and which puddle took it. */
@@ -340,17 +336,21 @@ function landingPoint(
  * `rig-frames.ts` bakes clips: the lab must not be able to tell generated art
  * from drawn art.
  */
-export const PUDDLE_FRAME: CloudFrame = { width: 36, height: 24, originX: 18, originY: 12 };
+export const PUDDLE_FRAME: CloudFrame = { width: 44, height: 28, originX: 22, originY: 14 };
 
 /** A lab-sized puddle, sampled across one full sweep of its slowest glint. */
-export function samplePuddleFrames(count: number, seed = 0x9a7e): PixelSpriteSource[] {
+export function samplePuddleFrames(
+  count: number,
+  seed = 0x9a7e,
+  sky: SkyReflection = NOON_SKY,
+): PixelSpriteSource[] {
   if (!Number.isInteger(count) || count < 1) {
     throw new Error("Frame count must be a positive integer");
   }
   const puddle = createPuddle({ id: "lab-puddle", centerX: 0, centerY: 0, radius: 13, seed });
-  const surface = puddleSurface(puddle);
+  const surface = puddleSurface(puddle, sky);
   return Array.from({ length: count }, (_unused, index) => {
     const elapsedMs = (index / count) * 4800;
-    return cloudToSprite([...surface, ...puddleGlints(puddle, elapsedMs)], PUDDLE_FRAME);
+    return cloudToSprite([...surface, ...puddleGlints(puddle, elapsedMs, sky.glint)], PUDDLE_FRAME);
   });
 }

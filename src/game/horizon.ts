@@ -37,7 +37,7 @@
  * is therefore real — walk toward it and it grows and comes down onto the field.
  */
 
-import { mixHex, sampleRamp } from "./color";
+import { sampleRamp } from "./color";
 import { TILE_DEPTH } from "./projection";
 
 /**
@@ -313,26 +313,6 @@ export function skyBands(skyHeight: number, ramp: readonly string[] = SKY_RAMP):
     height: 1,
     color: sampleRamp(ramp, y / last),
   }));
-}
-
-/** Horizon haze: black ground fading into the glow at the horizon line. */
-export const ROLL_NEAR_COLOR = "#04120b";
-export const ROLL_FAR_COLOR = "#0d1830";
-
-/**
- * The haze over a row `rowsBeyond` the seam, near colour at the field and far
- * colour on the horizon line.
- *
- * Keyed on the world row rather than the scanline, so the gradient travels
- * with the ground as it scrolls instead of being painted on the glass.
- */
-export function rollHaze(
-  rowsBeyond: number,
-  rows: number = ROLL_ROWS,
-  near: string = ROLL_NEAR_COLOR,
-  far: string = ROLL_FAR_COLOR,
-): string {
-  return mixHex(near, far, Math.min(Math.max(rowsBeyond / Math.max(rows, 1), 0), 1));
 }
 
 export interface RidgeOptions {

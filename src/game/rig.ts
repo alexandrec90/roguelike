@@ -10,6 +10,10 @@ import {
   type PixelCloud,
 } from "./ink";
 import { DEPTH_RATIO } from "./projection";
+import type { FamilyRampId } from "./shading";
+import { validateSkeleton } from "./rig-validation";
+
+export { validateClip, validateSkeleton } from "./rig-validation";
 
 export interface Vec3 {
   readonly x: number;
@@ -37,6 +41,36 @@ function scaleToLength(direction: Vec3, length: number): Vec3 {
   return { x: direction.x * factor, y: direction.y * factor, z: direction.z * factor };
 }
 
+/** A material is a ramp: `tunic`, `skin`, `metal`, `fire`… darkest first. */
+export type Material = FamilyRampId;
+
+/**
+ * What a bone's *body* is, for the volumetric renderer (`hero/rig-volume.ts`):
+ * a capsule of a radius and a material along part of the bone, a sphere at
+ * one point of it, or a bar square to it. Several per bone is the whole outfit
+ * mechanism — a sleeve is the upper half of the arm in `tunic`, the forearm
+ * below it in `skin` — and nothing is drawn. The line renderer ignores them.
+ */
+export interface VolumePiece {
+  /** Start along the bone: 0 its start joint, 1 its end. May overshoot. */
+  readonly from: number;
+  /** Where it ends; omitted, the piece is a sphere centred at `from`. */
+  readonly to?: number;
+  /** Radius at `from`, logical pixels; `radiusEnd` at `to`, for a taper. */
+  readonly radius: number;
+  readonly radiusEnd?: number;
+  readonly material: Material;
+  /** Ramp-level bias: -0.3 is a darker cloth of the same material. */
+  readonly shade?: number;
+  /**
+   * A rig-space nudge off the axis, authored for the front view; facing and
+   * mirroring apply to it as to a bone, so a buckle goes behind a turned back.
+   */
+  readonly offset?: Vec3;
+  /** A crossbar this many pixels either side of `from`, square to the bone on screen. */
+  readonly across?: number;
+}
+
 export interface BoneDef {
   readonly name: string;
   readonly parent: string | null;
@@ -47,44 +81,6 @@ export interface BoneDef {
 export interface SkeletonDef {
   readonly bones: readonly BoneDef[];
 }
-export function validateSkeleton(skeleton: SkeletonDef): string[] {
-  const problems: string[] = [];
-  const names = new Set<string>();
-  let roots = 0;
-
-  for (const bone of skeleton.bones) {
-    if (names.has(bone.name)) {
-      problems.push(`Duplicate bone '${bone.name}'`);
-    }
-    names.add(bone.name);
-    if (bone.length <= 0) {
-      problems.push(`Bone '${bone.name}' has non-positive length`);
-    }
-    if (bone.parent === null) {
-      roots += 1;
-    }
-  }
-
-  for (const bone of skeleton.bones) {
-    if (bone.parent !== null && !names.has(bone.parent)) {
-      problems.push(`Bone '${bone.name}' hangs from unknown parent '${bone.parent}'`);
-    }
-  }
-  if (roots !== 1) {
-    problems.push(`Skeleton has ${roots} root bones; expected exactly 1`);
-  }
-
-  const declared = new Set<string>();
-  for (const bone of skeleton.bones) {
-    if (bone.parent !== null && !declared.has(bone.parent)) {
-      problems.push(`Bone '${bone.name}' is declared before its parent '${bone.parent}'`);
-    }
-    declared.add(bone.name);
-  }
-
-  return problems;
-}
-
 /** Root position and per-bone directions; directions are normalized to bone length. */
 export interface RigPose {
   readonly root: Vec3;
@@ -149,34 +145,6 @@ export interface Clip {
   readonly loop: boolean;
   readonly keys: readonly Keyframe[];
 }
-export function validateClip(clip: Clip, skeleton: SkeletonDef, extraBones: readonly string[] = []): string[] {
-  const problems: string[] = [];
-  if (clip.durationMs <= 0) {
-    problems.push(`Clip '${clip.id}' has non-positive duration`);
-  }
-  if (clip.keys.length === 0) {
-    problems.push(`Clip '${clip.id}' has no keyframes`);
-  }
-
-  const known = new Set([...skeleton.bones.map((bone) => bone.name), ...extraBones]);
-  let previous = -1;
-  for (const key of clip.keys) {
-    if (key.t < 0 || key.t > 1) {
-      problems.push(`Clip '${clip.id}' key at t=${key.t} is outside 0..1`);
-    }
-    if (key.t <= previous) {
-      problems.push(`Clip '${clip.id}' keys are not strictly ascending at t=${key.t}`);
-    }
-    previous = key.t;
-    for (const name of Object.keys(key.bones ?? {})) {
-      if (!known.has(name)) {
-        problems.push(`Clip '${clip.id}' keys unknown bone '${name}'`);
-      }
-    }
-  }
-  return problems;
-}
-
 interface ChannelSample<T> {
   readonly before: { readonly t: number; readonly value: T } | undefined;
   readonly after: { readonly t: number; readonly value: T } | undefined;
@@ -285,6 +253,8 @@ export type RigPart =
       readonly ink: InkId;
       readonly thickness?: number;
       readonly direction?: Vec3;
+      /** Its body, for the volumetric renderer (`hero/rig-volume.ts`). */
+      readonly volumes?: readonly VolumePiece[];
     }
   | {
       readonly kind: "reink";
@@ -298,6 +268,11 @@ export interface RigModel {
   readonly basePose: RigPose;
   readonly style: Readonly<Record<string, BoneStyle>>;
   readonly parts: readonly RigPart[];
+  /**
+   * Per-bone bodies — radius, material, offsets — for the volumetric renderer.
+   * Optional so a line-art rig stays valid: `renderModel` ignores it.
+   */
+  readonly volumes?: Readonly<Record<string, readonly VolumePiece[]>>;
 }
 
 export function equip(model: RigModel, ...parts: readonly RigPart[]): RigModel {
@@ -435,6 +410,24 @@ function stampDrawables(
   return drawables;
 }
 
+/**
+ * Every bone of a posed model, solved in rig space *after* facing and mirroring
+ * — the one geometry both renderers draw from, so the line art and the
+ * volumetric body can never disagree about where a hand is.
+ */
+export function solveModel(model: RigModel, pose: RigPose, options: RenderOptions = {}): SolvedPose {
+  const facing = options.facing ?? "front";
+  const flipX = options.flipX ?? false;
+  const oriented = facingPose(pose, facing, flipX);
+  const base = facingPose(model.basePose, facing, flipX);
+  // Gear bones without a keyed or default direction extend their parent.
+  const withGearDefaults: RigPose = {
+    root: oriented.root,
+    bones: { ...gearDefaults(model, oriented, base, facing, flipX), ...oriented.bones },
+  };
+  return solvePose(effectiveSkeleton(model), withGearDefaults, base);
+}
+
 /** Flatten a posed model foot-anchored at (0, 0), drawing far limbs first. */
 export function renderModel(
   model: RigModel,
@@ -443,19 +436,9 @@ export function renderModel(
 ): PixelCloud {
   const facing = options.facing ?? "front";
   const flipX = options.flipX ?? false;
-
-  const skeleton = effectiveSkeleton(model);
-  const oriented = facingPose(pose, facing, flipX);
-  const base = facingPose(model.basePose, facing, flipX);
-
-  // Gear bones without a keyed or default direction extend their parent.
-  const withGearDefaults: RigPose = {
-    root: oriented.root,
-    bones: { ...gearDefaults(model, oriented, base, facing, flipX), ...oriented.bones },
-  };
-  const solved = solvePose(skeleton, withGearDefaults, base);
+  const solved = solveModel(model, pose, options);
   const drawables = [
-    ...boneDrawables(skeleton, solved, modelStyles(model)),
+    ...boneDrawables(effectiveSkeleton(model), solved, modelStyles(model)),
     ...stampDrawables(model, solved, facing, flipX),
   ];
   drawables.sort((a, b) => a.depth - b.depth);

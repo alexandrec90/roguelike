@@ -7,7 +7,28 @@ import {
   lightningBolt,
   RAIN_FALL_SPEED,
   RAIN_SLANT,
+  stormLightningAt,
+  WEATHER_PRESETS,
+  weatherAt,
 } from "./weather";
+
+describe("stormLightningAt", () => {
+  it("never strikes out of a sky that is not a storm", () => {
+    for (let ms = 0; ms < 90000; ms += 16) {
+      expect(stormLightningAt(ms, 0x51a7, WEATHER_PRESETS.rain).active).toBe(false);
+    }
+  });
+
+  it("follows the storm schedule exactly while it storms", () => {
+    for (let ms = 0; ms < 30000; ms += 16) {
+      expect(stormLightningAt(ms, 0x51a7, WEATHER_PRESETS.storm)).toEqual(lightningAt(ms, 0x51a7));
+    }
+  });
+
+  it("re-exports the weather schedule, so the sky has one import", () => {
+    expect(weatherAt(1000)).toEqual(weatherAt(1000));
+  });
+});
 
 describe("createRain", () => {
   it("makes drops that fall, from a strip above the frame", () => {

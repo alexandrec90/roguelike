@@ -43,7 +43,7 @@ interface Combustible {
   readonly resistance: number;
 }
 
-const MATERIALS: Readonly<Record<InkId, Combustible>> = {
+const LEGACY_MATERIALS: Readonly<Partial<Record<InkId, Combustible>>> = {
   // Foliage: catches instantly, gone in a moment.
   "neon-green": { fuel: 0.7, resistance: 0 },
   amber: { fuel: 0.9, resistance: 0.1 },
@@ -61,6 +61,39 @@ const MATERIALS: Readonly<Record<InkId, Combustible>> = {
   cyan: { fuel: 0, resistance: 4 },
   void: { fuel: 0, resistance: 0 },
 };
+
+/**
+ * Fuel by material family, for the full palette: what the ink is *made of*
+ * decides how it burns, so a new ink in an existing family needs no entry.
+ */
+const FAMILY_MATERIALS: Readonly<Record<string, Combustible>> = {
+  grass: { fuel: 0.6, resistance: 0 },
+  meadow: { fuel: 0.5, resistance: 0 },
+  leaf: { fuel: 0.7, resistance: 0 },
+  pine: { fuel: 0.8, resistance: 0.05 },
+  autumn: { fuel: 0.6, resistance: 0 },
+  moss: { fuel: 0.9, resistance: 0.2 },
+  bark: { fuel: 2.4, resistance: 0.9 },
+  leather: { fuel: 1.6, resistance: 0.6 },
+  tunic: { fuel: 1.2, resistance: 0.4 },
+  crimson: { fuel: 1.2, resistance: 0.4 },
+  hair: { fuel: 0.6, resistance: 0.1 },
+  skin: { fuel: 1.4, resistance: 0.8 },
+  fire: { fuel: 1.2, resistance: 0 },
+  petal: { fuel: 0.4, resistance: 0 },
+};
+
+const INERT: Combustible = { fuel: 0, resistance: 6 };
+
+/** How an ink burns: its legacy entry, else its family's, else not at all. */
+function inkMaterial(ink: InkId): Combustible {
+  const legacy = LEGACY_MATERIALS[ink];
+  if (legacy !== undefined) {
+    return legacy;
+  }
+  const cut = ink.lastIndexOf("-");
+  return (cut > 0 ? FAMILY_MATERIALS[ink.slice(0, cut)] : undefined) ?? INERT;
+}
 
 export interface BurnableOptions {
   /** Grid pitch in logical pixels. 3 is a good balance of shape and cost. */
@@ -216,7 +249,7 @@ function materialOf(inks: readonly InkId[]): Combustible {
   let resistance = 0;
   let best = 0;
   for (const ink of inks) {
-    const material = MATERIALS[ink];
+    const material = inkMaterial(ink);
     fuel += material.fuel;
     resistance += material.resistance;
     best = Math.max(best, material.fuel);
@@ -291,7 +324,7 @@ export function burnInkFromGrid(
       return { x: pixel.x, y: pixel.y, ink: emberInk(pixel, heat, seed + flicker) };
     }
     if ((grid.data[at + 1] ?? 0) > 127) {
-      return { x: pixel.x, y: pixel.y, ink: "deep" as InkId };
+      return { x: pixel.x, y: pixel.y, ink: "bark-0" as InkId };
     }
     return pixel;
   });
@@ -317,7 +350,7 @@ export function emberInk(
   seed: number,
 ): InkId {
   const jitter = pixelHash(at.x, at.y, seed, 4) * 0.28;
-  return rampInk(INK_RAMPS.ember, Math.min(0.18 + heat * 0.42 + jitter, 1), at);
+  return rampInk(INK_RAMPS.fire, Math.min(0.3 + heat * 0.5 + jitter, 1), at);
 }
 
 /** Where embers and smoke should be born: the cells actually alight. */

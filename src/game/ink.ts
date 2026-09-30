@@ -1,29 +1,40 @@
 /**
- * The 1-bit ink system: every drawable is lit pixels on pitch black.
+ * The ink system: every drawable is a cloud of pixels in named inks.
  *
- * The art direction is a black field with high-contrast neon marks on it, and
- * this module is the type that direction compiles to. A **pixel cloud** is an
- * ordered list of lit logical pixels, each carrying one ink from a small named
- * set. Everything renderable — a rigged character, a sword, a melting corpse, a
- * reflection in a puddle — flattens to a cloud before it reaches the screen,
- * which is what lets one generic transform (melt, freeze, burn) apply to any
- * model instead of needing per-model frames.
+ * A **pixel cloud** is an ordered list of lit logical pixels, each carrying one
+ * ink from a closed, named set. Everything renderable — a rigged character, a
+ * sword, a melting corpse, a reflection in a puddle — flattens to a cloud before
+ * it reaches the screen, which is what lets one generic transform (melt, freeze,
+ * burn) apply to any model instead of needing per-model frames.
  *
  * Order matters: later pixels overwrite earlier ones when a cloud is flattened
  * to a sprite, so a renderer draws far things first and near things last and
  * gets painter's-algorithm self-occlusion for free.
  *
- * Inks are a closed set on purpose. An agent drawing a new asset picks an ink
- * by name; it cannot invent a hex value, so the scene cannot drift off the
- * palette one asset at a time.
+ * Inks are a closed set on purpose, but no longer a small one. The original
+ * twelve neon inks survive under their old names so older art still resolves;
+ * the material families in `palette.ts` (`grass-3`, `fire-5`, `skin-2` …) are
+ * what new art is drawn in. An agent picks an ink by name; it cannot invent a
+ * hex value, so the scene cannot drift off the palette one asset at a time.
  */
 
 import type { Palette, PixelSpriteSource } from "./pixel-art";
+import {
+  FAMILY_ALPHA,
+  familyHex,
+  familyInks,
+  SINGLE_ALPHA,
+  SINGLE_INKS,
+  type Family,
+  type FamilyInk,
+  type SingleInk,
+} from "./palette";
 
-/** The screen behind everything. Pitch black, not "very dark". */
+/** Behind everything: the page and the void beyond the sky. */
 export const BACKGROUND = "#000000";
 
-export type InkId =
+/** The first palette's inks, kept by name so art drawn in them still resolves. */
+export type LegacyInk =
   | "bone"
   | "neon-green"
   | "cyan"
@@ -37,11 +48,9 @@ export type InkId =
   | "water"
   | "void";
 
-/**
- * The palette. `void` is deliberate black: on a black background it reads as a
- * hole, which is how eyes and hollows are punched into a lit silhouette.
- */
-export const INK_COLORS: Readonly<Record<InkId, string>> = {
+export type InkId = LegacyInk | FamilyInk | SingleInk;
+
+const LEGACY_COLORS: Readonly<Record<LegacyInk, string>> = {
   bone: "#f2f7ff",
   "neon-green": "#3cf06e",
   cyan: "#35e8ff",
@@ -56,8 +65,8 @@ export const INK_COLORS: Readonly<Record<InkId, string>> = {
   void: "#000000",
 };
 
-/** Stable one-character palette tokens, so flattened sprites diff cleanly. */
-export const INK_TOKENS: Readonly<Record<InkId, string>> = {
+/** Stable one-character tokens for the legacy inks, so old sprites diff unchanged. */
+const LEGACY_TOKENS: Readonly<Record<LegacyInk, string>> = {
   bone: "w",
   "neon-green": "g",
   cyan: "c",
@@ -72,36 +81,88 @@ export const INK_TOKENS: Readonly<Record<InkId, string>> = {
   void: "k",
 };
 
+const ALL_INKS: readonly InkId[] = [
+  ...(Object.keys(LEGACY_COLORS) as LegacyInk[]),
+  ...familyInks(),
+  ...(Object.keys(SINGLE_INKS) as SingleInk[]),
+];
+
+function isLegacy(ink: InkId): ink is LegacyInk {
+  return ink in LEGACY_COLORS;
+}
+
+function isSingle(ink: InkId): ink is SingleInk {
+  return ink in SINGLE_INKS;
+}
+
+/** Every ink's hex. `void` is deliberate black, for punching holes. */
+export const INK_COLORS: Readonly<Record<InkId, string>> = Object.fromEntries(
+  ALL_INKS.map((ink) => [
+    ink,
+    isLegacy(ink) ? LEGACY_COLORS[ink] : isSingle(ink) ? SINGLE_INKS[ink] : familyHex(ink),
+  ]),
+) as Record<InkId, string>;
+
+/**
+ * One-character palette tokens, so flattened sprites stay one glyph per pixel.
+ *
+ * Legacy inks keep their letters; everything else is dealt from a pool of
+ * printable characters in declaration order, skipping any already taken and
+ * `.` (which means empty). The pool runs into Latin-1 once ASCII is spent —
+ * still one UTF-16 unit each, so a row's length is still its width.
+ */
+function tokenTable(): Record<InkId, string> {
+  const taken = new Set<string>([...Object.values(LEGACY_TOKENS), "."]);
+  const pool: string[] = [];
+  for (let code = 33; code < 127; code += 1) {
+    pool.push(String.fromCharCode(code));
+  }
+  for (let code = 0xc0; code < 0x250; code += 1) {
+    pool.push(String.fromCharCode(code));
+  }
+  const free = pool.filter((glyph) => !taken.has(glyph) && glyph !== "#");
+  const table: Partial<Record<InkId, string>> = { ...LEGACY_TOKENS };
+  let next = 0;
+  for (const ink of ALL_INKS) {
+    if (table[ink] === undefined) {
+      const glyph = free[next];
+      if (glyph === undefined) {
+        throw new Error("The token pool is exhausted");
+      }
+      table[ink] = glyph;
+      next += 1;
+    }
+  }
+  return table as Record<InkId, string>;
+}
+
+export const INK_TOKENS: Readonly<Record<InkId, string>> = tokenTable();
+
+function familyAlpha(ink: FamilyInk): number {
+  const cut = ink.lastIndexOf("-");
+  const steps = FAMILY_ALPHA[ink.slice(0, cut) as Family];
+  return steps?.[Number(ink.slice(cut + 1))] ?? 1;
+}
+
 /**
  * How opaque an ink is, 0..1.
  *
  * Transparency is a property of the **ink**, not of the thing drawn with it:
  * an agent picks `water` and gets water's translucency without deciding an
  * alpha at the call site, exactly as it picks `ember` and gets ember's orange.
- * That keeps the set closed in the dimension that matters — a scene still
- * cannot invent a look, only choose one.
- *
- * Everything opaque is 1, which is why `cloudToSprite` emits six-digit hex for
- * every ink that existed before water: the alpha byte appears only where an
- * ink actually asked for it.
+ * `shadow` is sheer for the same reason — a cast shadow darkens the grass it
+ * falls on rather than replacing it.
  */
-export const INK_ALPHA: Readonly<Record<InkId, number>> = {
-  bone: 1,
-  "neon-green": 1,
-  cyan: 1,
-  magenta: 1,
-  amber: 1,
-  ember: 1,
-  ice: 1,
-  violet: 1,
-  steel: 1,
-  deep: 1,
-  // Dark enough to swallow the grass blades under it, sheer enough that the
-  // ground still reads through — which is the whole difference between a
-  // puddle and a hole.
-  water: 0.62,
-  void: 1,
-};
+export const INK_ALPHA: Readonly<Record<InkId, number>> = Object.fromEntries(
+  ALL_INKS.map((ink) => {
+    if (isLegacy(ink)) {
+      // Dark enough to swallow the grass blades under it, sheer enough that the
+      // ground still reads through — the difference between a puddle and a hole.
+      return [ink, ink === "water" ? 0.62 : 1];
+    }
+    return [ink, isSingle(ink) ? SINGLE_ALPHA[ink] : familyAlpha(ink)];
+  }),
+) as Record<InkId, number>;
 
 /** An ink as CSS hex: eight digits when it carries alpha, six when it does not. */
 export function inkHex(ink: InkId): string {

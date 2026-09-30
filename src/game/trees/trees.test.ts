@@ -107,12 +107,12 @@ describe("baking", () => {
 describe("staging", () => {
   const species = TREE_SPECIES[0]!;
 
-  it("adds a void shadow under the tree and nothing else new", () => {
+  it("adds a sheer shadow under the tree and nothing else new", () => {
     const instance = species.create(3);
     const bare = stageTree(instance, envAt(0), { shadow: false });
     const shadowed = stageTree(instance, envAt(0), { shadow: true });
     expect(shadowed.length).toBeGreaterThan(bare.length);
-    expect(shadowed.some((pixel) => pixel.ink === "void" && pixel.y > 0)).toBe(true);
+    expect(shadowed.some((pixel) => pixel.ink === "shadow" && pixel.y > 0)).toBe(true);
   });
 
   it("puts the reflection below the foot only when asked", () => {
@@ -142,7 +142,7 @@ describe("shared foliage parts", () => {
     const fromRight = castShadow(canopy, { light: { x: 1, y: -0.4 }, softness: 0 });
     expect(fromLeft[0]?.x ?? 0).toBeGreaterThan(0);
     expect(fromRight[0]?.x ?? 0).toBeLessThan(0);
-    expect(fromLeft.every((pixel) => pixel.y > 0 && pixel.ink === "void")).toBe(true);
+    expect(fromLeft.every((pixel) => pixel.y > 0 && pixel.ink.startsWith("shadow"))).toBe(true);
   });
 
   it("rakes the shadow further as the sun drops", () => {
