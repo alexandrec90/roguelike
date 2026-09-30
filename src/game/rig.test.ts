@@ -4,6 +4,7 @@ import { DEPTH_RATIO } from "./projection";
 import {
   effectiveSkeleton,
   equip,
+  orientVector,
   partBoneNames,
   projectRigPoint,
   renderModel,
@@ -86,6 +87,28 @@ describe("solvePose", () => {
     const pose = { root: vec3(0, 0, 4), bones: { spine: vec3(0, 0, 0), arm: vec3(1, 0, 0) } };
     const solved = solvePose(STICK, pose);
     expect(solved["spine"]?.end).toEqual(solved["spine"]?.start);
+  });
+});
+
+describe("orientVector", () => {
+  it("leaves a vector alone at no turn and no mirror", () => {
+    expect(orientVector(vec3(1, 2, 3), 0, false)).toEqual(vec3(1, 2, 3));
+  });
+
+  it("turns the chest toward screen right a quarter turn in, and away at a half", () => {
+    const quarter = orientVector(vec3(0, 1, 0), Math.PI / 2, false);
+    expect(quarter.x).toBeCloseTo(1, 9);
+    expect(quarter.y).toBeCloseTo(0, 9);
+    const half = orientVector(vec3(0, 1, 5), Math.PI, false);
+    expect(half.y).toBeCloseTo(-1, 9);
+    expect(half.z).toBe(5);
+  });
+
+  it("mirrors after the turn", () => {
+    const turned = orientVector(vec3(1, 1, 0), Math.PI / 4, false);
+    const mirrored = orientVector(vec3(1, 1, 0), Math.PI / 4, true);
+    expect(mirrored.x).toBeCloseTo(-turned.x, 9);
+    expect(mirrored.y).toBeCloseTo(turned.y, 9);
   });
 });
 

@@ -116,12 +116,12 @@ class SdfCrown implements SceneryInstance {
             { x: lean * 0.5, y: CROWN_Y + 9, toX: lean + 8, toY: CROWN_Y + 2, radius: 1.3 },
           ],
         },
-        light: { ramp: INK_RAMPS.bone, ambient: 0.2, occlusion: 0.22, ...shading },
+        light: { ramp: INK_RAMPS.bark, ambient: 0.2, occlusion: 0.22, ...shading },
         clip: { bottom: 0 },
       },
       {
         spec: this.canopySpec(lean, drift, detail.warpOctaves),
-        light: { ramp: INK_RAMPS.canopy, ambient: 0.04, occlusion: 0.13, ...shading },
+        light: { ramp: INK_RAMPS.canopy, ambient: 0.34, occlusion: 0.06, ...shading },
         clip: { bottom: 0 },
       },
     ];

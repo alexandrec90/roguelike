@@ -7,11 +7,18 @@
  * here rasterizes — `rig.ts` does that — so everything in this file is data,
  * diffs line by line, and is testable without a canvas.
  *
- * Proportions: the humanoid stands ~16 world pixels tall (one WALL_RISE), so
- * it reads at the same scale as a standing wall block. Feet at z=0; the model
- * anchors at its foot on the ground.
+ * Proportions: the humanoid stands ~20 world pixels tall — a little over one
+ * WALL_RISE, grown from 16 when he gained a body, so the shading has room to
+ * say "round" and the head is big enough to carry a face. Feet at z=0; the
+ * model anchors at its foot on the ground.
+ *
+ * Every bone also carries **pieces** (`HERO_VOLUMES`): the radius and material
+ * the volumetric renderer (`hero/rig-volume.ts`) fills it with. The line
+ * renderer ignores them, so both draw from the one skeleton.
  */
 
+import type { FaceSpec } from "./hero/rig-volume";
+import type { VolumePiece } from "./rig";
 import { maskFromRows } from "./ink";
 import {
   equip,
@@ -24,18 +31,25 @@ import {
 } from "./rig";
 
 /** Hip height: legs reach the ground from here in the base pose. */
-const HIP_Z = 6;
+const HIP_Z = 7.5;
 
+/**
+ * Shoulders are bones of their own so the arms hang from the edge of the
+ * chest rather than out of the neck; clips never key them, so every existing
+ * clip still owns the arms exactly as before.
+ */
 export const HUMANOID_SKELETON: SkeletonDef = {
   bones: [
-    { name: "torso", parent: null, attach: "end", length: 5 },
-    { name: "head", parent: "torso", attach: "end", length: 2 },
-    { name: "arm-l", parent: "torso", attach: "end", length: 4 },
-    { name: "arm-r", parent: "torso", attach: "end", length: 4 },
-    { name: "hip-l", parent: "torso", attach: "start", length: 1 },
-    { name: "hip-r", parent: "torso", attach: "start", length: 1 },
-    { name: "leg-l", parent: "hip-l", attach: "end", length: 6 },
-    { name: "leg-r", parent: "hip-r", attach: "end", length: 6 },
+    { name: "torso", parent: null, attach: "end", length: 5.5 },
+    { name: "head", parent: "torso", attach: "end", length: 2.6 },
+    { name: "shoulder-l", parent: "torso", attach: "end", length: 2 },
+    { name: "shoulder-r", parent: "torso", attach: "end", length: 2 },
+    { name: "arm-l", parent: "shoulder-l", attach: "end", length: 5 },
+    { name: "arm-r", parent: "shoulder-r", attach: "end", length: 5 },
+    { name: "hip-l", parent: "torso", attach: "start", length: 1.4 },
+    { name: "hip-r", parent: "torso", attach: "start", length: 1.4 },
+    { name: "leg-l", parent: "hip-l", attach: "end", length: 7.5 },
+    { name: "leg-r", parent: "hip-r", attach: "end", length: 7.5 },
   ],
 };
 
@@ -44,6 +58,8 @@ export const HUMANOID_BASE: RigPose = {
   bones: {
     torso: vec3(0, 0, 1),
     head: vec3(0, 0, 1),
+    "shoulder-l": vec3(-1, 0, -0.3),
+    "shoulder-r": vec3(1, 0, -0.3),
     "arm-l": vec3(-0.9, 0.25, -0.9),
     "arm-r": vec3(0.9, 0.25, -0.9),
     "hip-l": vec3(-1, 0, 0),
@@ -69,12 +85,67 @@ const HEAD_MASK = maskFromRows([
 const EYE_MASK = maskFromRows(["#"]);
 const EYE_OUT = 1.2;
 
+/**
+ * The adventurer's outfit, as bodies on bones: blue tunic belted in leather, a
+ * crimson collar, bracers and boots, brown hair over a skin face.
+ *
+ * Every entry is a capsule (`from`..`to`) or a sphere (`from` alone) along its
+ * bone. Order does not matter — the renderer keeps the nearest surface per
+ * pixel — so a belt is simply a capsule a hair fatter than the tunic under it,
+ * and hair is a sphere set back and up from the face so it wins on the crown
+ * and the face wins in front. Turn him round and the same two spheres give the
+ * back of his head, with nothing drawn for it.
+ */
+const SHIRT_SHADE = -0.02;
+const TROUSER_SHADE = -0.34;
+
+const ARM: readonly VolumePiece[] = [
+  { from: 0, to: 0.45, radius: 1.1, material: "tunic", shade: SHIRT_SHADE },
+  { from: 0.45, to: 0.62, radius: 0.9, material: "skin" },
+  { from: 0.62, to: 0.88, radius: 1.05, material: "leather" },
+  { from: 1, radius: 1.05, material: "skin" },
+];
+
+const LEG: readonly VolumePiece[] = [
+  { from: 0, to: 0.55, radius: 1.25, radiusEnd: 1.05, material: "tunic", shade: TROUSER_SHADE },
+  { from: 0.52, to: 0.97, radius: 1.2, material: "leather" },
+  { from: 0.97, radius: 1.1, material: "leather", offset: vec3(0, 0.8, 0.3) },
+];
+
+export const HERO_VOLUMES: Readonly<Record<string, readonly VolumePiece[]>> = {
+  torso: [
+    { from: 0.05, to: 0.32, radius: 2.8, radiusEnd: 2.55, material: "tunic", shade: SHIRT_SHADE - 0.06 },
+    { from: 0.3, to: 0.42, radius: 2.68, material: "leather", shade: 0.05 },
+    { from: 0.36, radius: 0.75, material: "gold", offset: vec3(0, 2.35, 0) },
+    { from: 0.42, to: 0.96, radius: 2.4, radiusEnd: 2.6, material: "tunic", shade: SHIRT_SHADE },
+    { from: 0.8, to: 0.87, radius: 2.68, material: "crimson" },
+  ],
+  head: [
+    { from: 0, to: 0.4, radius: 1, material: "skin", shade: -0.2 },
+    { from: 1, radius: 3.15, material: "skin", shade: 0.14, offset: vec3(0, 0.7, 0) },
+    { from: 1, radius: 3.3, material: "hair", offset: vec3(0, -0.15, 1) },
+    { from: 1, radius: 1.35, material: "hair", offset: vec3(0, -2.1, -0.9) },
+  ],
+  "shoulder-l": [{ from: 1, radius: 1.35, material: "tunic", shade: SHIRT_SHADE }],
+  "shoulder-r": [{ from: 1, radius: 1.35, material: "tunic", shade: SHIRT_SHADE }],
+  "arm-l": ARM,
+  "arm-r": ARM,
+  "leg-l": LEG,
+  "leg-r": LEG,
+};
+
+/** Two dark eyes, a pixel either side of the nose, only ever over skin. */
+export const HERO_FACE: FaceSpec = { bone: "head", spacing: 1, drop: 0.7, ink: "hair-0", on: "skin" };
+
 export const HERO_MODEL: RigModel = {
+  volumes: HERO_VOLUMES,
   skeleton: HUMANOID_SKELETON,
   basePose: HUMANOID_BASE,
   style: {
     torso: { ink: "bone", thickness: 2 },
     head: { ink: "bone" },
+    "shoulder-l": { ink: "bone" },
+    "shoulder-r": { ink: "bone" },
     "arm-l": { ink: "bone" },
     "arm-r": { ink: "bone" },
     "hip-l": { ink: "bone" },
@@ -129,9 +200,18 @@ export const HERO_MODEL: RigModel = {
 export const SWORD: RigPart = {
   kind: "bone",
   id: "sword",
-  bone: { name: "sword", parent: "arm-r", attach: "end", length: 6 },
+  bone: { name: "sword", parent: "arm-r", attach: "end", length: 8.5 },
   ink: "cyan",
+  volumes: [
+    { from: -0.2, radius: 0.8, material: "gold" },
+    { from: -0.16, to: 0.08, radius: 0.6, material: "leather" },
+    { from: 0.1, radius: 0.62, material: "gold", across: 1.9 },
+    { from: 0.15, to: 0.97, radius: 0.82, radiusEnd: 0.62, material: "metal", shade: 0.12 },
+  ],
 };
+
+/** Where on the sword bone the blade runs — what burns, and what leaves a trail. */
+export const BLADE_SPAN = { from: 0.15, to: 1 } as const;
 
 export const HAT: RigPart = {
   kind: "stamp",

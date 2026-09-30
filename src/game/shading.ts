@@ -20,30 +20,46 @@
  */
 
 import { cloudBounds, type CloudBounds, type InkId, type InkPixel, type PixelCloud } from "./ink";
+import { familyRamp, INK_FAMILIES, type Family } from "./palette";
 
-export type RampId = "bone" | "ember" | "arcane" | "verdant" | "tide" | "canopy";
+/** The first palette's ramps, kept for art still drawn in the legacy inks. */
+export type LegacyRampId = "bone" | "ember" | "verdant" | "tide";
+
+/** Every material family is a ramp, except the flower accents. */
+export type FamilyRampId = Exclude<Family, "petal">;
+
+/**
+ * Every ramp: the legacy four, plus one per material family in `palette.ts`.
+ *
+ * `canopy` and `arcane` are family ramps now — the canopy is the `leaf` family
+ * and `arcane` the arcane one — because every species that asked for them
+ * wanted *foliage* and *magic*, not the particular neon inks that once spelled
+ * them.
+ */
+export type RampId = LegacyRampId | FamilyRampId | "canopy";
+
+const FAMILY_RAMPS = Object.fromEntries(
+  (Object.keys(INK_FAMILIES) as Family[])
+    .filter((family) => family !== "petal")
+    .map((family) => [family, familyRamp(family)]),
+) as unknown as Record<FamilyRampId, readonly InkId[]>;
 
 /**
  * The ramps, darkest first. Every entry is an ink that already exists in
  * `INK_COLORS`: a ramp arranges the palette, it does not extend it.
  *
- * A ramp is allowed to end in `bone` — the near-white — because on pitch black
- * the highlight is what carries the silhouette. Starting one at `void` would
- * make the shadow side a hole rather than a dark surface; that is a deliberate
- * effect (see `cycleRamp` and the dissolve recipes), not the default.
+ * A legacy ramp may end in `bone` — the near-white — because on pitch black the
+ * highlight is what carries the silhouette. The family ramps end in their own
+ * warm highlight instead, because the field is no longer black.
  */
 export const INK_RAMPS: Readonly<Record<RampId, readonly InkId[]>> = {
   bone: ["deep", "steel", "ice", "bone"],
   ember: ["deep", "ember", "amber", "bone"],
-  arcane: ["deep", "violet", "magenta", "ice"],
   verdant: ["deep", "steel", "neon-green", "bone"],
   tide: ["deep", "steel", "cyan", "ice"],
-  // Foliage, and the reason it is not `verdant`: with `steel` in the middle,
-  // half of a four-step ramp is blue-grey, and a canopy whose body lands on the
-  // middle steps reads blue rather than green. Dropping the step puts the mass
-  // on `neon-green` and keeps `deep` for the shaded underside and `bone` for
-  // the handful of leaves catching the sky.
-  canopy: ["deep", "neon-green", "bone"],
+  ...FAMILY_RAMPS,
+  // Foliage: the leaf family. The name outlived the inks it once spelled.
+  canopy: FAMILY_RAMPS.leaf,
 };
 
 /**

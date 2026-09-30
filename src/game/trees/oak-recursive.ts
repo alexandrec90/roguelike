@@ -161,15 +161,15 @@ function strokeWood(
   const from = { x: Math.round(start.x), y: Math.round(start.y) };
   const to = { x: Math.round(end.x), y: Math.round(end.y) };
   if (depth > 0) {
-    strokeLine(cloud, from, to, "steel", thicknessFor(depth));
+    strokeLine(cloud, from, to, depth > 1 ? "bark-3" : "bark-2", thicknessFor(depth));
     return;
   }
   // The trunk alone gets bark: at one pixel wide the texture would be noise
-  // rather than grain, so the thinner orders stay flat steel.
+  // rather than grain, so the thinner orders stay flat bark.
   const wood: PixelCloud = [];
   strokeLine(wood, from, to, "steel", thicknessFor(depth));
   for (const pixel of wood) {
-    cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, seed, INK_RAMPS.bone) });
+    cloud.push({ x: pixel.x, y: pixel.y, ink: barkInk(pixel.x, pixel.y, seed, INK_RAMPS.bark) });
   }
 }
 

@@ -12,7 +12,12 @@ import {
   advancePlayer,
   attackProgress,
   ATTACK_MS,
+  CAST_COOLDOWN_MS,
+  CAST_CYCLE_MS,
+  CAST_RELEASE_MS,
+  castProgress,
   createPlayer,
+  SWING_CONTACT_MS,
   DIAGONAL_STEP_MS,
   facingYaw,
   gaitOf,
@@ -496,6 +501,105 @@ describe("attacking while moving", () => {
 
     expect(later.attackMs).toBeUndefined();
     expect(later.motion).toBe("step");
+  });
+});
+
+describe("the swing's contact beat", () => {
+  it("lands exactly once, on the frame the clock passes it", () => {
+    let player = advancePlayer(createPlayer(START), { attack: true }, 0, OPEN).player;
+    let strikes = 0;
+    for (let frame = 0; frame < 40; frame += 1) {
+      const tick = advancePlayer(player, NOTHING, 16, OPEN);
+      strikes += tick.struck ? 1 : 0;
+      if (tick.struck) {
+        expect(player.attackMs).toBeLessThan(SWING_CONTACT_MS);
+        expect(tick.player.attackMs ?? ATTACK_MS).toBeGreaterThanOrEqual(SWING_CONTACT_MS);
+      }
+      player = tick.player;
+    }
+    expect(strikes).toBe(1);
+  });
+
+  it("lands once per swing when the button is held", () => {
+    let player = createPlayer(START);
+    let strikes = 0;
+    for (let frame = 0; frame < Math.ceil((ATTACK_MS * 3) / 16); frame += 1) {
+      const tick = advancePlayer(player, { attack: true }, 16, OPEN);
+      strikes += tick.struck ? 1 : 0;
+      player = tick.player;
+    }
+    expect(strikes).toBe(3);
+  });
+});
+
+describe("casting", () => {
+  it("runs its own clock beside the sword and the legs, and never waits for them", () => {
+    const tick = advancePlayer(
+      createPlayer(START),
+      { heading: "east", attack: true, cast: true },
+      0,
+      OPEN,
+    );
+    expect(tick.cast).toBe(true);
+    expect(tick.attacked).toBe(true);
+    expect(tick.player.castMs).toBe(0);
+    expect(tick.player.attackMs).toBe(0);
+    expect(tick.player.motion).toBe("step");
+  });
+
+  it("releases once, at the clip's release beat", () => {
+    let player = advancePlayer(createPlayer(START), { attack: false, cast: true }, 0, OPEN).player;
+    const releases: number[] = [];
+    for (let elapsed = 16; elapsed <= CAST_CYCLE_MS + 16; elapsed += 16) {
+      const tick = advancePlayer(player, NOTHING, 16, OPEN);
+      if (tick.released) {
+        releases.push(elapsed);
+      }
+      player = tick.player;
+    }
+    expect(releases).toHaveLength(1);
+    expect(releases[0]).toBeGreaterThanOrEqual(CAST_RELEASE_MS);
+    expect(releases[0]).toBeLessThan(CAST_RELEASE_MS + 16);
+    expect(player.castMs).toBeUndefined();
+  });
+
+  it("fires at a steady rhythm while held: clip plus cooldown", () => {
+    let player = createPlayer(START);
+    const starts: number[] = [];
+    for (let elapsed = 0; elapsed < CAST_CYCLE_MS * 3; elapsed += 10) {
+      const tick = advancePlayer(player, { attack: false, cast: true }, 10, OPEN);
+      if (tick.cast) {
+        starts.push(elapsed);
+      }
+      player = tick.player;
+    }
+    expect(starts).toHaveLength(3);
+    expect((starts[1] ?? 0) - (starts[0] ?? 0)).toBe(CAST_CYCLE_MS);
+    expect(CAST_COOLDOWN_MS).toBeGreaterThan(0);
+    expect(castProgress(player)).toBeGreaterThan(0);
+  });
+});
+
+describe("the heading he remembers", () => {
+  it("keeps all eight, including diagonals the drawing cannot show", () => {
+    expect(createPlayer(START).heading).toBe("south");
+    const tick = advancePlayer(createPlayer(START), walk("northeast"), 0, OPEN);
+    expect(tick.player.heading).toBe("northeast");
+    const later = advancePlayer(tick.player, NOTHING, STEP_MS * 2, OPEN);
+    expect(later.player.heading).toBe("northeast");
+  });
+});
+
+describe("enchanting the blade", () => {
+  it("toggles once per press and reports it", () => {
+    const lit = advancePlayer(createPlayer(START), { attack: false, enchant: true }, 0, OPEN);
+    expect(lit.toggled).toBe(true);
+    expect(lit.player.enchanted).toBe(true);
+    const still = advancePlayer(lit.player, NOTHING, 16, OPEN);
+    expect(still.toggled).toBe(false);
+    expect(still.player.enchanted).toBe(true);
+    const out = advancePlayer(still.player, { attack: false, enchant: true }, 16, OPEN);
+    expect(out.player.enchanted).toBe(false);
   });
 });
 

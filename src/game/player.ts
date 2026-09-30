@@ -44,8 +44,9 @@
  * truth, which only the horizon is far enough away to show.
  */
 
+import { advanceTrack } from "./hero/action-track";
 import { HEADING_VECTOR, isDiagonal, type Heading } from "./keybindings";
-import { SWING } from "./models";
+import { CAST, SWING } from "./models";
 import {
   applyGait,
   DEFAULT_STRAFE_RADIUS,
@@ -68,6 +69,22 @@ export const DIAGONAL_STEP_MS = Math.round(STEP_MS * Math.SQRT2);
 
 /** An attack owns the sword arm until the swing it plays is over. */
 export const ATTACK_MS = SWING.durationMs;
+
+/** Where in the swing the blade meets its target: the clip's contact key. */
+export const SWING_CONTACT_MS = Math.round(SWING.durationMs * 0.45);
+
+/**
+ * How long the hands rest between two casts. Holding the button fires at the
+ * clip's length plus this — a steady rhythm rather than a stream — and it is
+ * what separates "cast" from "hold to channel".
+ */
+export const CAST_COOLDOWN_MS = 160;
+
+/** The casting hands are busy for the clip and the rest after it. */
+export const CAST_CYCLE_MS = CAST.durationMs + CAST_COOLDOWN_MS;
+
+/** Where in the cast the spell leaves the hands: the clip's release key. */
+export const CAST_RELEASE_MS = Math.round(CAST.durationMs * 0.55);
 
 /** What the *legs* are doing. The sword arm has its own clock, `attackMs`. */
 export type Motion = "idle" | "step";
@@ -129,6 +146,18 @@ export interface PlayerState {
    * express that.
    */
   readonly attackMs: number | undefined;
+  /** Elapsed ms in the cast and its cooldown, or `undefined` when the hands are free. */
+  readonly castMs: number | undefined;
+  /**
+   * The last heading asked for - where he last *walked*. It is not where he
+   * points: a blow or a spell goes along `facing`, the aim, which is the whole
+   * of a twin-stick game.
+   */
+  readonly heading: Heading;
+  /** Whether the blade is burning — simulation state, because it changes damage. */
+  readonly enchanted: boolean;
+  /** Which spell the cast in flight throws: decided on the frame it starts. */
+  readonly school: "fire" | "frost";
 }
 
 /** What the player may walk on, as the simulation sees it. */
@@ -148,6 +177,11 @@ export interface Intent {
    */
   readonly aim?: Heading;
   readonly attack: boolean;
+  readonly cast?: boolean;
+  /** The frost nova: the same hands and track as `cast`, a different spell. */
+  readonly frost?: boolean;
+  /** A press of enchant: toggles the blade's fire, once. */
+  readonly enchant?: boolean;
 }
 
 /**
@@ -165,6 +199,14 @@ export interface PlayerTick {
    * wall is an answer, not a request still waiting to be granted.
    */
   readonly usedHeading: boolean;
+  /** True on the frame a cast started — the cue to spend a queued cast. */
+  readonly cast: boolean;
+  /** True on the frame the enchant press was acted on (the blade toggled). */
+  readonly toggled: boolean;
+  /** True on the frame the swing reached its contact beat: a strike lands now. */
+  readonly struck: boolean;
+  /** True on the frame the cast reached its release beat: the spell leaves now. */
+  readonly released: boolean;
 }
 
 export function createPlayer(pose: PlanetPose): PlayerState {
@@ -176,7 +218,16 @@ export function createPlayer(pose: PlanetPose): PlayerState {
     motionMs: 0,
     steps: 0,
     attackMs: undefined,
+    castMs: undefined,
+    heading: "south",
+    enchanted: false,
+    school: "fire",
   };
+}
+
+/** How far through the cast he is, 0 to 1, or `undefined` when the hands are free. */
+export function castProgress(player: PlayerState): number | undefined {
+  return player.castMs === undefined ? undefined : Math.min(player.castMs / CAST.durationMs, 1);
 }
 
 /**
@@ -282,34 +333,38 @@ export function advancePlayer(
   const delta = Math.max(deltaMs, 0);
   // Turning is free and immediate. Waiting for the foot to land before the hero
   // even *looks* the way he was told to is the difference a player reads as lag.
-  const oriented = { ...player, facing: intent.aim ?? intent.heading ?? player.facing };
+  const oriented = {
+    ...player,
+    facing: intent.aim ?? intent.heading ?? player.facing,
+    heading: intent.heading ?? player.heading,
+  };
+  const toggled = intent.enchant === true;
 
-  const swung = advanceSwing(oriented, intent, delta);
-  const moved = advanceMotion(swung.player, intent, delta, world);
-  return { player: moved.player, attacked: swung.attacked, usedHeading: moved.usedHeading };
-}
-
-/**
- * The sword arm's clock, which knows nothing about the legs.
- *
- * A swing runs to its end, and a button still held when it does starts the next
- * one on the same frame - with the overshoot carried, so holding attack gives
- * an even rhythm.
- */
-function advanceSwing(
-  player: PlayerState,
-  intent: Intent,
-  delta: number,
-): { readonly player: PlayerState; readonly attacked: boolean } {
-  const attackMs = player.attackMs === undefined ? undefined : player.attackMs + delta;
-  if (attackMs !== undefined && attackMs < ATTACK_MS) {
-    return { player: { ...player, attackMs }, attacked: false };
-  }
-  if (!intent.attack) {
-    return { player: { ...player, attackMs: undefined }, attacked: false };
-  }
-  const carry = attackMs === undefined ? 0 : Math.min(attackMs - ATTACK_MS, ATTACK_MS);
-  return { player: { ...player, attackMs: carry }, attacked: true };
+  // The sword arm and the casting hands: two clocks that know nothing about
+  // the legs or each other. Each runs to its end, and a button still held when
+  // it does starts the next on the same frame with the overshoot carried.
+  const swing = advanceTrack(oriented.attackMs, intent.attack, delta, ATTACK_MS, SWING_CONTACT_MS);
+  const casting = intent.cast === true || intent.frost === true;
+  const cast = advanceTrack(oriented.castMs, casting, delta, CAST_CYCLE_MS, CAST_RELEASE_MS);
+  // A fireball wins a tie: the school is fixed when the hands start moving.
+  const school = cast.started ? (intent.cast === true ? "fire" : "frost") : oriented.school;
+  const armed: PlayerState = {
+    ...oriented,
+    attackMs: swing.ms,
+    castMs: cast.ms,
+    school,
+    enchanted: toggled ? !oriented.enchanted : oriented.enchanted,
+  };
+  const moved = advanceMotion(armed, intent, delta, world);
+  return {
+    player: moved.player,
+    attacked: swing.started,
+    usedHeading: moved.usedHeading,
+    cast: cast.started,
+    toggled,
+    struck: swing.beat,
+    released: cast.beat,
+  };
 }
 
 /** The legs' clock, which knows nothing about the sword. */

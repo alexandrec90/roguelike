@@ -13,8 +13,12 @@ import {
   releaseButton,
   releaseKey,
   spendAttack,
+  spendCast,
+  spendEnchant,
   spendHeading,
   wantsAttack,
+  wantsCast,
+  wantsEnchant,
 } from "./controls";
 import { DEFAULT_KEYBINDINGS, type Keybindings } from "./keybindings";
 import { DEPTH_RATIO } from "./projection";
@@ -257,13 +261,68 @@ describe("the attack input", () => {
     expect(wantsAttack(controls)).toBe(false);
   });
 
-  it("takes either mouse button, and survives releasing one of two", () => {
+  it("takes the mouse and space together, and survives releasing one of two", () => {
     const controls = createControls();
     pressButton(controls, "left");
-    pressButton(controls, "right");
+    pressKey(controls, "Space");
     releaseButton(controls, "left");
     spendAttack(controls);
     expect(wantsAttack(controls)).toBe(true);
+  });
+
+  it("is not triggered by the right button any more — that is the cast", () => {
+    const controls = createControls();
+    pressButton(controls, "right");
+    expect(wantsAttack(controls)).toBe(false);
+    expect(wantsCast(controls)).toBe(true);
+  });
+});
+
+describe("the cast input", () => {
+  it("queues a tap and keeps wanting while held, on the sword's terms", () => {
+    const controls = createControls();
+    pressKey(controls, "KeyQ");
+    releaseKey(controls, "KeyQ");
+    expect(wantsCast(controls)).toBe(true);
+    spendCast(controls);
+    expect(wantsCast(controls)).toBe(false);
+
+    pressButton(controls, "right");
+    spendCast(controls);
+    expect(wantsCast(controls)).toBe(true);
+    releaseButton(controls, "right");
+    expect(wantsCast(controls)).toBe(false);
+  });
+
+  it("never touches the attack queue, or the heading", () => {
+    const controls = createControls();
+    pressKey(controls, "KeyQ");
+    expect(wantsAttack(controls)).toBe(false);
+    expect(nextHeading(controls)).toBeUndefined();
+  });
+});
+
+describe("the enchant input", () => {
+  it("owes exactly one toggle per press, however long the key is held", () => {
+    const controls = createControls();
+    pressKey(controls, "KeyF");
+    expect(wantsEnchant(controls)).toBe(true);
+    spendEnchant(controls);
+    // Still held, and auto-repeat keydowns arriving: no second toggle.
+    pressKey(controls, "KeyF");
+    expect(wantsEnchant(controls)).toBe(false);
+    releaseKey(controls, "KeyF");
+    pressKey(controls, "KeyF");
+    expect(wantsEnchant(controls)).toBe(true);
+  });
+
+  it("is dropped by a lost focus", () => {
+    const controls = createControls();
+    pressKey(controls, "KeyF");
+    pressKey(controls, "KeyQ");
+    releaseAll(controls);
+    expect(wantsEnchant(controls)).toBe(false);
+    expect(wantsCast(controls)).toBe(false);
   });
 
   it("ignores an unbound button, and an event with no button at all", () => {

@@ -1,112 +1,119 @@
 /**
  * The playfield, scrolling and turning under a grid that never moves.
  *
- * The whole layer is built on the split `camera.ts` describes. Art is laid out
- * once on the zero-phase grid and thereafter only ever *moved by a container
- * position*; what each cell shows is re-sampled only when a step completes and
- * the pose the world is read from advances. So a frame of walking costs about
- * twenty container writes rather than four hundred sprite writes, and a step
- * costs one sweep of the grid.
+ * The layer is built on the split `camera.ts` describes. Art is laid out on the
+ * zero-phase grid and thereafter only ever *moved by an image position*; what
+ * each cell shows is re-sampled only when a step completes and the pose the
+ * world is read from advances:
  *
- *     per frame   : containers <- scrollOffset(frame)          (smooth, cheap)
- *     per step    : every cell <- terrainAt(fromLocal(pose))   (the world turns)
+ *     per frame : ground image, rock rows <- scrollOffset(frame)   (a few writes)
+ *     per step  : lattice sample -> tile keys -> copy tiles -> one upload each
  *
- * Containers also buy the depth sorting for nothing. The ground is one container
- * behind everything, and standing rock gets one container per *screen* row, so a
- * block keeps sorting against the hero on the scene's shared
- * `row * TILE_WIDTH + rank` key without every block owning a depth of its own.
+ * The flat ground is **one** `PixelSurface` the size of the grid: every cell's
+ * tile is copied into it word by word when the pose changes, and it reaches the
+ * GPU as one texture and one quad. The previous build drew four hundred images
+ * for the same picture.
+ *
+ * Rock cannot join it, because rock stands up and must sort against the hero
+ * and the trees. It keeps the old rule - one image per *screen row*, on the
+ * scene's shared `row * TILE_WIDTH + rank` key - but each row is now a surface
+ * holding that row's caps and faces, re-uploaded only when its content changed.
  * Screen rows are the right key because the grid is bolted to the screen: only
  * the phase slides things inside a row, never between rows.
  *
- * A rock cell is three pieces of art, and the reason is in `projection.ts`: the
- * cap art at ground level so nothing shows through, the same cap lifted by
- * `WALL_RISE` so the block reads as standing, and a front face - but only where
- * the cell in front is not also rock, or a flat shelf grows a course of mortar
- * across its middle.
- *
- * The cap has the same edge rule pointing the other way. `WALL_TOP` carries a
- * lit back lip, which is a catch-light on the step behind it; inside a mass
- * there is no step, so a cell with rock behind it gets `WALL_SHELF` instead and
- * the whole outcrop ends up with one rim at the back and one face at the front
- * rather than a lit line every twelve pixels.
+ * What the tiles look like, and why they meet without seams, is `ground/`:
+ * `ground-sample.ts` (the planet on a half-tile lattice), `ground-plan.ts`
+ * (which tile where), `ground-tiles.ts` and `rock-tiles.ts` (the art),
+ * `wang.ts` (why neighbours agree).
  */
 
 import Phaser from "phaser";
 
-import {
-  localOrigin,
-  localRow,
-  scrollOffset,
-  type CameraFrame,
-  type LocalBounds,
-} from "./camera";
-import { fromLocal, type PlanetPose } from "./planet";
-import { TILE_WIDTH, wallCapY, wallFaceY } from "./projection";
-import { terrainAt, type Terrain } from "./terrain";
-import { installPixelTexture } from "./textures";
-import { DIRT_PATH, GRASS, WALL_FACE, WALL_SHELF, WALL_TOP } from "./tiles";
+import { localOrigin, localRow, scrollOffset, type CameraFrame, type LocalBounds } from "./camera";
+import type { FrameContext } from "./frame-context";
+import { FACE_TOP, planGround, ROCK_ROW_HEIGHT, rowSignature, type GroundPlan, type RockRowPlan } from "./ground/ground-plan";
+import { sharedGroundSample } from "./ground/ground-sample";
+import { groundTile, unpackGroundKey } from "./ground/ground-tiles";
+import { capTile, faceTile, unpackCapKey, unpackFaceKey } from "./ground/rock-tiles";
+import { blitWords, createTileCache, type TileCache, type WordTarget } from "./ground/tile-cache";
+import { PixelSurface } from "./pixel-surface";
+import type { PlanetPose } from "./planet";
+import { RANK, TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "./projection";
 
 /** Behind everything that stands on it. */
-const GROUND_DEPTH = -1000;
-const RANK_CAP = 0;
+export const GROUND_DEPTH = -1000;
 
-const GROUND_TEXTURE: Readonly<Record<Terrain, string>> = {
-  grass: "ground-grass",
-  dirt: "ground-dirt",
-  rock: "wall-top",
-};
+/** Seconds of steady rain to soak the ground, and of dry weather to lose it. */
+const SOAK_MS = 6000;
+const DRY_MS = 30000;
 
-/** One grid cell's three sprites, pre-positioned on the zero-phase grid. */
-interface CellArt {
-  readonly localX: number;
-  readonly localY: number;
-  readonly tile: Phaser.GameObjects.Image;
-  readonly cap: Phaser.GameObjects.Image;
-  readonly face: Phaser.GameObjects.Image;
+/** Milliseconds of never-seen tiles a walking step may generate before deferring the rest. */
+const BAKE_BUDGET_MS = 1.5;
+
+interface RockRow {
+  readonly surface: PixelSurface;
+  readonly target: WordTarget;
+  signature: string;
+}
+
+function wordTarget(surface: PixelSurface): WordTarget {
+  return {
+    width: surface.width,
+    height: surface.height,
+    words: new Uint32Array(surface.buffer.data.buffer),
+  };
 }
 
 export class GroundLayer {
   private scene!: Phaser.Scene;
-  private cells: CellArt[] = [];
-  private ground!: Phaser.GameObjects.Container;
-  /** One per screen row, keyed by `row - bounds.minRow`. */
-  private rockRows: Phaser.GameObjects.Container[] = [];
-  private minRow = 0;
+  private ground: PixelSurface | undefined;
+  private groundTarget: WordTarget | undefined;
+  private rockRows: (RockRow | undefined)[] = [];
+  private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  /** Screen top-left of the grid's top-left cell, on the zero-phase grid. */
+  private origin = { x: 0, y: 0 };
+  private flat: CameraFrame | undefined;
   private sampled: PlanetPose | undefined;
+  /** A plan whose tiles did not all fit in last frame's bake budget. */
+  private pending: GroundPlan | undefined;
+  private wetness = 0;
+  private readonly groundTiles: TileCache = createTileCache(TILE_WIDTH, TILE_DEPTH, (key) =>
+    groundTile(unpackGroundKey(key)),
+  );
+  private readonly capTiles: TileCache = createTileCache(TILE_WIDTH, TILE_DEPTH, (key) =>
+    capTile(unpackCapKey(key)),
+  );
+  private readonly faceTiles: TileCache = createTileCache(TILE_WIDTH, WALL_RISE, (key) =>
+    faceTile(unpackFaceKey(key)),
+  );
+  /** The last resample's cost, ms - read it from the console when profiling. */
+  lastResampleMs = 0;
 
   create(scene: Phaser.Scene, frame: CameraFrame, bounds: LocalBounds): void {
     this.scene = scene;
-    installPixelTexture(scene.textures, "ground-grass", GRASS);
-    installPixelTexture(scene.textures, "ground-dirt", DIRT_PATH);
-    installPixelTexture(scene.textures, "wall-top", WALL_TOP);
-    installPixelTexture(scene.textures, "wall-shelf", WALL_SHELF);
-    installPixelTexture(scene.textures, "wall-face", WALL_FACE);
-    this.ground = scene.add.container(0, 0).setDepth(GROUND_DEPTH);
     this.layout(frame, bounds);
   }
 
   /**
-   * (Re)build the pools for a grid of this size.
+   * (Re)build the surfaces for a grid of this size.
    *
    * Called again on every resize, because the window decides how many rows
    * survive the cover crop and therefore how much grid there is to fill.
    */
   layout(frame: CameraFrame, bounds: LocalBounds): void {
-    this.destroyPools();
-    const flat: CameraFrame = { ...frame, phaseX: 0, phaseY: 0 };
-    this.minRow = bounds.minY;
-    this.rockRows = Array.from({ length: bounds.maxY - bounds.minY + 1 }, (_unused, index) =>
-      this.scene.add
-        .container(0, 0)
-        .setDepth(this.screenRow(frame, bounds.minY + index) * TILE_WIDTH + RANK_CAP),
-    );
-
-    for (let localY = bounds.maxY; localY >= bounds.minY; localY -= 1) {
-      for (let localX = bounds.minX; localX <= bounds.maxX; localX += 1) {
-        this.cells.push(this.buildCell(flat, localX, localY));
-      }
-    }
+    this.destroySurfaces();
+    this.bounds = bounds;
+    this.flat = { ...frame, phaseX: 0, phaseY: 0 };
+    this.origin = localOrigin(this.flat, { x: bounds.minX, y: bounds.maxY });
+    const columns = bounds.maxX - bounds.minX + 1;
+    const rows = bounds.maxY - bounds.minY + 1;
+    this.ground = new PixelSurface(this.scene, columns * TILE_WIDTH, rows * TILE_DEPTH, "ground");
+    this.ground.image.setDepth(GROUND_DEPTH);
+    this.groundTarget = wordTarget(this.ground);
+    this.rockRows = Array.from({ length: rows }, () => undefined);
     this.sampled = undefined;
+    this.pending = undefined;
+    this.applyWetness();
   }
 
   /**
@@ -115,75 +122,158 @@ export class GroundLayer {
    */
   draw(frame: CameraFrame, pose: PlanetPose): void {
     if (this.sampled !== pose) {
-      this.resample(pose);
+      const started = performance.now();
+      // The first paint of a layout is unbudgeted: a field that fills in over
+      // twenty frames on load looks broken, where a margin cell that catches up
+      // a frame late on a walk is never seen.
+      this.resample(pose, this.sampled === undefined ? Number.POSITIVE_INFINITY : BAKE_BUDGET_MS);
       this.sampled = pose;
+      this.lastResampleMs = performance.now() - started;
+    } else if (this.pending !== undefined) {
+      const plan = this.pending;
+      this.pending = undefined;
+      this.paintGround(plan, BAKE_BUDGET_MS);
     }
     const offset = scrollOffset(frame);
-    this.ground.setPosition(offset.x, offset.y);
-    for (const row of this.rockRows) {
-      row.setPosition(offset.x, offset.y);
-    }
-  }
-
-  private buildCell(flat: CameraFrame, localX: number, localY: number): CellArt {
-    const origin = localOrigin(flat, { x: localX, y: localY });
-    const tile = this.scene.add.image(origin.x, origin.y, "ground-grass").setOrigin(0, 0);
-    const cap = this.scene.add
-      .image(origin.x, wallCapY(origin.y), "wall-top")
-      .setOrigin(0, 0)
-      .setVisible(false);
-    const face = this.scene.add
-      .image(origin.x, wallFaceY(origin.y), "wall-face")
-      .setOrigin(0, 0)
-      .setVisible(false);
-
-    this.ground.add(tile);
-    const row = this.rockRows[localY - this.minRow];
-    row?.add(cap);
-    row?.add(face);
-    return { localX, localY, tile, cap, face };
+    this.ground?.image.setPosition(this.origin.x + offset.x, this.origin.y + offset.y);
+    this.rockRows.forEach((row, index) => {
+      if (row !== undefined) {
+        const top = this.origin.y + (this.rows() - 1 - index) * TILE_DEPTH - WALL_RISE;
+        row.surface.image.setPosition(this.origin.x + offset.x, top + offset.y);
+      }
+    });
   }
 
   /**
-   * Read the planet through the frame, one cell at a time.
+   * The frame-context form: draw, and let the ground soak up the rain.
    *
-   * `fromLocal` is the rotation, and it is applied per cell rather than to the
-   * grid: the grid stays axis-aligned and only what lands in each cell changes,
-   * which is the entire reason a camera may turn in a game with this pixel
-   * contract.
+   * Wetness follows `ctx.rain` with a lag - quick to soak, slow to dry - so a
+   * shower that stops leaves the ground dark for a while, as it does.
    */
-  private resample(pose: PlanetPose): void {
-    for (const cell of this.cells) {
-      const terrain = terrainAt(fromLocal(pose, { x: cell.localX, y: cell.localY }));
-      cell.tile.setTexture(GROUND_TEXTURE[terrain]);
-      const rock = terrain === "rock";
-      cell.cap.setVisible(rock);
-      if (rock) {
-        // The lit lip belongs on the far edge of the mass and nowhere inside
-        // it, exactly as the face belongs on the near edge and nowhere behind.
-        const behind = terrainAt(fromLocal(pose, { x: cell.localX, y: cell.localY + 1 }));
-        cell.cap.setTexture(behind === "rock" ? "wall-shelf" : "wall-top");
-      }
-      cell.face.setVisible(
-        rock && terrainAt(fromLocal(pose, { x: cell.localX, y: cell.localY - 1 })) !== "rock",
-      );
-    }
+  update(ctx: FrameContext): void {
+    this.draw(ctx.frame, ctx.pose);
+    const rate = ctx.rain > this.wetness ? ctx.deltaMs / SOAK_MS : ctx.deltaMs / DRY_MS;
+    const next = this.wetness + Math.sign(ctx.rain - this.wetness) * Math.min(rate, Math.abs(ctx.rain - this.wetness));
+    this.setWetness(next);
   }
 
-  /** Screen row of a local depth, on the zero-phase grid. */
-  private screenRow(frame: CameraFrame, localY: number): number {
-    return Math.round(localRow({ ...frame, phaseX: 0, phaseY: 0 }, { x: 0, y: localY }));
+  /**
+   * 0 is dry, 1 is soaked: wet ground is darker and cooler.
+   *
+   * A multiply tint on the ground and rock images - lighting, not new art, so
+   * it costs nothing and cannot drift off the palette the tiles were baked in.
+   */
+  setWetness(wetness: number): void {
+    const clamped = Math.min(Math.max(wetness, 0), 1);
+    if (Math.abs(clamped - this.wetness) < 0.004 && clamped !== 0 && clamped !== 1) {
+      return;
+    }
+    this.wetness = clamped;
+    this.applyWetness();
   }
 
-  private destroyPools(): void {
-    for (const cell of this.cells) {
-      cell.tile.destroy();
-      cell.cap.destroy();
-      cell.face.destroy();
-    }
-    this.cells = [];
+  destroy(): void {
+    this.destroySurfaces();
+  }
+
+  private applyWetness(): void {
+    const w = this.wetness;
+    const channel = (loss: number): number => Math.round(255 * (1 - loss * w));
+    const tint = (channel(0.3) << 16) | (channel(0.26) << 8) | channel(0.16);
+    this.ground?.image.setTint(tint);
     for (const row of this.rockRows) {
-      row.destroy();
+      row?.surface.image.setTint((channel(0.22) << 16) | (channel(0.2) << 8) | channel(0.12));
+    }
+  }
+
+  private rows(): number {
+    return this.bounds.maxY - this.bounds.minY + 1;
+  }
+
+  /**
+   * Read the planet through the frame and repaint what changed.
+   *
+   * `fromLocal` is the rotation, and it is applied per lattice point rather
+   * than to the grid: the grid stays axis-aligned and only what lands in each
+   * cell changes, which is the entire reason a camera may turn in a game with
+   * this pixel contract.
+   */
+  private resample(pose: PlanetPose, budgetMs: number): void {
+    const plan = planGround(sharedGroundSample(pose, this.bounds));
+    this.paintGround(plan, budgetMs);
+    plan.rockRows.forEach((row, index) => this.paintRockRow(row, index));
+  }
+
+  /**
+   * Copy every cell's tile into the ground surface, generating at most
+   * `budgetMs` of tiles it has never seen. A cell whose tile missed the budget
+   * keeps last step's pixels for a frame and the plan is finished next frame -
+   * new tiles arrive at the grid's margin, which is off screen.
+   */
+  private paintGround(plan: GroundPlan, budgetMs: number): void {
+    const target = this.groundTarget;
+    if (target === undefined || this.ground === undefined) {
+      return;
+    }
+    this.pending = undefined;
+    const deadline = performance.now() + budgetMs;
+    for (const cell of plan.ground) {
+      let tile = this.groundTiles.peek(cell.key);
+      if (tile === undefined && performance.now() < deadline) {
+        tile = this.groundTiles.get(cell.key);
+      }
+      if (tile === undefined) {
+        this.pending = plan;
+        continue;
+      }
+      blitWords(target, tile, TILE_WIDTH, cell.x, cell.y, true);
+    }
+    this.ground.touch().commit();
+  }
+
+  private paintRockRow(plan: RockRowPlan, index: number): void {
+    const signature = rowSignature(plan);
+    let row = this.rockRows[index];
+    if (row?.signature === signature) {
+      return;
+    }
+    if (plan.caps.length === 0) {
+      if (row !== undefined) {
+        row.signature = signature;
+        row.surface.image.setVisible(false);
+      }
+      return;
+    }
+    row ??= this.createRockRow(plan.localY, index);
+    row.signature = signature;
+    row.target.words.fill(0);
+    for (const cap of plan.caps) {
+      blitWords(row.target, this.capTiles.get(cap.key), TILE_WIDTH, cap.x, cap.y, false);
+    }
+    for (const face of plan.faces) {
+      blitWords(row.target, this.faceTiles.get(face.key), TILE_WIDTH, face.x, FACE_TOP, false);
+    }
+    row.surface.touch().commit();
+    row.surface.image.setVisible(true);
+  }
+
+  private createRockRow(localY: number, index: number): RockRow {
+    const width = (this.bounds.maxX - this.bounds.minX + 1) * TILE_WIDTH;
+    const surface = new PixelSurface(this.scene, width, ROCK_ROW_HEIGHT, "rock-row");
+    const flat = this.flat ?? { groundTop: 0, rollHeight: 0, footX: 0, footY: 0, phaseX: 0, phaseY: 0 };
+    surface.image.setDepth(Math.round(localRow(flat, { x: 0, y: localY })) * TILE_WIDTH + RANK.cap);
+    const row: RockRow = { surface, target: wordTarget(surface), signature: "" };
+    this.rockRows[index] = row;
+    this.applyWetness();
+    return row;
+  }
+
+  private destroySurfaces(): void {
+    this.ground?.destroy();
+    this.ground = undefined;
+    this.groundTarget = undefined;
+    for (const row of this.rockRows) {
+      row?.surface.destroy();
     }
     this.rockRows = [];
   }

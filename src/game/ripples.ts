@@ -55,7 +55,7 @@ function ringKey(x: number, y: number): number {
  * ran all night must not have grown its ring count. A spawn with no free slot
  * is dropped, which is the cap doing its job rather than a failure.
  */
-export function createRippleField(capacity = 28): RippleField {
+export function createRippleField(capacity = 48): RippleField {
   if (!Number.isInteger(capacity) || capacity < 1) {
     throw new Error("Ripple capacity must be a positive integer");
   }
@@ -134,7 +134,7 @@ export function rippleAlpha(ripple: Ripple): number {
  * The ring opens fast and slows, which is what a real impact does and what
  * stops a linear ring reading as a growing circle drawn by a machine.
  */
-export function rippleCloud(ripple: Ripple, ink: InkId = "ice"): PixelCloud {
+export function rippleCloud(ripple: Ripple, ink: InkId = "ice", splash: InkId = "bone"): PixelCloud {
   if (!ripple.active) {
     return [];
   }
@@ -167,7 +167,7 @@ export function rippleCloud(ripple: Ripple, ink: InkId = "ice"): PixelCloud {
     put(-dx, dy, ink);
   }
   if (progress < 0.25) {
-    put(0, 0, "bone");
+    put(0, 0, splash);
   }
 
   return cloud;

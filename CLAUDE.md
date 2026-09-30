@@ -92,8 +92,8 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 | --- | --- |
 | Render target | Render the world at 320×180, then nearest-neighbor upscale the whole canvas by the smallest integer factor that covers the full window. Centre-crop horizontal overflow, keep the horizon pinned to the top, and clip vertical overflow from the near foreground; never expose a border or distort the aspect ratio. **The window therefore decides how much world you can see** — a short window clips the near rows — but it can no longer decide how much world *exists*: the planet is unbounded and the hero is pinned to one pixel inside the walkable band (`src/game/viewport.ts`), so a dragged window edge re-frames him rather than stranding him. |
 | Setting | **Outdoors.** The game is an overworld — fields, paths, rock, sky — not a dungeon interior. |
-| Color | **A closed palette of named inks on pitch black.** The background is `#000000`, never "very dark"; everything drawn is high-contrast lit pixels in a named ink from the closed set in `src/game/ink.ts`. No asset invents a hex value — new colours are new inks, added deliberately. `void` ink is deliberate black, for punching holes (eyes, hollows) into a lit silhouette. An ink may be **translucent** — `INK_ALPHA` carries its opacity and `inkHex` spells it, so `water` is sheer wherever it is drawn and no call site invents an alpha for a colour. A scene dimming a whole layer is lighting, and multiplies the ink's own alpha rather than replacing it. |
-| Light and shade | The palette is closed but **not one bit deep**. Shadow, highlight and gradient are *computed, never painted*: an ordered **ink ramp**, a light direction, and a 4×4 Bayer dither locked to the logical pixel grid (`src/game/shading.ts`). Shading is a pass over a pixel cloud, so it applies to every model that exists or ever will, and a ramp arranges the palette rather than extending it. Hold identity inks — a cyan blade, a magenta hat, `void` eyes — out of the light pass, so the silhouette still reads at 1×. |
+| Color | **Full colour, still a closed set of named inks.** The one-bit neon-on-black rule is retired. `src/game/palette.ts` defines material families (`grass`, `leaf`, `bark`, `stone`, `fire`, `skin`, `metal`, …), each a hue-shifted ramp darkest first, named `family-index` (`grass-3`). No asset invents a hex value — a new colour is a new step in a family. The legacy inks (`bone`, `cyan`, `void`) still resolve. Opacity belongs to the ink (`INK_ALPHA`): `shadow`, `smoke` and `slime` are sheer everywhere they are drawn. The sky is the one computed gradient. |
+| Light and shade | Shadow, highlight and gradient are *computed, never painted*: a ramp, a light direction, and a 4×4 Bayer dither locked to the pixel grid (`src/game/shading.ts`); volumes are lit per pixel from their SDF normal. The light direction, the time of day and the night are one pure function (`atmosphere.ts`), and one multiply pass over the frame (`lighting-layer.ts`) applies the ambient, every `LightSource` and the cloud shadows — so a layer draws daylight colours and never darkens itself. **How a frame reaches the screen, and its budget, is `.claude/rules/rendering.md`.** |
 | Camera | A **pitched-back overhead** view, not a 45°-yaw diamond isometric: rows and columns stay axis-aligned and only the vertical axis is foreshortened. A 16×16 world square lands on 16×12 of screen, and height rises straight up the screen by `WALL_RISE`, which is what makes walls stand. `src/game/projection.ts` owns that math; nothing else re-derives it. The camera is **bolted to the hero and turns with him** — he never moves on screen, the planet moves under him (`src/game/camera.ts`). |
 | Grid | 16×16 tiles, and **the grid belongs to the screen, not to the world**: the planet has no lattice, so a turning camera never puts a tile on a diagonal. Author ground art **already foreshortened** — 16×`TILE_DEPTH` for anything lying on the ground, 16×`WALL_RISE` for anything standing up — so every tile blits 1:1 and nothing is scaled at draw time. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
 | Flatness | Below the horizon band the ground is **affine, not perspective**: every world row is exactly `TILE_DEPTH` scanlines tall, with no convergence and no per-row scaling. A tile's screen size never depends on how far up the screen it is. |
@@ -120,7 +120,7 @@ Seven modules, and no eighth place where any of this is decided:
 | `src/game/panorama.ts` | The horizon as a 360° loop: `PANORAMA_WIDTH` pixels to a full turn, `bearingOffset()` from a heading, and where a landmark at a bearing lands on screen. |
 | `src/game/viewport.ts` | What the window left of the render target: `visibleHeight()` (scanlines that survived the cover crop), `walkableBand()` (that, horizon roll excluded) and `anchorFoot()` (the pixel the hero — and therefore the whole world — is centred on). The one place the *window* is allowed to influence the simulation, and it now only re-frames. |
 
-`src/game/tiles.ts` still owns the terrain art itself, in one shared palette.
+`src/game/ground/` owns the terrain art itself: tiles generated procedurally (seamless grass, neighbour-aware path edges, rock caps and faces), baked once and composed per step, plus the baked tuft atlas the grass is drawn from.
 
 **The grid belongs to the screen, and the planet has no grid.** That is the load-bearing
 sentence, because it is what reconciles a camera that turns with a pixel contract that
@@ -198,7 +198,9 @@ last rung, for props and tiles only, never for a character.**
 effect vocabulary (emitters, fields, noise, automata, SDFs, decals, impulse), what each
 one is for, and the determinism rules that keep a capture reproducible.
 
-**Two knobs, neither of them a constant to inline.** `DEFAULT_SKY_FRACTION` in
+**Knobs, none of them a constant to inline** (all read in `scene-options.ts`; also
+`?time=21` or `?time=18:30` pins the clock, `?day=120` sets a day's seconds, and
+`?weather=clear|rain|storm` pins the sky). `DEFAULT_SKY_FRACTION` in
 `horizon.ts` sets the 88/12 sky split and `?horizon=8%` (or `?horizon=0.08`) overrides
 it per load; `DEFAULT_STRAFE_RADIUS` in `planet.ts` sets how hard the world turns
 when you walk sideways and `?radius=64` overrides that. Both are meant to be retuned by
@@ -217,7 +219,8 @@ ways no screenshot shows: reach for it before reasoning about turning, scrolling
 where a feature is, and prefer adding a panel to it over adding a `console.log`.
 
 There is no on-screen caption printing the resulting pixel counts — **the page is the game
-world and nothing else**, so judge a split against the frame itself and read the numbers
+world and nothing else** (the one exception is the controls reminder, `help-overlay.ts`: H, ?
+or F1, generated from the binding table), so judge a split against the frame itself and read the numbers
 from `horizonLayout()` in the console or from `horizon.test.ts`. Read
 `horizonLayout()` for `groundTop` — never hard-code a y for the horizon, and never
 assume the flat field starts at 22px, because that number moves the moment the knob does.
@@ -308,22 +311,18 @@ species nobody has written yet.
 | `src/game/procgen/` | The primitives, none of which are about trees: `volume.ts` (lobes smooth-unioned into a field), `sdf.ts`, `noise.ts`, `verlet.ts` (rope and chain), `growth.ts` (space colonization), `heat.ts` (the fire automaton), `motes.ts`. |
 | `src/game/trees/` | The species — eight of them, each existing to demonstrate one mechanism — plus `foliage.ts` for what they share. |
 | `src/game/props/` | A boulder, a bush and a mushroom, built from the same three calls as a crown. |
-| `src/game/gpu/` | The volume shader (`volume-shader.ts`), its uniforms (`volume-uniforms.ts`), and the two hosts that consume it: `volume-phaser.ts` for the game, `volume-gl.ts` for the lab's readback and parity diff. |
+| `src/game/gpu/` | The volume shader (`volume-shader.ts`), its uniforms (`volume-uniforms.ts`), and `volume-gl.ts`, the tree lab's host for its readback and parity diff. The game no longer draws with it. |
 | `src/game/lod.ts` | The detail budget. A distant body evaluates the **same field** more cheaply — never a different, simpler model — so it gains detail as you walk toward it instead of popping. |
-| `src/game/scenery-layer.ts` | The Phaser wiring: one `GameObjects.Shader` per volume part, positioned at the body's foot and depth-sorted like anything else. |
+| `src/game/scenery-bake.ts`, `scenery-cache.ts` | Bodies baked once per lean, per light, per horizon scale — posed by stepping the species under a fixed wind — into textures, on a sliced queue. |
+| `src/game/scenery-features.ts`, `scenery-layer.ts` | Which species stands where on the planet; the Phaser wiring that picks a baked lean from the wind. |
 | `src/game/scenery-slots.ts` | Which body gets which slot, pure and tested — the pool is smaller than the planet, so a slot is *lent* to whichever tree is in reach and an incumbent keeps it. |
 
 Three things about it that are easy to break:
 
-- **A body is a game object, not a texture.** An earlier version rendered into a second
-  WebGL2 context and handed Phaser one texture, which meant one depth for all the scenery
-  and a hand-rolled behind/in-front split around the hero. Phaser accepts a context you
-  give it (`main.ts` hands it a WebGL2 one), and on that it compiles the `#version 300 es`
-  shader through `GameObjects.Shader` unchanged — so a body takes a `setDepth` and
-  interleaves with the hero for free.
-- **Phaser matches uniforms against WebGL's *active* names**, where an array is
-  `u_lobes[0]`. The bare name is silently ignored, the lobes stay at radius zero, and the
-  body draws nothing, with no error anywhere. `ARRAY_UNIFORMS` holds that in one place.
+- **A body is a baked image, not a per-frame shader.** Each body is two images (body,
+  shadow) that depth-sort with the hero for free; per-frame shader bodies cost a third of
+  the frame on an integrated GPU. The lab's GPU path still needs `ARRAY_UNIFORMS`:
+  Phaser matches uniforms by *active* name (`u_lobes[0]`), and a bare name is silently ignored.
 - **A tree is a point feature, not a cell.** It has planet coordinates out of
   `terrain.ts`, keeps its identity as the world scrolls, and is seeded and wind-sampled
   from the *planet* point rather than from where it happens to be on screen — otherwise a
@@ -353,8 +352,8 @@ write. The offset is a hash, so collisions remain possible: pin one side with
 ## Controls
 
 **A rebinding touches exactly one file: `src/game/keybindings.ts`.** It is the config the
-rest of the game reads — `DEFAULT_KEYBINDINGS` maps each `GameAction` (four directions
-plus `attack`) to the physical `KeyboardEvent.code`s and mouse buttons that trigger it,
+rest of the game reads — `DEFAULT_KEYBINDINGS` maps each `GameAction` (four directions,
+`attack`, `cast` fireball, `frost` nova, `enchant` the blade) to the `KeyboardEvent.code`s and mouse buttons that trigger it,
 and `validateKeybindings` rejects a map that leaves an action unbound or claims one input
 twice. Codes rather than `key` values, so the map survives a non-QWERTY layout. No other
 module may name a key.
@@ -374,7 +373,7 @@ Four files, and no fifth place where any of this is decided:
 | `src/game/keybindings.ts` | What an input *means*: the binding table, the lookups over it, and `headingToward` — a free direction (a mouse, one day a stick) snapped to the nearest of the eight headings. |
 | `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, one winner per axis summed into a `Heading` (newest-press-wins within an axis), and the one-shot queue that keeps a tap shorter than a frame, two same-frame taps joining into the diagonal they mean. Also the **aim**: `aimAt` takes the cursor's screen offset from the hero's chest, un-foreshortens it by `DEPTH_RATIO` so the sectors lie on the ground, and holds the last heading pointed at. |
 | `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free simulation over (state, intent, elapsed, world). **North and south walk the heading; east and west strafe, and strafing turns the world** — a press is two gaits over a `PlanetPose` (`Gait`), not a direction on a map, and a diagonal is both walks at once rather than a fifth direction the planet does not have. Two tracks — `motion`/`motionMs` for the legs, `attackMs` for the sword arm — aged independently, so he can swing mid-stride. A press commits one whole tile of walking that runs to completion (√2 as long on a diagonal, so eight-way movement has one speed), `facing` is a `Heading` read from `Intent.aim` when there is one and the heading otherwise, and `facingYaw` is the one place a heading becomes a turn of the rig. It hands the renderer three views of the pose: `groundPose` (frozen for the stride, what the world is sampled from), `scrollPhase` (the sub-tile offset it is drawn at) and `livePose` (the continuous truth, which only the horizon shows). |
-| `src/game/hero-layer.ts` | The wiring only — DOM events in (the pointer mapped back to a logical pixel through the canvas's own box by `logicalPoint`, since the canvas is CSS-scaled under `Scale.NONE`), a posed rig into a `Graphics`. Also the one place the two tracks are put back together: `samplePose(SWING, samplePose(WALK, …), …)` **layers** the clips, because unkeyed channels fall through to the base pose and `SWING` keys nothing below the waist. The single file here that imports Phaser. |
+| `src/game/hero-layer.ts` | The wiring only — DOM events in (the pointer mapped back to a logical pixel through the canvas's own box by `logicalPoint`, since the canvas is CSS-scaled under `Scale.NONE`), and a frame of `hero/hero-look.ts` into two `PixelSurface`s. The tracks are put back together in `layeredPose` (`hero/hero-figure.ts`), which **layers** the clips — unkeyed channels fall through, and `SWING` keys nothing below the waist. A blow or a spell leaves along `facing`, the aim, not the heading. The single file here that imports Phaser. |
 
 That split is the `Separation` contract above, applied to input: the simulation is
 deterministic and testable without a canvas, and the presentation layer can exaggerate a
@@ -494,5 +493,7 @@ Cross-reference this project's own scoped rules here, one line each.
 - **`.claude/rules/procedural-effects.md`** (`src/game/**/*.ts`) — how to simulate
   rather than draw: emitters, fields, noise, automata, SDF spell geometry, decals and
   impulse, and the seeding rules that keep every one of them reproducible.
+- **`.claude/rules/rendering.md`** (`src/game/**/*.ts`) — how pixels reach the screen:
+  bakes vs surfaces, the lighting pass, `FrameContext`, and the per-frame budget.
 - **`/art-check`** (`.claude/skills/art-check/`) — the browser capture ritual that turns
   "the tests are green" into "the picture is right". Every art change ends there.

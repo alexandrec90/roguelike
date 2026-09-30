@@ -127,7 +127,7 @@ class EmberBirch implements SceneryInstance {
         });
       }
     });
-    for (const pixel of moteCloud(this.embers, INK_RAMPS.ember)) {
+    for (const pixel of moteCloud(this.embers, INK_RAMPS.fire)) {
       cloud.push(pixel);
     }
     return rooted(cloud);
@@ -143,11 +143,14 @@ class EmberBirch implements SceneryInstance {
         if (distance > 1 || pixelHash(x, y, this.seed, 21) < distance * 0.85) {
           continue;
         }
-        cloud.push({ x, y, ink: distance > 0.72 ? "deep" : "void" });
+        cloud.push({ x, y, ink: distance > 0.72 ? "earth-1" : "earth-0" });
       }
     }
   }
 }
+
+/** Birch bark: pale, papery, flecked grey. */
+const BIRCH_BARK: readonly InkId[] = ["stone-3", "stone-4", "stone-5", "petal-2"];
 
 /** Char, ember or unburnt wood — one ramp lookup off the automaton's number. */
 function limbInk(
@@ -162,7 +165,7 @@ function limbInk(
     // Char is deep, not void. A burnt limb still has a silhouette, and drawing
     // it in the background colour deletes the tree rather than blackening it --
     // which is what the screen showed and no unit test could.
-    return spent ? "deep" : rampInk(INK_RAMPS.bone, 0.08 + pixelHash(x, y, seed, 4) * 0.3, { x, y });
+    return spent ? "bark-0" : rampInk(BIRCH_BARK, 0.08 + pixelHash(x, y, seed, 4) * 0.3, { x, y });
   }
   // One rule for what fire looks like, shared with every other burning thing.
   return emberInk(at, heat, seed);

@@ -15,6 +15,8 @@ import {
   type Puddle,
 } from "./puddles";
 import { rippleCloud, RIPPLE_LIFE_MS } from "./ripples";
+import { atmosphereAt } from "./atmosphere";
+import { skyReflection } from "./water/sky-inks";
 
 function puddle(overrides: Partial<Parameters<typeof createPuddle>[0]> = {}): Puddle {
   return createPuddle({ id: "test", centerX: 60, centerY: 90, radius: 10, seed: 0x51bd, ...overrides });
@@ -94,23 +96,30 @@ describe("clipToPuddle", () => {
 });
 
 describe("puddleSurface", () => {
-  it("fills the body with the translucent water ink", () => {
+  it("paints every water pixel once, and damp ground round it", () => {
     const water = puddle();
     const surface = puddleSurface(water);
-    const body = surface.filter((pixel) => pixel.ink === "water");
+    const body = surface.filter((pixel) => puddleHolds(water, pixel.x, pixel.y));
     expect(body).toHaveLength(water.water.length);
+    expect(surface.length).toBeGreaterThan(body.length);
   });
 
-  it("lights the far lip and leaves the near edge dark", () => {
+  it("mirrors the sky it is given", () => {
     const water = puddle();
-    const surface = puddleSurface(water);
-    const steel = surface.filter((pixel) => pixel.ink === "steel");
-    const deep = surface.filter((pixel) => pixel.ink === "deep");
-    expect(steel.length).toBeGreaterThan(0);
-    expect(deep.length).toBeGreaterThan(0);
-    // Far is up the screen: every lit lip pixel is above every dark one.
-    expect(Math.max(...steel.map((pixel) => pixel.y))).toBeLessThan(
-      Math.max(...deep.map((pixel) => pixel.y)),
+    const night = skyReflection(atmosphereAt(23));
+    expect(puddleSurface(water, night)).not.toEqual(puddleSurface(water));
+  });
+
+  it("keeps a sheer shallow edge at the front, below the dark far lip", () => {
+    const water = puddle();
+    const surface = puddleSurface(water).filter((pixel) => puddleHolds(water, pixel.x, pixel.y));
+    const shallow = surface.filter((pixel) => pixel.ink === "water");
+    const lip = surface.filter((pixel) => pixel.ink === "grass-1");
+    expect(shallow.length).toBeGreaterThan(0);
+    expect(lip.length).toBeGreaterThan(0);
+    // Far is up the screen: the lip sits above the shallow front edge.
+    expect(Math.min(...lip.map((pixel) => pixel.y))).toBeLessThan(
+      Math.max(...shallow.map((pixel) => pixel.y)),
     );
   });
 
@@ -138,17 +147,17 @@ describe("puddleGlints", () => {
 });
 
 describe("puddleReflection", () => {
-  it("hangs below the foot and keeps the reflected thing's own inks", () => {
+  it("hangs below the foot, in the reflected thing's own hue made darker", () => {
     const water = puddle();
     const reflection = puddleReflection(
       water,
-      column("amber"),
+      column("fire-5"),
       water.centerX,
       water.centerY - 6,
       0,
     );
     expect(reflection.length).toBeGreaterThan(0);
-    expect(reflection.every((pixel) => pixel.ink === "amber")).toBe(true);
+    expect(reflection.every((pixel) => pixel.ink === "fire-3")).toBe(true);
     expect(reflection.every((pixel) => pixel.y > water.centerY - 6)).toBe(true);
   });
 
