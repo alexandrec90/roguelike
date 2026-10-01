@@ -20,31 +20,48 @@
  * The ground is drawn in daylight colours and lit by the lighting pass like the
  * field; only the haze it dissolves into is pre-divided (`unlitHaze`), so it
  * meets the sky in the sky's own colour.
+ *
+ * The surface spans the whole band above the field, not only the roll: rock
+ * stands on the lip (`roll-rock.ts`), and a wall near the seam rises past the
+ * horizon line into the sky. Above the roll it is transparent wherever no rock
+ * rises. Which cells are rock is asked one cell at a time, off the planet, and
+ * only a rock cell pays for its lattice - the march reads most of the cells out
+ * to the horizon, and reading the lattice under all of them is what the lazy
+ * sample exists to avoid. The puddles out there are grown once a step
+ * (`roll-water.ts`).
  */
 
 import type Phaser from "phaser";
 
 import type { CameraFrame, LocalBounds } from "./camera";
 import type { FrameContext } from "./frame-context";
-import { capKey, groundKey } from "./ground/ground-plan";
+import { capKey, faceKey, groundKey } from "./ground/ground-plan";
 import {
+  cachedTerrain,
   cellTerrain,
+  DIRT,
+  GRASS,
   lazyGroundSample,
   ROCK,
   sharedGroundSample,
   type GroundSample,
   type LazyGroundSample,
+  type TerrainCode,
 } from "./ground/ground-sample";
 import { groundTile, unpackGroundKey } from "./ground/ground-tiles";
-import { capTile, unpackCapKey } from "./ground/rock-tiles";
+import { capTile, faceTile, unpackCapKey, unpackFaceKey } from "./ground/rock-tiles";
 import { swayBend, tuftsInCell, type TuftPlacement } from "./ground/tuft-placement";
 import { bendFrame, TUFT_SHAPES, tuftCloud, tuftFrame } from "./ground/tufts";
 import { PixelSurface } from "./pixel-surface";
-import type { PlanetPose } from "./planet";
+import { localFrame, type PlanetPoint, type PlanetPose } from "./planet";
 import { HORIZON_DEPTH, TILE_DEPTH, TILE_WIDTH } from "./projection";
-import { gridTexels, lipBounds, rollGroundPixels, type TileTexels } from "./roll-ground";
+import { gridTexels, lipBounds, rollGroundPixels, tileMode, type TileTexels } from "./roll-ground";
 import { packCloud, tuftBounds, TuftOverlay, type PackedCloud, type TuftPiece } from "./roll-grass";
+import { faceTexels, paintRollRock, type RockLook } from "./roll-rock";
+import { LipWater, puddleOnLip } from "./roll-water";
 import { unlitHaze } from "./sky-paint";
+import { growPuddles } from "./water-layer";
+import { reflectionKey, skyKey, skyReflection, type SkyReflection } from "./water/sky-inks";
 import { windAt } from "./wind";
 
 /** Rows past the seam over which the lip's grass still sways with the field's. */
@@ -55,6 +72,29 @@ const TILE_LIMIT = 4096;
 
 /** A rock cap's key, kept apart from the ground keys in one map. */
 const CAP_FLAG = 2 ** 30;
+
+/**
+ * What each kind of ground looks like from too far to see its tile: the
+ * commonest colour of a plain tile of that kind. Worked out once.
+ */
+let farColours: Readonly<Record<TerrainCode, number>> | undefined;
+
+function farColour(code: TerrainCode): number {
+  farColours ??= {
+    [GRASS]: tileMode(gridTexels(groundTile({ dirt: 0, colours: 0, middle: 0, shade: 0 }))),
+    [DIRT]: tileMode(gridTexels(groundTile({ dirt: 0x1ff, colours: 0, middle: 0, shade: 0 }))),
+    [ROCK]: tileMode(gridTexels(capTile({ rock: 15, colours: 0, middle: 0 }))),
+  };
+  return farColours[code];
+}
+
+let farFace: number | undefined;
+
+/** A rock wall from too far to see its tiles: a plain cap's colour on top, a plain face's in front. */
+function farRock(): { readonly cap: number; readonly face: number } {
+  farFace ??= tileMode(faceTexels(faceTile({ openLeft: false, openRight: false, colours: 0, middle: 0 })));
+  return { cap: farColour(ROCK), face: farFace };
+}
 
 interface LipCell {
   readonly tile: TileTexels;
@@ -74,6 +114,17 @@ export class RollGroundLayer {
   private readonly cells = new Map<number, LipCell>();
   private readonly tiles = new Map<number, TileTexels>();
   private readonly clouds = new Map<number, PackedCloud>();
+  /** Per lip cell, its terrain code plus one - 0 for not yet asked; and each rock cell's look. */
+  private terrain = new Uint8Array(0);
+  /** Local to planet for the pose the lip was sampled at. */
+  private toPlanet: ((x: number, y: number) => PlanetPoint) | undefined;
+  private readonly rocks = new Map<number, RockLook>();
+  private readonly faces = new Map<number, TileTexels>();
+  private water: LipWater | undefined;
+  private waterKey = "";
+  private waterPose: PlanetPose | undefined;
+  private sky: SkyReflection | undefined;
+  private atmosphereKey = "";
   /** The last frame's cost, ms - read it from the console when profiling. */
   lastFrameMs = 0;
 
@@ -83,8 +134,8 @@ export class RollGroundLayer {
     if (frame.rollHeight <= 0) {
       return;
     }
-    this.surface = new PixelSurface(scene, width, frame.rollHeight, "roll-ground");
-    this.surface.image.setPosition(0, frame.groundTop - frame.rollHeight).setDepth(HORIZON_DEPTH);
+    this.surface = new PixelSurface(scene, width, frame.groundTop, "roll-ground");
+    this.surface.image.setPosition(0, 0).setDepth(HORIZON_DEPTH);
   }
 
   /** Re-cut after a resize moved the anchor, and with it where the seam falls. */
@@ -95,6 +146,7 @@ export class RollGroundLayer {
     this.grass = new TuftOverlay(tuftBounds(flat, this.width));
     this.liveMaxY = Math.floor((flat.footY - flat.groundTop) / TILE_DEPTH) + LIVE_ROWS;
     this.sample = undefined;
+    this.water = undefined;
   }
 
   /**
@@ -102,7 +154,7 @@ export class RollGroundLayer {
    * the ones on the field; a tuft that froze as it crossed the seam would be the
    * seam.
    */
-  update(ctx: FrameContext): void {
+  update(ctx: FrameContext, puddleScale = 1): void {
     const surface = this.surface;
     if (surface === undefined) {
       return;
@@ -110,9 +162,10 @@ export class RollGroundLayer {
     const started = performance.now();
     const sample = this.sampleFor(ctx.pose);
     const grass = this.grass;
+    const haze = unlitHaze(ctx.atmosphere);
     // The swaying rows are stamped afresh; everything past them is still in.
     grass.forget(grass.bounds.minY, this.liveMaxY);
-    const rgba = rollGroundPixels(
+    const ground = rollGroundPixels(
       ctx.frame,
       this.width,
       {
@@ -120,12 +173,123 @@ export class RollGroundLayer {
         tuft: (cellX, cellY) =>
           cellY <= this.liveMaxY ? this.swaying(sample, cellX, cellY, ctx) : this.upright(sample, cellX, cellY),
         grass,
+        water: this.waterFor(ctx, puddleScale),
+        far: (cellX, cellY) => farColour(this.terrainAt(sample, cellX, cellY)),
       },
-      unlitHaze(ctx.atmosphere),
+      haze,
     );
-    surface.buffer.data.set(rgba);
+    // The sky rows are clear but for rock; the roll's own rows are the ground.
+    const band = surface.buffer.data;
+    band.fill(0, 0, band.length - ground.length);
+    band.set(ground, band.length - ground.length);
+    paintRollRock(ctx.frame, this.width, (cellX, cellY) => this.rock(sample, cellX, cellY), haze, band);
     surface.touch().commit();
     this.lastFrameMs = performance.now() - started;
+  }
+
+  /**
+   * The puddles out on the lip, re-grown when the pose, their size or the sky
+   * they mirror moved on - what the water layer re-grows and re-bakes for too.
+   */
+  private waterFor(ctx: FrameContext, scale: number): LipWater {
+    const atmosphereKey = skyKey(ctx.atmosphere);
+    if (atmosphereKey !== this.atmosphereKey) {
+      this.atmosphereKey = atmosphereKey;
+      this.sky = skyReflection(ctx.atmosphere);
+    }
+    const sky = this.sky ?? skyReflection(ctx.atmosphere);
+    const key = `${scale}|${reflectionKey(sky)}`;
+    if (this.water === undefined || this.waterKey !== key || this.waterPose !== ctx.pose) {
+      const flat = { ...ctx.frame, phaseX: 0, phaseY: 0 };
+      const { minX, maxX, minY, maxY } = this.bounds;
+      const around = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+      const reach = Math.ceil(Math.hypot((maxX - minX) / 2, (maxY - minY) / 2)) + 1;
+      const puddles = growPuddles(flat, ctx.pose, reach, scale, {
+        keep: (local) => puddleOnLip(flat, this.width, local),
+        around,
+      });
+      this.water = new LipWater(flat, puddles, sky);
+      this.waterKey = key;
+      this.waterPose = ctx.pose;
+    }
+    return this.water;
+  }
+
+  /**
+   * Is the cell rock, and how does it look standing? Asked off the planet at
+   * the cell's own sample point - exactly `cellTerrain`'s - so open ground,
+   * which is most of the lip, never reads the lattice round it.
+   */
+  private rock(sample: GroundSample, cellX: number, cellY: number): RockLook | null {
+    if (this.terrainAt(sample, cellX, cellY) !== ROCK) {
+      return null;
+    }
+    const { minX, maxX, minY } = this.bounds;
+    const index = (cellY - minY) * (maxX - minX + 1) + (cellX - minX);
+    let look = this.rocks.get(index);
+    if (look === undefined) {
+      look = this.lazyRock(sample, cellX, cellY);
+      this.rocks.set(index, look);
+    }
+    return look;
+  }
+
+  /**
+   * A rock cell whose tiles are composed only when a pixel point-samples them.
+   * Out toward the horizon every pixel shows the far colours instead, and the
+   * lattice under the far wall is never read.
+   */
+  private lazyRock(sample: GroundSample, cellX: number, cellY: number): RockLook {
+    let cap: TileTexels | undefined;
+    let face: TileTexels | undefined;
+    const tiles = {
+      cap: (): TileTexels => (cap ??= this.cell(sample, cellX, cellY).tile),
+      face: (): TileTexels => {
+        // The face's key reads the lattice round the cell, which `cell` reads in.
+        this.cell(sample, cellX, cellY);
+        return (face ??= this.face(faceKey(sample, cellX, cellY)));
+      },
+    };
+    return {
+      get cap() {
+        return tiles.cap();
+      },
+      get face() {
+        return tiles.face();
+      },
+      far: farRock(),
+    };
+  }
+
+  /**
+   * What a lip cell is made of, read off the planet at the cell's own sample
+   * point - exactly `cellTerrain`'s answer, without the lattice round it. Out
+   * of the lip's bounds is open grass.
+   */
+  private terrainAt(sample: GroundSample, cellX: number, cellY: number): TerrainCode {
+    const { minX, maxX, minY, maxY } = this.bounds;
+    if (cellX < minX || cellX > maxX || cellY < minY || cellY > maxY) {
+      return GRASS;
+    }
+    const index = (cellY - minY) * (maxX - minX + 1) + (cellX - minX);
+    const known = this.terrain[index] ?? 0;
+    if (known !== 0) {
+      return (known - 1) as TerrainCode;
+    }
+    this.toPlanet ??= localFrame(sample.pose);
+    const point = this.toPlanet(cellX, cellY);
+    const code = cachedTerrain(point.x, point.y);
+    this.terrain[index] = code + 1;
+    return code;
+  }
+
+  private face(key: number): TileTexels {
+    let face = this.faces.get(key);
+    if (face === undefined) {
+      face = faceTexels(faceTile(unpackFaceKey(key)));
+      this.faces.set(key, face);
+    }
+    return face;
   }
 
   /**
@@ -138,6 +302,10 @@ export class RollGroundLayer {
       this.sample = lazyGroundSample(pose, this.bounds, sharedGroundSample(pose, this.field));
       this.cells.clear();
       this.grass.reset();
+      const { minX, maxX, minY, maxY } = this.bounds;
+      this.terrain = new Uint8Array((maxX - minX + 1) * (maxY - minY + 1));
+      this.rocks.clear();
+      this.toPlanet = undefined;
     }
     return this.sample.sample;
   }

@@ -5,6 +5,7 @@ import {
   DEFAULT_STRAFE_RADIUS,
   forwardOf,
   fromLocal,
+  localFrame,
   parseStrafeRadius,
   pivotOf,
   PLANET_TILES,
@@ -96,6 +97,22 @@ describe("fromLocal and toLocal", () => {
     const behind = fromLocal(seam, { x: -4, y: -4 });
     expect(behind).toEqual({ x: PLANET_TILES - 3, y: PLANET_TILES - 3 });
     expect(toLocal(seam, behind).x).toBeCloseTo(-4, 9);
+  });
+});
+
+describe("localFrame", () => {
+  it("is fromLocal for one pose, to the last bit", () => {
+    for (const pose of [ORIGIN, { x: 3.25, y: 250.5, turn: 2.2 }, { x: 255.9, y: 0.1, turn: -0.731 }]) {
+      const toPlanet = localFrame(pose);
+      for (const local of [
+        { x: 0, y: 0 },
+        { x: -58, y: 57 },
+        { x: 13, y: -7 },
+        { x: 0.5, y: 48.25 },
+      ]) {
+        expect(toPlanet(local.x, local.y)).toEqual(fromLocal(pose, local));
+      }
+    }
   });
 });
 

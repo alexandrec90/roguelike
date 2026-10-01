@@ -106,12 +106,28 @@ function edgeScale(theta: number, seed: number): number {
   return 1 + 0.17 * Math.sin(theta * 2 + phaseTwo) + 0.1 * Math.sin(theta * 3 + phaseThree);
 }
 
-export function createPuddle(options: PuddleOptions): Puddle {
-  if (options.radius < 2) {
-    throw new Error("A puddle needs a radius of at least 2");
-  }
+/** A puddle's outline about its own centre: every water pixel, and whether it is on the rim. */
+interface PuddleShape {
+  readonly radiusY: number;
+  readonly offsets: readonly { readonly dx: number; readonly dy: number; readonly edge: boolean }[];
+}
 
-  const radiusX = Math.round(options.radius);
+/**
+ * Outlines already traced, by radius and seed. A puddle's shape does not depend
+ * on where it lies, and the field re-grows every puddle in reach on every step -
+ * the horizon lip several dozen of them - so tracing each outline once and
+ * moving it is the difference between a step that costs a millisecond and one
+ * that costs fifty.
+ */
+const SHAPES = new Map<string, PuddleShape>();
+const SHAPE_LIMIT = 512;
+
+function puddleShape(radiusX: number, seed: number): PuddleShape {
+  const key = `${radiusX}:${seed}`;
+  const known = SHAPES.get(key);
+  if (known !== undefined) {
+    return known;
+  }
   // Lying on the ground, so authored already foreshortened by the camera pitch
   // — never drawn round and squashed at draw time. The spread is the puddle's
   // own shape; the ratio is the camera's.
@@ -124,28 +140,44 @@ export function createPuddle(options: PuddleOptions): Puddle {
     if (distance === 0) {
       return true;
     }
-    return distance <= edgeScale(Math.atan2(v, u), options.seed);
+    return distance <= edgeScale(Math.atan2(v, u), seed);
   };
 
+  const offsets: { dx: number; dy: number; edge: boolean }[] = [];
+  const spanX = Math.ceil(radiusX * EDGE_GAIN);
+  const spanY = Math.ceil(radiusY * EDGE_GAIN);
+  for (let dy = -spanY; dy <= spanY; dy += 1) {
+    for (let dx = -spanX; dx <= spanX; dx += 1) {
+      if (inside(dx, dy)) {
+        const edge = !inside(dx - 1, dy) || !inside(dx + 1, dy) || !inside(dx, dy - 1) || !inside(dx, dy + 1);
+        offsets.push({ dx, dy, edge });
+      }
+    }
+  }
+  if (SHAPES.size >= SHAPE_LIMIT) {
+    SHAPES.clear();
+  }
+  const shape = { radiusY, offsets };
+  SHAPES.set(key, shape);
+  return shape;
+}
+
+export function createPuddle(options: PuddleOptions): Puddle {
+  if (options.radius < 2) {
+    throw new Error("A puddle needs a radius of at least 2");
+  }
+
+  const radiusX = Math.round(options.radius);
+  const { radiusY, offsets } = puddleShape(radiusX, options.seed);
   const water: ScreenPixel[] = [];
   const rim: ScreenPixel[] = [];
   const keys = new Set<number>();
-  const spanX = Math.ceil(radiusX * EDGE_GAIN);
-  const spanY = Math.ceil(radiusY * EDGE_GAIN);
-
-  for (let dy = -spanY; dy <= spanY; dy += 1) {
-    for (let dx = -spanX; dx <= spanX; dx += 1) {
-      if (!inside(dx, dy)) {
-        continue;
-      }
-      const pixel = { x: options.centerX + dx, y: options.centerY + dy };
-      water.push(pixel);
-      keys.add(surfaceKey(pixel.x, pixel.y));
-      const edge =
-        !inside(dx - 1, dy) || !inside(dx + 1, dy) || !inside(dx, dy - 1) || !inside(dx, dy + 1);
-      if (edge) {
-        rim.push(pixel);
-      }
+  for (const { dx, dy, edge } of offsets) {
+    const pixel = { x: options.centerX + dx, y: options.centerY + dy };
+    water.push(pixel);
+    keys.add(surfaceKey(pixel.x, pixel.y));
+    if (edge) {
+      rim.push(pixel);
     }
   }
 

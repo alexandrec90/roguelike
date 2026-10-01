@@ -29,7 +29,14 @@
 
 import Phaser from "phaser";
 
-import { localOrigin, localRow, scrollOffset, type CameraFrame, type LocalBounds } from "./camera";
+import {
+  localOrigin,
+  localRow,
+  scrollOffset,
+  standsOnField,
+  type CameraFrame,
+  type LocalBounds,
+} from "./camera";
 import type { FrameContext } from "./frame-context";
 import { FACE_TOP, planGround, ROCK_ROW_HEIGHT, rowSignature, type GroundPlan, type RockRowPlan } from "./ground/ground-plan";
 import { sharedGroundSample } from "./ground/ground-sample";
@@ -54,6 +61,8 @@ interface RockRow {
   readonly surface: PixelSurface;
   readonly target: WordTarget;
   signature: string;
+  /** Whether the row has any rock in it at all. */
+  filled: boolean;
 }
 
 function wordTarget(surface: PixelSurface): WordTarget {
@@ -138,8 +147,12 @@ export class GroundLayer {
     this.ground?.image.setPosition(this.origin.x + offset.x, this.origin.y + offset.y);
     this.rockRows.forEach((row, index) => {
       if (row !== undefined) {
-        const top = this.origin.y + (this.rows() - 1 - index) * TILE_DEPTH - WALL_RISE;
-        row.surface.image.setPosition(this.origin.x + offset.x, top + offset.y);
+        const top = this.origin.y + (this.rows() - 1 - index) * TILE_DEPTH - WALL_RISE + offset.y;
+        row.surface.image.setPosition(this.origin.x + offset.x, top);
+        // A row whose foot has crossed the seam is the horizon roll's to stand
+        // up (`roll-rock.ts`); drawn here too it was a full-size wall floating
+        // over the roll with the sky behind it.
+        row.surface.image.setVisible(row.filled && standsOnField(top + ROCK_ROW_HEIGHT, frame));
       }
     });
   }
@@ -240,6 +253,7 @@ export class GroundLayer {
     if (plan.caps.length === 0) {
       if (row !== undefined) {
         row.signature = signature;
+        row.filled = false;
         row.surface.image.setVisible(false);
       }
       return;
@@ -254,7 +268,7 @@ export class GroundLayer {
       blitWords(row.target, this.faceTiles.get(face.key), TILE_WIDTH, face.x, FACE_TOP, false);
     }
     row.surface.touch().commit();
-    row.surface.image.setVisible(true);
+    row.filled = true;
   }
 
   private createRockRow(localY: number, index: number): RockRow {
@@ -262,7 +276,7 @@ export class GroundLayer {
     const surface = new PixelSurface(this.scene, width, ROCK_ROW_HEIGHT, "rock-row");
     const flat = this.flat ?? { groundTop: 0, rollHeight: 0, footX: 0, footY: 0, phaseX: 0, phaseY: 0 };
     surface.image.setDepth(Math.round(localRow(flat, { x: 0, y: localY })) * TILE_WIDTH + RANK.cap);
-    const row: RockRow = { surface, target: wordTarget(surface), signature: "" };
+    const row: RockRow = { surface, target: wordTarget(surface), signature: "", filled: false };
     this.rockRows[index] = row;
     this.applyWetness();
     return row;

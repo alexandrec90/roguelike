@@ -7,6 +7,7 @@ import {
   localRow,
   localReach,
   scrollOffset,
+  standsOnField,
   visibleLocal,
   type CameraFrame,
 } from "./camera";
@@ -157,6 +158,24 @@ describe("localRow", () => {
   it("stays fractional between rows, so a scrolling thing sorts as it moves", () => {
     const half = localRow({ ...FRAME, phaseY: 0.5 }, { x: 0, y: 0 });
     expect(Number.isInteger(half)).toBe(false);
+  });
+});
+
+describe("standsOnField", () => {
+  it("gives the field everything whose foot is below the seam, and the roll the rest", () => {
+    // The regression: the field's last grid rows hang above the seam, and a
+    // rock row there stood full size over the roll with the sky behind it.
+    expect(standsOnField(FRAME.groundTop + 1, FRAME)).toBe(true);
+    expect(standsOnField(FRAME.groundTop, FRAME)).toBe(false);
+    expect(standsOnField(FRAME.groundTop - TILE_DEPTH, FRAME)).toBe(false);
+  });
+
+  it("agrees with localPlacement about where the roll begins", () => {
+    const onField = localPlacement(FRAME, { x: 0, y: FAR_EDGE - 0.25 });
+    const onRoll = localPlacement(FRAME, { x: 0, y: FAR_EDGE + 0.25 });
+    expect(standsOnField(onField.y, FRAME)).toBe(onField.scale === 1);
+    expect(onRoll.scale).toBeLessThan(1);
+    expect(standsOnField(onRoll.y, FRAME)).toBe(false);
   });
 });
 

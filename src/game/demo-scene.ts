@@ -143,7 +143,7 @@ export class DemoScene extends Phaser.Scene {
     trackScroll(this.odometer, this.hero.phase(), pose);
 
     this.ground.update(ctx);
-    this.rollGround.update(ctx);
+    this.rollGround.update(ctx, this.water.sizeScale());
     this.vegetation.update(ctx, this.grassPushers(ctx));
     this.scenery.update(ctx);
     this.hero.update(ctx);

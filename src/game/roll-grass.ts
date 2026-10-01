@@ -21,10 +21,10 @@ import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 /**
  * Rows past the seam over which the grass tufts are drawn on the lip.
  *
- * Past this the lip is more than four-fifths haze (`rollFog`) and a tuft is a
- * texel in five, so a blade there changes nothing anyone can see - while a
- * scanline out there crosses a hundred cells, and stamping their tufts was most
- * of the cost of a frame of lip.
+ * Past this a lip pixel spans a dozen texel rows and shows its tile's
+ * commonest colour more often than not (`distantShare`), so a blade there
+ * changes nothing anyone can see - while a scanline out there crosses a hundred
+ * cells, and stamping their tufts was most of the cost of a frame of lip.
  */
 export const TUFT_ROWS = 8;
 

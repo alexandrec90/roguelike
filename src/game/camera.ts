@@ -105,6 +105,20 @@ export function localPlacement(frame: CameraFrame, local: LocalPoint): Placement
 }
 
 /**
+ * Whether something standing with its foot on screen row `footY` is the
+ * field's to draw, rather than the horizon roll's.
+ *
+ * The field's grid runs a row or two past the seam so the scroll has a row to
+ * slide on; those rows are under the roll, not seen. Anything standing on them
+ * - a rock row - is drawn by the roll instead, at the roll's own scale
+ * (`roll-rock.ts`), so it rolls on rather than floating full size over the
+ * horizon. A foot exactly on the seam is the roll's: one owner per row, always.
+ */
+export function standsOnField(footY: number, frame: Pick<CameraFrame, "groundTop">): boolean {
+  return footY > frame.groundTop;
+}
+
+/**
  * The scroll, as a whole-pixel offset.
  *
  * Handed to a layer that has already laid its art out on the zero-phase grid, so

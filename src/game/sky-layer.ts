@@ -23,7 +23,7 @@
  *     sky gradient     dithered, zenith to horizon
  *     stars            at a bearing; fade in at dusk
  *     sun / moon       on the light's arc, in screen space like the light
- *     clouds           fBm at a bearing, drifting, lit from the sun's side
+ *     clouds           cumulus on two decks at a bearing, drifting (`sky-clouds.ts`)
  *     far ridge        seamless noise profile, hazed
  *     near ridge       the same, nearer and darker
  *

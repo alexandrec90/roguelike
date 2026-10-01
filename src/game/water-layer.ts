@@ -30,7 +30,7 @@ import { localFoot, localReach, scrollOffset, visibleLocal, type CameraFrame } f
 import type { FrameContext } from "./frame-context";
 import type { PixelCloud } from "./ink";
 import { PixelSurface } from "./pixel-surface";
-import { toLocal, type PlanetPose } from "./planet";
+import { fromLocal, toLocal, type LocalPoint, type PlanetPose } from "./planet";
 import type { ScreenPoint } from "./projection";
 import { createPuddle, puddleHolds, rainImpact, type Puddle } from "./puddles";
 import { createRippleField, spawnRipple, stepRipples, type RippleField } from "./ripples";
@@ -58,6 +58,42 @@ const MARGIN = 20;
 export interface Foot {
   readonly x: number;
   readonly y: number;
+}
+
+/**
+ * Every puddle within `reach` tiles, grown on the zero-phase grid at `scale`.
+ *
+ * The one recipe for where a puddle is and what shape it has: the horizon lip
+ * (`roll-water.ts`) grows its puddles here too, so the water it carries over
+ * the seam is the same water, pixel for pixel. `keep` passes over a site by its
+ * local position before its outline is traced - the lip's reach is a disc
+ * hundreds of puddles wide, and it can see a cone of it. `around` moves the
+ * swept disc's centre off the hero to a local point, so `reach` can be the
+ * radius of what is wanted rather than its distance from him.
+ */
+export function growPuddles(
+  frame: CameraFrame,
+  pose: PlanetPose,
+  reach: number,
+  scale: number,
+  options: { readonly keep?: (local: LocalPoint) => boolean; readonly around?: LocalPoint } = {},
+): Puddle[] {
+  const flat: CameraFrame = { ...frame, phaseX: 0, phaseY: 0 };
+  const centre = options.around === undefined ? pose : fromLocal(pose, options.around);
+  return puddlesNear(centre, reach).flatMap((site) => {
+    const local = toLocal(pose, site);
+    if (options.keep !== undefined && !options.keep(local)) {
+      return [];
+    }
+    const foot = localFoot(flat, local);
+    return createPuddle({
+      id: `${Math.round(site.x)}:${Math.round(site.y)}`,
+      centerX: foot.x,
+      centerY: foot.y,
+      radius: Math.max(2, site.size * scale),
+      seed: site.seed,
+    });
+  });
 }
 
 /** What stands over the water this frame. */
@@ -115,18 +151,13 @@ export class WaterLayer {
     }
     this.sampled = pose;
     this.bakedKey = "";
-    const flat: CameraFrame = { ...frame, phaseX: 0, phaseY: 0 };
-    this.puddles = puddlesNear(pose, reach).map((site) => {
-      const foot = localFoot(flat, toLocal(pose, site));
-      return createPuddle({
-        id: `${Math.round(site.x)}:${Math.round(site.y)}`,
-        centerX: foot.x,
-        centerY: foot.y,
-        radius: Math.max(2, site.size * this.scale),
-        seed: site.seed,
-      });
-    });
+    this.puddles = growPuddles(frame, pose, reach, this.scale);
     fillMask(this.mask, this.puddles);
+  }
+
+  /** How much the wet weather has swollen every puddle: the radius multiplier. */
+  sizeScale(): number {
+    return this.scale;
   }
 
   /** How hard it is raining (roughens reflections) and how soaked the ground is (sizes puddles). */
