@@ -79,7 +79,7 @@ export function sampleWaterScene(hours: number, count: number): PixelSpriteSourc
   const puddle = createPuddle({ id: "lab", centerX: 2, centerY: 4, radius: 15, seed: 0x9a7e });
   const field = fieldPatch(WATER_SCENE_FRAME, atmosphere.daylight);
   const ground = [...field, ...seeThrough(field, puddleSurface(puddle, sky))];
-  const hero = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, { facing: "front", flipX: false });
+  const hero = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose);
   const foot = { x: -3, y: puddle.centerY - puddle.radiusY + 1 };
   const holds = new Set(puddle.water.map((pixel) => `${pixel.x},${pixel.y}`));
   const wet = (cloud: PixelCloud): PixelCloud => cloud.filter((pixel) => holds.has(`${pixel.x},${pixel.y}`));

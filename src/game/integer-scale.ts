@@ -99,6 +99,31 @@ export function letterbox(
   };
 }
 
+/**
+ * A point in the page, as a logical pixel of the render target - the inverse
+ * of the upscale, for pointer input.
+ *
+ * Read off the canvas's on-page box rather than from the factor, so it stays
+ * right however the canvas got its size; the crop needs no special case,
+ * because an overflowing canvas simply has a box that starts off-page. Not
+ * rounded: aim is a direction, and a half pixel of it is still information.
+ */
+export function logicalPoint(
+  clientX: number,
+  clientY: number,
+  box: { readonly left: number; readonly top: number; readonly width: number; readonly height: number },
+  baseWidth: number,
+  baseHeight: number,
+): { readonly x: number; readonly y: number } {
+  if (box.width <= 0 || box.height <= 0) {
+    throw new Error("Canvas box must have a positive size");
+  }
+  return {
+    x: ((clientX - box.left) / box.width) * baseWidth,
+    y: ((clientY - box.top) / box.height) * baseHeight,
+  };
+}
+
 /** Centre horizontal overflow, but keep the horizon pinned to the top edge. */
 export function coverOffset(
   availableWidth: number,

@@ -12,11 +12,10 @@
 
 import { createPool, particleCloud, stepParticles, type ParticlePool } from "../fx/particles";
 import type { PixelCloud } from "../ink";
-import { HEADING_VECTOR } from "../keybindings";
 import type { LightSource } from "../lights";
 import { BLADE_SPAN, CAST, HERO_EQUIPPED, WALK } from "../models";
 import { solveModel, type SolvedPose } from "../rig";
-import { stepDurationMs, walkClipMs, type PlayerState } from "../player";
+import { facingYaw, stepDurationMs, walkClipMs, type PlayerState } from "../player";
 import { TILE_DEPTH, TILE_WIDTH } from "../projection";
 import { windAt, type WindOptions } from "../wind";
 import {
@@ -89,18 +88,18 @@ export class HeroLook {
   frame(input: LookInput): LookFrame {
     const { player } = input;
     const pose = layeredPose(tracksOf(player, input.elapsedMs));
-    const orient = { facing: player.facing, flipX: player.flipX };
+    // Turned, not mirrored: the eyes slide round the head with the turn itself,
+    // so there is no separate gaze to add.
+    const orient = { yaw: facingYaw(player.facing) };
     const skeleton = solveModel(HERO_EQUIPPED, pose, orient);
     this.stepScarf(skeleton, input);
 
-    const front = player.facing === "front";
     const figure = heroFigure(pose, {
       ...orient,
-      gaze: front ? HEADING_VECTOR[player.heading].dx : 0,
       enchanted: player.enchanted,
       timeMs: input.elapsedMs,
       light: { x: input.sun.light.x, y: input.sun.light.y, ambient: 0.24 },
-      extras: scarfPrims(this.scarf, depthOf(skeleton, front), SCARF_GROUP),
+      extras: scarfPrims(this.scarf, depthOf(skeleton, orient.yaw), SCARF_GROUP),
     });
 
     const blade = bladeOf(figure.solved);
@@ -181,7 +180,8 @@ function bladeOf(solved: SolvedPose): BladeSegment | undefined {
   return span === undefined ? undefined : { ax: span.a.x, ay: span.a.y, bx: span.b.x, by: span.b.y };
 }
 
-function depthOf(solved: SolvedPose, front: boolean): number {
+/** Behind his back, turned with him: behind the spine from the front, before it from behind. */
+function depthOf(solved: SolvedPose, yaw: number): number {
   const neck = solved["torso"]?.end.y ?? 0;
-  return front ? neck - SCARF_DEPTH : neck + SCARF_DEPTH;
+  return neck - SCARF_DEPTH * Math.cos(yaw);
 }

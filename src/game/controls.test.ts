@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  aimAt,
   createControls,
+  currentAim,
   heldHeading,
   isHeld,
   nextHeading,
@@ -19,6 +21,53 @@ import {
   wantsEnchant,
 } from "./controls";
 import { DEFAULT_KEYBINDINGS, type Keybindings } from "./keybindings";
+import { DEPTH_RATIO } from "./projection";
+
+describe("aiming", () => {
+  it("aims nowhere until the pointer first moves", () => {
+    expect(currentAim(createControls())).toBeUndefined();
+  });
+
+  it("aims at the cursor, and keeps aiming there once it stops moving", () => {
+    const controls = createControls();
+    aimAt(controls, 0, 40);
+    expect(currentAim(controls)).toBe("south");
+    expect(currentAim(controls)).toBe("south");
+    aimAt(controls, -30, -30);
+    expect(currentAim(controls)).toBe("northwest");
+  });
+
+  it("measures the diagonal on the ground, not on the foreshortened screen", () => {
+    const controls = createControls();
+    // Equal on the ground is squashed on screen: this reads as a true diagonal.
+    aimAt(controls, 20, 20 * DEPTH_RATIO);
+    expect(currentAim(controls)).toBe("southeast");
+    // 10 across and 20 down is 63 degrees on screen - south-east, read naively -
+    // but 26.7 down on the ground, which is past the 67.5 boundary into south.
+    aimAt(controls, 10, 20);
+    expect(currentAim(controls)).toBe("south");
+  });
+
+  it("keeps its aim with the cursor dead on his chest", () => {
+    const controls = createControls();
+    aimAt(controls, 5, 0);
+    aimAt(controls, 0, 0);
+    expect(currentAim(controls)).toBe("east");
+  });
+
+  it("survives the window losing focus, because nothing was held", () => {
+    const controls = createControls();
+    aimAt(controls, -5, 0);
+    releaseAll(controls);
+    expect(currentAim(controls)).toBe("west");
+  });
+
+  it("does not move the legs", () => {
+    const controls = createControls();
+    aimAt(controls, 10, 0);
+    expect(nextHeading(controls)).toBeUndefined();
+  });
+});
 
 describe("holding a direction", () => {
   it("holds it until it is released", () => {

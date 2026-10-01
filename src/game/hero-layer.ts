@@ -31,7 +31,9 @@ import Phaser from "phaser";
 
 import type { Strike } from "./combat";
 import {
+  aimAt,
   createControls,
+  currentAim,
   nextHeading,
   pressButton,
   pressKey,
@@ -47,6 +49,7 @@ import {
   wantsCast,
   wantsFrost,
   wantsEnchant,
+  type ControlState,
 } from "./controls";
 import type { FrameContext } from "./frame-context";
 import { castEvent, swingStrike, type CastEvent } from "./hero/hero-actions";
@@ -54,6 +57,7 @@ import { heroFigure } from "./hero/hero-figure";
 import { HeroLook } from "./hero/hero-look";
 import type { ShadowLight } from "./hero/hero-shadow";
 import type { PixelCloud } from "./ink";
+import { logicalPoint } from "./integer-scale";
 import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED } from "./models";
 import { PixelSurface } from "./pixel-surface";
@@ -115,6 +119,8 @@ export class HeroLayer {
   private driven = false;
   private lastElapsedMs = 0;
   private lastDeltaMs = 0;
+  /** Half his height: where on him the aim is measured from. */
+  private readonly chestHeight = heroHeight() / 2;
 
   constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
     this.player = createPlayer(start);
@@ -157,6 +163,7 @@ export class HeroLayer {
       this.player,
       {
         heading: nextHeading(this.controls),
+        aim: currentAim(this.controls),
         attack: wantsAttack(this.controls),
         cast: wantsCast(this.controls),
         frost: wantsFrost(this.controls),
@@ -168,11 +175,12 @@ export class HeroLayer {
     this.player = tick.player;
     this.spend(tick);
     const at = scrollPhase(this.player);
+    // A blow or a spell goes where he points, not where he walks: twin-stick.
     if (tick.struck) {
-      this.strikes.push(swingStrike(this.player.heading, at, this.player.enchanted));
+      this.strikes.push(swingStrike(this.player.facing, at, this.player.enchanted));
     }
     if (tick.released) {
-      this.casts.push(castEvent(this.player.heading, at, this.player.school));
+      this.casts.push(castEvent(this.player.facing, at, this.player.school));
     }
     this.lastElapsedMs = elapsedMs;
     this.lastDeltaMs = step;
@@ -342,7 +350,13 @@ export class HeroLayer {
 
     // Right-click is the cast, so the context menu is in the way.
     scene.input.mouse?.disableContextMenu();
+    // Aim is taken from his chest, not his feet, so the cursor on his body is on centre.
+    const chest = (): Foot => ({ x: this.foot.x, y: this.foot.y - this.chestHeight });
+    scene.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      aimFrom(this.controls, pointer, scene, chest());
+    });
     scene.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      aimFrom(this.controls, pointer, scene, chest());
       pressButton(this.controls, mouseButtonOf(pointer.button));
     });
     scene.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
@@ -352,4 +366,27 @@ export class HeroLayer {
     // A key released while the tab is in the background never sends its keyup.
     scene.game.events.on(Phaser.Core.Events.BLUR, () => releaseAll(this.controls));
   }
+
+}
+
+/**
+ * Point the aim at the cursor, measured from `from`.
+ *
+ * The page position is mapped back through the canvas's own box rather than
+ * read from Phaser's pointer coordinates: the canvas is sized by CSS under
+ * `Scale.NONE`, so Phaser's idea of the display scale is not the one to trust.
+ */
+function aimFrom(controls: ControlState, pointer: Phaser.Input.Pointer, scene: Phaser.Scene, from: Foot): void {
+  const event = pointer.event;
+  if (!("clientX" in event)) {
+    return;
+  }
+  const at = logicalPoint(
+    event.clientX,
+    event.clientY,
+    scene.game.canvas.getBoundingClientRect(),
+    scene.scale.width,
+    scene.scale.height,
+  );
+  aimAt(controls, at.x - from.x, at.y - from.y);
 }
