@@ -76,8 +76,14 @@ const HEAD_MASK = maskFromRows([
   ".###.",
 ]);
 
-/** Front-only: the one detail that tells front from back, per the contract. */
-const EYES_MASK = maskFromRows(["#.#"]);
+/**
+ * One eye, stamped twice. Front-only, and the one detail that tells front from
+ * back: each sits a pixel either side of centre and a little proud of the face,
+ * so turning slides the pair across the head - both from the front, shifted on
+ * a three-quarter view, one in profile, none from behind.
+ */
+const EYE_MASK = maskFromRows(["#"]);
+const EYE_OUT = 1.2;
 
 /**
  * The adventurer's outfit, as bodies on bones: blue tunic belted in leather, a
@@ -160,13 +166,25 @@ export const HERO_MODEL: RigModel = {
     },
     {
       kind: "stamp",
-      id: "eyes",
+      id: "eye-l",
       bone: "head",
       at: "end",
-      mask: EYES_MASK,
-      anchor: { x: 1, y: 0 },
+      mask: EYE_MASK,
+      anchor: { x: 0, y: 0 },
       ink: "void",
       facing: "front",
+      offset: vec3(-1, EYE_OUT, 0),
+    },
+    {
+      kind: "stamp",
+      id: "eye-r",
+      bone: "head",
+      at: "end",
+      mask: EYE_MASK,
+      anchor: { x: 0, y: 0 },
+      ink: "void",
+      facing: "front",
+      offset: vec3(1, EYE_OUT, 0),
     },
   ],
 };
@@ -240,8 +258,8 @@ export const IDLE: Clip = {
 
 /**
  * Walking happens *along the depth axis*: authored facing the camera, the
- * stride swings each leg through y, so played with `back` facing the same
- * clip walks away up the screen, and `flipX` mirrors it for left/right.
+ * stride swings each leg through y, so the same clip played at any `yaw`
+ * strides the way he is facing - away up the screen, or across it in profile.
  */
 export const WALK: Clip = {
   id: "walk",

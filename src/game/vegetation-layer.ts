@@ -43,6 +43,7 @@ import { sharedGroundSample } from "./ground/ground-sample";
 import {
   inWater,
   placeTufts,
+  swayBend,
   windBetween,
   windGrid,
   type TuftPlacement,
@@ -58,10 +59,6 @@ import { windAt, type WindOptions } from "./wind";
 
 export const TUFT_TEXTURE = "grass-tufts";
 
-/** Bend levels per unit of `windAt`: a normal gust bends the tips two or three pixels. */
-const WIND_GAIN = 4;
-/** A little private sway, so a lull is not a freeze. */
-const IDLE_SWAY = 0.45;
 /** Tufts within this many tiles of a pusher lean away from it. */
 const PUSH_RADIUS = 1.2;
 /** How often bare ground (a scorch, say) is re-read: it changes on a scale of seconds. */
@@ -244,7 +241,7 @@ export class VegetationLayer {
     pushers: readonly GrassPusher[],
   ): number {
     const gust = this.wind === undefined ? 0 : windBetween(this.wind, tuft.windU, tuft.windV);
-    let bend = gust * WIND_GAIN * tuft.flex + Math.sin(elapsedMs * 0.0021 + tuft.phase) * IDLE_SWAY;
+    let bend = swayBend(tuft, gust, elapsedMs);
     for (const pusher of pushers) {
       const dx = (left + tuft.x - pusher.x) / TILE_WIDTH;
       const dy = (top + tuft.y - pusher.y) / TILE_DEPTH;

@@ -1,13 +1,13 @@
 /**
- * Painting the band above the horizon into a pixel buffer — the pure half of
- * `sky-layer.ts`, so what the sky looks like at an hour is testable without a
- * canvas. See that file for what each part is and why.
+ * Painting the sky above the horizon line into a pixel buffer — the pure half
+ * of `sky-layer.ts`, so what the sky looks like at an hour is testable without
+ * a canvas. See that file for what each part is and why. The ground on the
+ * roll below the line is `roll-ground.ts`; only its haze colour is decided here.
  */
 
 import type { Atmosphere } from "./atmosphere";
-import { hexToRgb, mixHex, rgbToHex, type Rgb } from "./color";
-import { rollBands, starField, type HorizonLayout, type Star } from "./horizon";
-import { INK_COLORS } from "./ink";
+import { hexToRgb, mixHex, type Rgb } from "./color";
+import { starField, type HorizonLayout, type Star } from "./horizon";
 import { panoramaColumn, panoramaRidge, PANORAMA_WIDTH, wrapPanorama } from "./panorama";
 import type { PixelBuffer } from "./pixel-buffer";
 import { fbm3 } from "./procgen/noise";
@@ -15,9 +15,6 @@ import { ditherThreshold } from "./shading";
 
 const RIDGE_FAR = { seed: 7, base: 3, amplitude: 3, wavelength: 55 } as const;
 const RIDGE_NEAR = { seed: 21, base: 1, amplitude: 3, wavelength: 26 } as const;
-
-/** Ground on the roll starts as grass and dissolves into the haze. */
-const ROLL_GRASS = INK_COLORS["grass-3"];
 
 export class SkyPainter {
   private readonly stars: readonly Star[];
@@ -61,7 +58,6 @@ export class SkyPainter {
     this.paintClouds(atmosphere, offset, drift);
     this.paintRidges(atmosphere, offset);
     this.unlight(atmosphere.ambient);
-    this.paintRoll(atmosphere);
   }
 
   /**
@@ -220,30 +216,24 @@ export class SkyPainter {
     }
   }
 
-  /** The ground curving away: grass near, haze at the horizon, dithered between. */
-  private paintRoll(atmosphere: Atmosphere): void {
-    // The haze is air, not ground: divided like the sky, so the far roll meets
-    // the horizon in the sky's own colour once the lighting pass has run.
-    const light = hexToRgb(atmosphere.ambient);
-    const air = hexToRgb(atmosphere.haze);
-    const haze = rgbToHex({
-      r: Math.min(255, (air.r * 255) / Math.max(light.r, 1)),
-      g: Math.min(255, (air.g * 255) / Math.max(light.g, 1)),
-      b: Math.min(255, (air.b * 255) / Math.max(light.b, 1)),
-    });
-    const near = mixHex(ROLL_GRASS, haze, 0.2);
-    for (const band of rollBands(this.layout.rollHeight)) {
-      const t = Math.min(1, band.row / 20);
-      const colour = hexToRgb(mixHex(near, haze, t ** 0.7));
-      const deeper = hexToRgb(mixHex(near, haze, Math.min(1, (t + 0.08) ** 0.7)));
-      for (let dy = 0; dy < band.height; dy += 1) {
-        const y = this.layout.horizonY + band.y + dy;
-        for (let x = 0; x < this.width; x += 1) {
-          this.put(x, y, ditherThreshold(x, y) < 0.5 ? colour : deeper);
-        }
-      }
-    }
-  }
+}
+
+/**
+ * The air at the horizon, divided by the ambient it is about to be multiplied by.
+ *
+ * The haze the far ground dissolves into is air, not ground: the ground on the
+ * roll (`roll-ground.ts`) is lit like the field, but its haze has to meet the
+ * horizon in the sky's own colour once the lighting pass has run - the same
+ * pre-division `unlight` gives the sky, clamped where the ambient cannot reach.
+ */
+export function unlitHaze(atmosphere: Atmosphere): Rgb {
+  const light = hexToRgb(atmosphere.ambient);
+  const air = hexToRgb(atmosphere.haze);
+  return {
+    r: Math.min(255, Math.round((air.r * 255) / Math.max(light.r, 1))),
+    g: Math.min(255, Math.round((air.g * 255) / Math.max(light.g, 1))),
+    b: Math.min(255, Math.round((air.b * 255) / Math.max(light.b, 1))),
+  };
 }
 
 /** Radius of the circle the cloud noise is read around, in noise units. */

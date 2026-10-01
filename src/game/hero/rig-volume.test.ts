@@ -35,7 +35,7 @@ describe("modelPrims", () => {
       volumes: { torso: [{ from: 0.5, radius: 1, material: "gold", offset: vec3(0, 2, 0) }] },
     };
     const front = modelPrims(model, solveModel(model, BASE))[0];
-    const back = modelPrims(model, solveModel(model, BASE, { facing: "back" }), { facing: "back" })[0];
+    const back = modelPrims(model, solveModel(model, BASE, { yaw: Math.PI }), { yaw: Math.PI })[0];
     expect(front?.da).toBeGreaterThan(0);
     expect(back?.da).toBeLessThan(0);
   });
@@ -63,16 +63,25 @@ describe("renderVolume", () => {
   it("draws eyes from the front only, and only when a face is asked for", () => {
     const eyes = (cloud: { ink: string }[]) => cloud.filter((p) => p.ink === HERO_FACE.ink).length;
     const front = renderVolume(HERO_EQUIPPED, BASE, { face: HERO_FACE }).cloud;
-    const back = renderVolume(HERO_EQUIPPED, BASE, { face: HERO_FACE, facing: "back" }).cloud;
+    const back = renderVolume(HERO_EQUIPPED, BASE, { face: HERO_FACE, yaw: Math.PI }).cloud;
     const faceless = renderVolume(HERO_EQUIPPED, BASE).cloud;
     expect(eyes(front) - eyes(faceless)).toBe(2);
-    expect(eyes(back)).toBe(eyes(renderVolume(HERO_EQUIPPED, BASE, { facing: "back" }).cloud));
+    expect(eyes(back)).toBe(eyes(renderVolume(HERO_EQUIPPED, BASE, { yaw: Math.PI }).cloud));
+  });
+
+  it("turns the eyes with the head: one in profile, both on a three-quarter view", () => {
+    const eyes = (yaw: number) =>
+      renderVolume(HERO_EQUIPPED, BASE, { face: HERO_FACE, yaw }).cloud.filter((p) => p.ink === HERO_FACE.ink).length -
+      renderVolume(HERO_EQUIPPED, BASE, { yaw }).cloud.filter((p) => p.ink === HERO_FACE.ink).length;
+    expect(eyes(Math.PI / 2)).toBeLessThanOrEqual(1);
+    expect(eyes(-Math.PI / 2)).toBeLessThanOrEqual(1);
+    expect(eyes(Math.PI / 4)).toBeGreaterThanOrEqual(1);
   });
 
   it("shows more hair from behind than from the front", () => {
     const hair = (cloud: { ink: string }[]) => cloud.filter((p) => p.ink.startsWith("hair")).length;
     const front = renderVolume(HERO_EQUIPPED, BASE).cloud;
-    const back = renderVolume(HERO_EQUIPPED, BASE, { facing: "back" }).cloud;
+    const back = renderVolume(HERO_EQUIPPED, BASE, { yaw: Math.PI }).cloud;
     expect(hair(back)).toBeGreaterThan(hair(front) * 1.5);
   });
 

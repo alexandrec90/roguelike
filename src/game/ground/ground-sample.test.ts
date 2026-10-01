@@ -6,6 +6,7 @@ import {
   cellTerrain,
   DIRT,
   GRASS,
+  lazyGroundSample,
   planetHash,
   ROCK,
   sampleGround,
@@ -70,5 +71,59 @@ describe("the ground lattice", () => {
     expect(planetHash(10.1, 20.2)).toBe(planetHash(10.1, 20.2));
     expect(planetHash(10, 20)).not.toBe(planetHash(10.5, 20));
     expect(planetHash(10, 20)).not.toBe(planetHash(10, 20.5));
+  });
+});
+
+describe("the lattice read on demand", () => {
+  const WIDE = { minX: -30, maxX: 30, minY: 4, maxY: 40 };
+  const previous = sampleGround(POSE, BOUNDS);
+  const full = sampleGround(POSE, WIDE, previous);
+
+  function node(sample: typeof full, a: number, b: number): readonly number[] {
+    const index = b * sample.latticeWidth + a;
+    return [
+      sample.terrain[index] ?? -1,
+      sample.hashes[index] ?? -1,
+      sample.planetX[index] ?? -1,
+      sample.planetY[index] ?? -1,
+    ];
+  }
+
+  it("reads exactly the nodes the whole sample reads, around each cell it is asked about", () => {
+    const lazy = lazyGroundSample(POSE, WIDE, previous);
+    const cells = [
+      [0, 5],
+      [-30, 4],
+      [30, 40],
+      [12, 22],
+    ] as const;
+    for (const [x, y] of cells) {
+      lazy.readAround(x, y);
+      const a = (x - WIDE.minX) * 2;
+      const b = (y - WIDE.minY) * 2;
+      for (let nb = Math.max(b - 2, 0); nb <= Math.min(b + 4, full.latticeHeight - 1); nb += 1) {
+        for (let na = Math.max(a - 2, 0); na <= Math.min(a + 4, full.latticeWidth - 1); na += 1) {
+          expect(node(lazy.sample, na, nb)).toEqual(node(full, na, nb));
+        }
+      }
+      expect(cellTerrain(lazy.sample, x, y)).toBe(cellTerrain(full, x, y));
+    }
+  });
+
+  it("inherits the field's hashes where the two overlap, so the seam is one tile", () => {
+    const lazy = lazyGroundSample(POSE, WIDE, previous);
+    lazy.readAround(0, 5);
+    // Local (0, 5) is inside BOUNDS: its centre node is a node of `previous` too.
+    const here = lazy.sample.hashes[(5 - WIDE.minY) * 2 * lazy.sample.latticeWidth + (0 - WIDE.minX) * 2 + 1];
+    const there = previous.hashes[(5 - BOUNDS.minY) * 2 * previous.latticeWidth + (0 - BOUNDS.minX) * 2 + 1];
+    expect(here).toBe(there);
+  });
+
+  it("leaves a node nobody asked about unread", () => {
+    const lazy = lazyGroundSample(POSE, WIDE, previous);
+    lazy.readAround(0, 5);
+    const far = (lazy.sample.latticeHeight - 1) * lazy.sample.latticeWidth;
+    expect(lazy.sample.planetX[far]).toBe(0);
+    expect(lazy.sample.hashes[far]).toBe(0);
   });
 });

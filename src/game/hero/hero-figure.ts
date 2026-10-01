@@ -5,12 +5,13 @@
  */
 
 import { CAST, HERO_EQUIPPED, HERO_FACE, IDLE, SWING, WALK } from "../models";
-import { samplePose, type Facing, type RigPose } from "../rig";
+import { samplePose, type RigPose } from "../rig";
 import { renderVolume, type VolumeRender } from "./rig-volume";
 import type { RasterLight, ScreenPrim } from "./volume-raster";
 
 export interface FigureOptions {
-  readonly facing?: Facing;
+  /** The turn about his vertical axis — `facingYaw(heading)` for one of the eight. */
+  readonly yaw?: number;
   readonly flipX?: boolean;
   /** -1..1, which way across the screen he is looking. */
   readonly gaze?: number;
@@ -29,7 +30,7 @@ const BLADE_SEED = 0xb1ade;
 export function heroFigure(pose: RigPose, options: FigureOptions = {}): VolumeRender {
   const enchanted = options.enchanted === true;
   return renderVolume(HERO_EQUIPPED, pose, {
-    facing: options.facing,
+    yaw: options.yaw,
     flipX: options.flipX,
     gaze: options.gaze,
     light: options.light,

@@ -27,6 +27,7 @@ import {
   DIRECTION_AXES,
   HEADING_VECTOR,
   headingOf,
+  headingToward,
   type Command,
   type Direction,
   type GameAction,
@@ -34,6 +35,7 @@ import {
   type Keybindings,
   type MouseButton,
 } from "./keybindings";
+import { DEPTH_RATIO } from "./projection";
 
 export interface ControlState {
   readonly bindings: Keybindings;
@@ -63,6 +65,14 @@ export interface ControlState {
    * up-right even when neither key survives to the next `update`.
    */
   queuedHeading: Heading | undefined;
+  /**
+   * Where the player is pointing - the second stick, which is the mouse.
+   *
+   * `undefined` until the pointer first moves, so a keyboard-only player still
+   * faces where he walks; from then on it holds the last direction pointed,
+   * because a cursor that has stopped moving is still pointing somewhere.
+   */
+  aim: Heading | undefined;
 }
 
 export function createControls(bindings: Keybindings = DEFAULT_KEYBINDINGS): ControlState {
@@ -73,7 +83,24 @@ export function createControls(bindings: Keybindings = DEFAULT_KEYBINDINGS): Con
     sequence: 0,
     queued: new Set(),
     queuedHeading: undefined,
+    aim: undefined,
   };
+}
+
+/**
+ * Point the aim along a screen-pixel offset from the hero's chest.
+ *
+ * The offset is un-foreshortened first: the screen squashes depth by
+ * `DEPTH_RATIO`, so a cursor that *looks* diagonal on screen is further ahead
+ * on the ground than it is across, and the sectors are drawn on the ground. An
+ * offset of zero - the cursor on his chest - keeps the aim it had.
+ */
+export function aimAt(state: ControlState, dx: number, dy: number): void {
+  state.aim = headingToward(dx, dy / DEPTH_RATIO) ?? state.aim;
+}
+
+export function currentAim(state: ControlState): Heading | undefined {
+  return state.aim;
 }
 
 /** True when the input was bound — the caller's cue to `preventDefault` it. */
@@ -104,7 +131,8 @@ export function releaseButton(state: ControlState, button: MouseButton | undefin
  *
  * A key released while the tab is in the background never sends its `keyup`, so
  * without this the hero walks into a wall forever after an alt-tab. The queued
- * attack goes too: it was pressed before the player looked away.
+ * attack goes too: it was pressed before the player looked away. The aim stays -
+ * it is a position, not a press, and nothing was left held down.
  */
 export function releaseAll(state: ControlState): void {
   state.held.clear();

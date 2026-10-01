@@ -44,9 +44,9 @@ describe("sampleClipFrames", () => {
     expect(settled).toHaveLength(1);
   });
 
-  it("passes facing and flipX through to the renderer", () => {
+  it("passes the render options through to the renderer", () => {
     const front = sampleClipFrames(HERO_EQUIPPED, IDLE, 1);
-    const back = sampleClipFrames(HERO_EQUIPPED, IDLE, 1, { facing: "back" });
+    const back = sampleClipFrames(HERO_EQUIPPED, IDLE, 1, { yaw: Math.PI });
     expect(front[0]?.rows.join("\n")).not.toBe(back[0]?.rows.join("\n"));
   });
 

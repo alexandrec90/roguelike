@@ -5,7 +5,15 @@ import { demoTerrain, syntheticSample } from "./field-preview";
 import { dirtOf } from "./ground-plan";
 import { cellTerrain, ROCK } from "./ground-sample";
 import { pathCover } from "./ground-tiles";
-import { inWater, placeTufts, windBetween, windGrid, WIND_SPACING } from "./tuft-placement";
+import {
+  inWater,
+  placeTufts,
+  swayBend,
+  tuftsInCell,
+  windBetween,
+  windGrid,
+  WIND_SPACING,
+} from "./tuft-placement";
 import { TUFT_SHAPES } from "./tufts";
 
 const sample = syntheticSample(14, 9, demoTerrain);
@@ -51,6 +59,54 @@ describe("tuft placement", () => {
 
   it("uses more than a couple of shapes across a field", () => {
     expect(new Set(tufts.map((tuft) => tuft.shape)).size).toBeGreaterThan(5);
+  });
+
+  it("answers cell by cell exactly what it answers for the whole grid", () => {
+    const { bounds } = sample;
+    const byCell = [];
+    for (let localY = bounds.maxY; localY >= bounds.minY; localY -= 1) {
+      for (let localX = bounds.minX; localX <= bounds.maxX; localX += 1) {
+        byCell.push(...tuftsInCell(sample, localX, localY));
+      }
+    }
+    expect(byCell).toEqual(tufts);
+  });
+
+  it("grows nothing in a rock cell", () => {
+    const { bounds } = sample;
+    let rocks = 0;
+    for (let localY = bounds.minY; localY <= bounds.maxY; localY += 1) {
+      for (let localX = bounds.minX; localX <= bounds.maxX; localX += 1) {
+        if (cellTerrain(sample, localX, localY) === ROCK) {
+          rocks += 1;
+          expect(tuftsInCell(sample, localX, localY)).toEqual([]);
+        }
+      }
+    }
+    expect(rocks).toBeGreaterThan(0);
+  });
+});
+
+describe("a tuft's sway", () => {
+  const tuft = tufts[0]!;
+
+  it("leans with the gust, harder for a more flexible tuft", () => {
+    const still = swayBend(tuft, 0, 0);
+    expect(swayBend(tuft, 0.5, 0)).toBeGreaterThan(still);
+    expect(swayBend(tuft, -0.5, 0)).toBeLessThan(still);
+    const stiff = { ...tuft, flex: 0.5 };
+    const supple = { ...tuft, flex: 1.2 };
+    expect(swayBend(supple, 0.5, 0) - swayBend(supple, 0, 0)).toBeGreaterThan(
+      swayBend(stiff, 0.5, 0) - swayBend(stiff, 0, 0),
+    );
+  });
+
+  it("keeps a small private sway in a dead calm, so a lull is not a freeze", () => {
+    const samples = [0, 400, 800, 1200, 1600].map((ms) => swayBend(tuft, 0, ms));
+    expect(new Set(samples).size).toBeGreaterThan(1);
+    for (const bend of samples) {
+      expect(Math.abs(bend)).toBeLessThan(1);
+    }
   });
 });
 

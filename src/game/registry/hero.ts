@@ -11,7 +11,8 @@
 import { AUTHORED, type AssetEntry, type PaletteVariant } from "../asset-types";
 import { heroFigure, layeredPose, type FigureOptions } from "../hero/hero-figure";
 import { HeroLook } from "../hero/hero-look";
-import { createPlayer, STEP_MS, type PlayerState } from "../player";
+import type { Heading } from "../keybindings";
+import { createPlayer, facingYaw, STEP_MS, type PlayerState } from "../player";
 import { cloudToSprite, INK_COLORS, INK_TOKENS, type CloudFrame, type InkId, type PixelCloud } from "../ink";
 import { CAST, SWING, WALK, IDLE } from "../models";
 import type { PixelSpriteSource } from "../pixel-art";
@@ -70,7 +71,22 @@ function fitted(variant: PaletteVariant, list: readonly PixelSpriteSource[]): Pa
   return { ...variant, overrides };
 }
 
-const DUSK_SUN = { light: { x: 0.82, y: -0.57 }, elevation: 0.3 };
+/** Facing away: the rig turned half round, never a drawing of his back. */
+const BACK: FigureOptions = { yaw: facingYaw("north") };
+
+/** Clockwise from facing the viewer, so the filmstrip plays as one slow turn. */
+const COMPASS: readonly Heading[] = [
+  "south",
+  "southeast",
+  "east",
+  "northeast",
+  "north",
+  "northwest",
+  "west",
+  "southwest",
+];
+
+const DUSK_SUN ={ light: { x: 0.82, y: -0.57 }, elevation: 0.3 };
 
 /**
  * Frames of the whole look — body, scarf, trail, flames, shadow — by driving
@@ -113,7 +129,7 @@ function walkingAt(heading: "east" | "north") {
   return (ms: number): PlayerState => ({
     ...STAND,
     heading,
-    facing: heading === "north" ? "back" : "front",
+    facing: heading,
     motion: "step",
     gait,
     motionMs: ms % STEP_MS,
@@ -135,14 +151,18 @@ export const HERO_ASSETS: readonly AssetEntry[] = [
     "Volumetric rig: capsules and spheres on the bones, lit per pixel from their normals, " +
       "nearest surface wins, selective outline. Nothing drawn but the two eyes.",
   ),
-  entry("hero-body-idle-back", "Hero body — idle, back", frames(8, idle, { facing: "back" }), 175,
-    "Same spheres, depth negated: the hair sphere is now the nearer one, so it is the back of his head."),
+  entry("hero-body-idle-back", "Hero body — idle, back", frames(8, idle, BACK), 175,
+    "Same spheres, turned half round: the hair sphere is now the nearer one, so it is the back of his head."),
+  entry("hero-facings", "Hero body — eight facings", COMPASS.flatMap((facing) => frames(1, idle, { yaw: facingYaw(facing) })), 400,
+    "One skeleton turned an eighth at a time, clockwise from facing the viewer. No view was drawn: " +
+      "the eyes slide round the head and hide behind it, and the sword never changes hands."),
   entry("hero-body-walk", "Hero body — walk, front", frames(8, walk), 80, "WALK on the volumetric rig."),
-  entry("hero-body-walk-side", "Hero body — walk, east", frames(8, walk, { gaze: 1 }), 80,
-    "Front view with the eyes slid toward the heading — how east reads without a side drawing."),
-  entry("hero-body-walk-back", "Hero body — walk, back", frames(8, walk, { facing: "back" }), 80, "WALK, back facing."),
+  entry("hero-body-walk-side", "Hero body — walk, east", frames(8, walk, { yaw: facingYaw("east") }), 80,
+    "The same clip turned a quarter: a true profile, one eye showing, striding across the screen."),
+  entry("hero-body-walk-back", "Hero body — walk, back", frames(8, walk, BACK), 80,
+    "WALK turned half round: the sword stays in the same hand, so it crosses to the other side of the screen."),
   entry("hero-body-swing", "Hero body — swing", frames(8, swing), 65, "SWING: windup behind the head, contact in front."),
-  entry("hero-body-swing-back", "Hero body — swing, back", frames(8, swing, { facing: "back" }), 65, "SWING, back facing."),
+  entry("hero-body-swing-back", "Hero body — swing, back", frames(8, swing, BACK), 65, "SWING, turned half round."),
   entry("hero-body-cast", "Hero body — cast", frames(8, cast), 88, "CAST: gather, release at t=0.55."),
   entry("hero-body-flaming", "Hero body — flaming blade", frames(8, idle, { enchanted: true }), 90,
     "Enchanted: the sword bone re-inked to the fire ramp and self-lit from noise."),

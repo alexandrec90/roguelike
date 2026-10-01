@@ -13,6 +13,7 @@ import type { MapOverlay } from "./map-overlay";
 import { createOdometer, trackScroll } from "./odometer";
 import type { PlanetPoint, PlanetPose } from "./planet";
 import type { ScreenPoint } from "./projection";
+import { RollGroundLayer } from "./roll-ground-layer";
 import { DEFAULT_SCENE_OPTIONS, type SceneOptions } from "./scene-options";
 import { SceneryLayer } from "./scenery-layer";
 import { SkyLayer } from "./sky-layer";
@@ -62,6 +63,7 @@ export class DemoScene extends Phaser.Scene {
 
   private readonly hero: HeroLayer;
   private readonly sky = new SkyLayer();
+  private readonly rollGround = new RollGroundLayer();
   private readonly ground = new GroundLayer();
   private readonly vegetation = new VegetationLayer();
   private readonly scenery = new SceneryLayer();
@@ -94,6 +96,7 @@ export class DemoScene extends Phaser.Scene {
     this.relayout();
 
     this.sky.create(this, this.layout, WIDTH);
+    this.rollGround.create(this, this.frame(), WIDTH, this.bounds);
     this.hero.create(this, this.layout.groundTop, this.anchor);
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
@@ -140,6 +143,7 @@ export class DemoScene extends Phaser.Scene {
     trackScroll(this.odometer, this.hero.phase(), pose);
 
     this.ground.update(ctx);
+    this.rollGround.update(ctx);
     this.vegetation.update(ctx, this.grassPushers(ctx));
     this.scenery.update(ctx);
     this.hero.update(ctx);
@@ -251,6 +255,7 @@ export class DemoScene extends Phaser.Scene {
     }
     this.hero.setAnchor(this.anchor);
     this.ground.layout(flat, this.bounds);
+    this.rollGround.layout(flat, this.bounds);
     this.vegetation.layout(flat, this.bounds);
     this.scenery.layout(this.bounds, WIDTH);
   }

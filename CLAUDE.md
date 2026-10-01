@@ -15,7 +15,7 @@ Three parts of that, so an agent can tell what exists from what is intended:
 | --- | --- |
 | **Movement** | **Built.** Eight-way, from any two of the four bound directions held at once (`controls.ts` reads one winner per axis and sums them). A press still commits one whole tile of walking that runs to completion, and a diagonal is given √2 the time so it is not a 41%-faster shortcut. On a round planet a diagonal is the two gaits walked together — forward *and* strafe — rather than a fifth direction, so it turns the world exactly as a sideways step does. |
 | **Acting while moving** | **Built.** Locomotion and the swing are **two timers over one skeleton**, aged independently in `player.ts` — an attack never costs a step and a step never delays an attack. Every action added later belongs on its own track for the same reason; the moment two of them share an enum, one of them starts waiting. |
-| **Aim** | **The direction, not yet built.** Facing currently follows movement, out of four drawings — front, its mirror, back, its mirror — so all eight headings read. Aim becomes a second axis pair (right stick, or the mouse) bound in `keybindings.ts` exactly like the first, and the day it lands, facing reads *it* instead of the heading. Nothing outside `player.ts` should assume the two agree. |
+| **Aim** | **Built, for the mouse.** The cursor, measured from the hero's chest and un-foreshortened onto the ground, snaps to the nearest of eight headings (`controls.ts` `aimAt`), and facing reads *it* rather than the heading — so he can walk north while facing south. Until the pointer first moves, facing follows movement, so a keyboard-only player still faces where he walks. Each of the eight facings is the one rig **turned** about its vertical axis (`facingYaw`), not a drawing or a mirror, so the sword stays in the same hand from every side. A right stick is still to come, as a second axis pair in `keybindings.ts`. Nothing outside `player.ts` should assume aim and heading agree. |
 
 **Responsiveness is a contract, not a polish pass.** Three rules hold the feel, and each
 is one an ordinary refactor breaks by accident:
@@ -63,7 +63,8 @@ without a human redrawing anything.
 Four things already built are the load-bearing ones. Build *on* them, not around them:
 
 - **Characters are skeletons, not drawings.** `rig.ts` poses bones in 3D; `models.ts`
-  dresses them. Limbs animate independently, and facing left or away is a flag.
+  dresses them. Limbs animate independently, and facing any of eight ways is a turn of
+  the skeleton (`yaw`), never another drawing.
 - **Gear is modular and animates for free.** A sword is a `bone` part that extends the
   arm, so it tracks every clip that already exists; a hat is a `stamp`; armour is a
   `reink`. Putting a new weapon in the hero's hand is one entry, never a redraw.
@@ -96,10 +97,10 @@ animating) and `.claude/rules/procedural-effects.md` (simulating).
 | Camera | A **pitched-back overhead** view, not a 45°-yaw diamond isometric: rows and columns stay axis-aligned and only the vertical axis is foreshortened. A 16×16 world square lands on 16×12 of screen, and height rises straight up the screen by `WALL_RISE`, which is what makes walls stand. `src/game/projection.ts` owns that math; nothing else re-derives it. The camera is **bolted to the hero and turns with him** — he never moves on screen, the planet moves under him (`src/game/camera.ts`). |
 | Grid | 16×16 tiles, and **the grid belongs to the screen, not to the world**: the planet has no lattice, so a turning camera never puts a tile on a diagonal. Author ground art **already foreshortened** — 16×`TILE_DEPTH` for anything lying on the ground, 16×`WALL_RISE` for anything standing up — so every tile blits 1:1 and nothing is scaled at draw time. Snap rendered objects and the camera to logical integer pixels. Do not use antialiasing, arbitrary sprite rotation, or continuously fractional sprite transforms. |
 | Flatness | Below the horizon band the ground is **affine, not perspective**: every world row is exactly `TILE_DEPTH` scanlines tall, with no convergence and no per-row scaling. A tile's screen size never depends on how far up the screen it is. |
-| Horizon | The top of the screen **rolls over the horizon** — sky, then a short band where the ground curves away and `ROLL_ROWS` world rows compress into a few scanlines, then the flat field. `src/game/horizon.ts` owns it, and one knob sets the split. **The horizon is real, and the band is a place rather than a backdrop.** Anything that stands is drawn over it, so a tree on the far row keeps its crown against the sky, and what is on the horizon line is a feature of the planet: a body past the field's far edge lands on the roll a little higher and a little smaller for every row it is further away (`rollPlacement`), and walking toward it makes it grow and come down onto the flat field. Nothing that a player could walk to is painted at a bearing. |
+| Horizon | The top of the screen **rolls over the horizon** — sky, then a band where the ground bends over the horizon like **the lip of a treadmill**, then the flat field. The lip meets the field without a crease: its first row is as tall as a flat one (`TILE_DEPTH` scanlines), and from there each row is squashed further than the last until `ROLL_ROWS` rows have folded under the horizon line (`rollLift`). The ground on it is the field carried on, not a painted stripe: `roll-ground.ts` samples the field's own ground tiles and grass tufts at each lip pixel, exactly 1:1 at the seam, compressing and converging further up, then dithering into the hour's haze (pre-divided by the ambient, like the sky, so it meets the sky in the sky's colour). `src/game/horizon.ts` owns the curve, and one knob sets the split. **The horizon is real, and the band is a place rather than a backdrop.** Anything that stands is drawn over it, so a tree on the far row keeps its crown against the sky, and what is on the horizon line is a feature of the planet: a body past the field's far edge lands on the roll a little higher and a little smaller for every row it is further away (`rollPlacement`), and walking toward it makes it grow and come down onto the flat field. Nothing that a player could walk to is painted at a bearing. |
 | Identity art | **Characters are skeleton rigs**, not frame-by-frame sprites: bones posed in rig-space 3D (`src/game/rig.ts`), dressed by the authored models in `src/game/models.ts`, rasterized to pixels at draw time. Props, tiles, and effect sources stay authored palette-indexed raster sprites. All sources are text-defined and diffable; generated PNG atlases are build output. SVG is not a primary game-art format. |
 | Procedural art | Use math for motion, light, particles, world simulation and effects. Character silhouettes are procedural too — posed rigs rather than drawn frames — but they stay **authored**: proportions, gear and clips are designed by hand, and a mechanism renders them. Status effects (melt, freeze, burn, reflect) are **generic transforms over pixel clouds** (`src/game/transforms.ts`), never per-model frames. Image-generated art may guide mood and composition; it never becomes production pixels. |
-| Animation | Character actions are **clips**: sparse 3D keyframes over rig bones (`src/game/models.ts`), sampled per channel — a new attack is a handful of direction lines, not a redraw. Facing is front/back only (depth negated, front-only stamps dropped); left/right is a mirror flip. Combine silhouette-changing poses with discrete, grid-quantized translation and squash/stretch. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. Prefer **more terms over more keyframes**: what is on screen is `base pose + clip + secondary motion + reaction`, each a function of time, summed. Breathing, bob, recoil, stagger and wind are terms, not frames. |
+| Animation | Character actions are **clips**: sparse 3D keyframes over rig bones (`src/game/models.ts`), sampled per channel — a new attack is a handful of direction lines, not a redraw. Facing is a rotation of the rig about its vertical axis (`RenderOptions.yaw`): eight headings are eight turns of one skeleton, a `front` stamp shows only while its `offset` faces the viewer, and a turn never swaps hands the way a mirror would. `flipX` remains, as a mirror for art that wants one. Combine silhouette-changing poses with discrete, grid-quantized translation and squash/stretch. Express actions as anticipation, fast contact, hit stop, overshoot, and settle; drive visual beats from gameplay events. Prefer **more terms over more keyframes**: what is on screen is `base pose + clip + secondary motion + reaction`, each a function of time, summed. Breathing, bob, recoil, stagger and wind are terms, not frames. |
 | Effects | Build particles from 1–4 logical-pixel primitives or tiny raster sprites. Pool them, cap their count, and use seeded randomness when reproducibility matters. Motion comes from a field — noise, a flow field, gravity, a curve — never from a drawn path. |
 | World | **A round planet, and no map edge.** Walk straight for `PLANET_TILES` and you return to where you began; walk sideways and you slide round a circle of radius `radius` whose centre sits behind you, so one lap of `2·π·radius` tiles brings you back having swung the horizon through a full 360° (`src/game/planet.ts`). Terrain is a seeded, wrapping, **continuous field** over planet coordinates (`src/game/terrain.ts`) rather than an authored map — which is what lets the local grid stay axis-aligned while the world turns through it. |
 | World simulation | **The direction, not yet built.** Elemental state belongs to the world rather than to an animation: an **effect field** under the tiles, holding fire, water, ice, electricity, poison and corruption as cell state that spreads and combines — fire + grass spreads, electricity + water arcs, fire + ice steams. Build a new element as a rule over that field once it exists, so interactions fall out of the system instead of being drawn one pairing at a time. |
@@ -115,7 +116,7 @@ Seven modules, and no eighth place where any of this is decided:
 | `src/game/planet.ts` | The round world: `PLANET_TILES`, the sideways circle's radius, `stepForward` / `stepStrafe` / `applyGait` (both walks at once, which is what a diagonal is), and the only conversion between planet and local coordinates (`fromLocal` / `toLocal`). |
 | `src/game/terrain.ts` | What the planet is made of, as a continuous seeded field — `terrainAt()`, `elevationAt()`, and the point features (`treesNear`, `puddlesNear`) hashed out of planet cells. |
 | `src/game/camera.ts` | The local frame on screen: the pixel the hero is nailed to, the sub-tile `scrollOffset` of a stride in flight, and `localFoot` / `localOrigin` / `localRow` — the one answer to "this is *x* tiles right and *y* ahead, where do I draw it". `localPlacement` is that answer continued past the field's far edge: where on the roll a body stands, how small it is, and whether it has gone over the horizon. |
-| `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, `ridgeProfile()` for distant silhouettes — which takes a `period` when the profile has to close on itself — and the roll's projection: `ROLL_ROWS` to the horizon, `HORIZON_SCALE` at it, and `rollPlacement(rowsBeyond)` → lift and scale, the one curve both the ground's roll bands and every body standing on them are drawn from. |
+| `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, `ridgeProfile()` for distant silhouettes — which takes a `period` when the profile has to close on itself — and the roll's projection: `ROLL_ROWS` to the horizon, `HORIZON_SCALE` at it, and `rollPlacement(rowsBeyond, rollHeight)` → lift and scale, the one curve both the ground on the lip (`roll-ground.ts`, via `rollRowAt`) and every body standing on it are drawn from. The curve's knee is derived from `rollHeight`, never tuned: it is whatever makes the lip start at the flat field's slope and end on the horizon line. |
 | `src/game/panorama.ts` | The horizon as a 360° loop: `PANORAMA_WIDTH` pixels to a full turn, `bearingOffset()` from a heading, and where a landmark at a bearing lands on screen. |
 | `src/game/viewport.ts` | What the window left of the render target: `visibleHeight()` (scanlines that survived the cover crop), `walkableBand()` (that, horizon roll excluded) and `anchorFoot()` (the pixel the hero — and therefore the whole world — is centred on). The one place the *window* is allowed to influence the simulation, and it now only re-frames. |
 
@@ -137,8 +138,8 @@ has turned. Only its position does. The ridge and the stars are the airtight cas
 sit at a bearing, effectively infinitely far, so the viewing angle on them cannot change
 at all. Near props are a small and safe lie — walk past a tree and you see the same
 sprite from behind, which on a broadleaf nobody can tell. The lie only shows on an
-*asymmetric* near prop (a signpost, a door), and the answer there is the rig's existing
-`facing: front | back`, never an eight-way sprite set. This is why the round planet cost
+*asymmetric* near prop (a signpost, a door), and the answer there is a rig turned by its
+existing `yaw`, never an eight-way sprite set. This is why the round planet cost
 the art pipeline nothing.
 
 **A body past the field is the same field sampled at a smaller scale, never a shrunk
@@ -200,14 +201,15 @@ one is for, and the determinism rules that keep a capture reproducible.
 **Knobs, none of them a constant to inline** (all read in `scene-options.ts`; also
 `?time=21` or `?time=18:30` pins the clock, `?day=120` sets a day's seconds, and
 `?weather=clear|rain|storm` pins the sky). `DEFAULT_SKY_FRACTION` in
-`horizon.ts` sets the 88/12 sky split and `?horizon=8%` (or `?horizon=0.08`) overrides
+`horizon.ts` sets the 78/22 split between flat field and band and `?horizon=8%` (or `?horizon=0.08`) overrides
 it per load; `DEFAULT_STRAFE_RADIUS` in `planet.ts` sets how hard the world turns
 when you walk sideways and `?radius=64` overrides that. Both are meant to be retuned by
 eye in the address bar rather than in a rebuild — though the radius is no longer *only* a
 feel decision, and the paragraph above says what it is now also holding down.
 The split grew from 5% when the horizon became real: a tree standing on the horizon
 line is drawn at `HORIZON_SCALE` of its height and needs that much sky to keep its crown
-on screen.
+on screen. It grew again, to 22%, when the roll became a lip: a curve that starts at a
+full 12-scanline row needs about two rows of screen to bend, or it reads as a fold.
 
 **And one instrument: `?map=1`** (`map-overlay.ts`, `map-panels.ts`, `map-drift.ts`).
 Off on every other load, drawn on its own canvas over the game so it never enters the
@@ -222,7 +224,7 @@ world and nothing else** (the one exception is the controls reminder, `help-over
 or F1, generated from the binding table), so judge a split against the frame itself and read the numbers
 from `horizonLayout()` in the console or from `horizon.test.ts`. Read
 `horizonLayout()` for `groundTop` — never hard-code a y for the horizon, and never
-assume the flat field starts at 22px, because that number moves the moment the knob does.
+assume the flat field starts at 40px, because that number moves the moment the knob does.
 
 Two rules fall out of the projection and are easy to break by accident:
 
@@ -369,10 +371,10 @@ Four files, and no fifth place where any of this is decided:
 
 | Module | Owns |
 | --- | --- |
-| `src/game/keybindings.ts` | What an input *means*: the binding table, and the lookups over it. |
-| `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, one winner per axis summed into a `Heading` (newest-press-wins within an axis), and the one-shot queue that keeps a tap shorter than a frame, two same-frame taps joining into the diagonal they mean. |
-| `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free simulation over (state, intent, elapsed, world). **North and south walk the heading; east and west strafe, and strafing turns the world** — a press is two gaits over a `PlanetPose` (`Gait`), not a direction on a map, and a diagonal is both walks at once rather than a fifth direction the planet does not have. Two tracks — `motion`/`motionMs` for the legs, `attackMs` for the sword arm — aged independently, so he can swing mid-stride. A press commits one whole tile of walking that runs to completion (√2 as long on a diagonal, so eight-way movement has one speed), and the `ORIENTATION` table is the one place a heading becomes a facing. It hands the renderer three views of the pose: `groundPose` (frozen for the stride, what the world is sampled from), `scrollPhase` (the sub-tile offset it is drawn at) and `livePose` (the continuous truth, which only the horizon shows). |
-| `src/game/hero-layer.ts` | The wiring only — DOM events in, a posed rig into a `Graphics`. Also the one place the two tracks are put back together: `samplePose(SWING, samplePose(WALK, …), …)` **layers** the clips, because unkeyed channels fall through to the base pose and `SWING` keys nothing below the waist. The single file here that imports Phaser. |
+| `src/game/keybindings.ts` | What an input *means*: the binding table, the lookups over it, and `headingToward` — a free direction (a mouse, one day a stick) snapped to the nearest of the eight headings. |
+| `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, one winner per axis summed into a `Heading` (newest-press-wins within an axis), and the one-shot queue that keeps a tap shorter than a frame, two same-frame taps joining into the diagonal they mean. Also the **aim**: `aimAt` takes the cursor's screen offset from the hero's chest, un-foreshortens it by `DEPTH_RATIO` so the sectors lie on the ground, and holds the last heading pointed at. |
+| `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free simulation over (state, intent, elapsed, world). **North and south walk the heading; east and west strafe, and strafing turns the world** — a press is two gaits over a `PlanetPose` (`Gait`), not a direction on a map, and a diagonal is both walks at once rather than a fifth direction the planet does not have. Two tracks — `motion`/`motionMs` for the legs, `attackMs` for the sword arm — aged independently, so he can swing mid-stride. A press commits one whole tile of walking that runs to completion (√2 as long on a diagonal, so eight-way movement has one speed), `facing` is a `Heading` read from `Intent.aim` when there is one and the heading otherwise, and `facingYaw` is the one place a heading becomes a turn of the rig. It hands the renderer three views of the pose: `groundPose` (frozen for the stride, what the world is sampled from), `scrollPhase` (the sub-tile offset it is drawn at) and `livePose` (the continuous truth, which only the horizon shows). |
+| `src/game/hero-layer.ts` | The wiring only — DOM events in (the pointer mapped back to a logical pixel through the canvas's own box by `logicalPoint`, since the canvas is CSS-scaled under `Scale.NONE`), and a frame of `hero/hero-look.ts` into two `PixelSurface`s. The tracks are put back together in `layeredPose` (`hero/hero-figure.ts`), which **layers** the clips — unkeyed channels fall through, and `SWING` keys nothing below the waist. A blow or a spell leaves along `facing`, the aim, not the heading. The single file here that imports Phaser. |
 
 That split is the `Separation` contract above, applied to input: the simulation is
 deterministic and testable without a canvas, and the presentation layer can exaggerate a
@@ -383,10 +385,10 @@ genuinely cannot coexist with the others, because a shared enum is how an action
 silently waiting for an unrelated one to finish.
 
 Facing and heading are allowed to disagree, and do. The *camera* is bolted to the
-heading, so it swings when the hero strafes; the *sprite* still turns to face the
-way the key pointed, because the rig has a front, a back and a mirror and nothing
-else. A hero who turned his shoulders to walk right would be fighting a camera that
-had already turned.
+heading, so it swings when the hero strafes; the *sprite* turns to face the cursor (or,
+with no cursor yet, the way the key pointed), and that is a screen-space turn of the rig,
+not a turn of the world. A hero who turned his shoulders to walk right would be fighting
+a camera that had already turned.
 
 ## Environment Variables
 

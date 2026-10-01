@@ -95,7 +95,7 @@ export function localPlacement(frame: CameraFrame, local: LocalPoint): Placement
   if (affineY >= frame.groundTop) {
     return { ...localFoot(frame, local), scale: 1, visible: true };
   }
-  const roll = rollPlacement((frame.groundTop - affineY) / TILE_DEPTH);
+  const roll = rollPlacement((frame.groundTop - affineY) / TILE_DEPTH, frame.rollHeight);
   return {
     x: Math.round(frame.footX + (local.x - frame.phaseX) * TILE_WIDTH * roll.scale),
     y: Math.round(frame.groundTop - frame.rollHeight * roll.lift),

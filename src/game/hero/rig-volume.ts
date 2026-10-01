@@ -9,12 +9,12 @@
  * `volume-raster.ts` to be filled nearest-first and lit from its own normal.
  *
  * So everything the line rig already had comes for free: clips, layering,
- * facing (`back` negates depth, and the pieces' offsets with it — the belt
+ * facing (`yaw` turns the bones, and the pieces' offsets with them — the belt
  * buckle goes behind him), mirroring, and gear that is a bone. A sword is
  * still one gear part; it now has a grip, a gold guard and a steel blade.
  */
 
-import { effectiveSkeleton, solveModel, type RenderOptions, type RigModel, type RigPose, type SolvedPose, type Vec3 } from "../rig";
+import { effectiveSkeleton, orientVector, solveModel, type RenderOptions, type RigModel, type RigPose, type SolvedPose, type Vec3 } from "../rig";
 import { DEPTH_RATIO } from "../projection";
 import type { InkId, PixelCloud } from "../ink";
 import { rasterizePrims, type RasterLight, type ScreenPrim } from "./volume-raster";
@@ -77,11 +77,7 @@ function orientOffset(offset: Vec3 | undefined, options: VolumeOptions): Vec3 {
   if (offset === undefined) {
     return { x: 0, y: 0, z: 0 };
   }
-  return {
-    x: options.flipX === true ? -offset.x : offset.x,
-    y: options.facing === "back" ? -offset.y : offset.y,
-    z: offset.z,
-  };
+  return orientVector(offset, options.yaw ?? 0, options.flipX === true);
 }
 
 interface PieceContext {
@@ -152,11 +148,19 @@ export function modelPrims(model: RigModel, solved: SolvedPose, options: VolumeO
   return prims;
 }
 
+/**
+ * How far proud of the head's centre line the eyes sit, in the model's own
+ * frame. Against `spacing` it decides where each eye goes round the side: both
+ * show from the front and on a three-quarter view, one in profile, none from
+ * behind.
+ */
+const EYE_OUT = 1.2;
+
 function drawFace(
   raster: ReturnType<typeof rasterizePrims>,
   solved: SolvedPose,
   face: FaceSpec,
-  gaze: number,
+  options: VolumeOptions,
 ): void {
   const head = solved[face.bone];
   if (head === undefined) {
@@ -164,8 +168,15 @@ function drawFace(
   }
   const centre = projectPoint(head.end);
   const y = Math.round(centre.y + face.drop);
-  const middle = Math.round(centre.x + gaze);
-  for (const x of [middle - face.spacing, middle + face.spacing]) {
+  const middle = Math.round(centre.x + Math.round(options.gaze ?? 0));
+  for (const side of [-face.spacing, face.spacing]) {
+    // Each eye turns with the head: it slides by its turned x, and is round the
+    // far side - so not drawn - once its turned depth points away.
+    const eye = orientVector({ x: side, y: EYE_OUT, z: 0 }, options.yaw ?? 0, options.flipX === true);
+    if (eye.y <= 0) {
+      continue;
+    }
+    const x = middle + Math.round(eye.x);
     if (raster.materialAt(x, y) === face.on) {
       raster.setInk(x, y, face.ink);
     }
@@ -175,16 +186,16 @@ function drawFace(
 /**
  * The posed model as lit, outlined pixels, foot-anchored at (0, 0).
  *
- * Eyes are the one drawn detail, and they are drawn only from the front and
- * only over skin — the front/back contract, and the reason a fringe can hang
- * over them without being punched through.
+ * Eyes are the one drawn detail, and they are drawn only while they face the
+ * viewer and only over skin — the front/back contract, and the reason a fringe
+ * can hang over them without being punched through.
  */
 export function renderVolume(model: RigModel, pose: RigPose, options: VolumeOptions = {}): VolumeRender {
   const solved = solveModel(model, pose, options);
   const prims = [...modelPrims(model, solved, options), ...(options.extras ?? [])];
   const raster = rasterizePrims(prims, options.light ?? DEFAULT_LIGHT);
-  if (options.face !== undefined && (options.facing ?? "front") === "front") {
-    drawFace(raster, solved, options.face, Math.round(options.gaze ?? 0));
+  if (options.face !== undefined) {
+    drawFace(raster, solved, options.face, options);
   }
   return { cloud: raster.cloud, solved };
 }

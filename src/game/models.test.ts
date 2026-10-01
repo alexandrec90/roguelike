@@ -62,13 +62,36 @@ describe("the humanoid hero", () => {
     }
   });
 
-  it("shows eyes from the front and none from the back", () => {
-    const front = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose);
-    const back = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, { facing: "back" });
-    expect(front.some((pixel) => pixel.ink === "void")).toBe(true);
-    expect(back.some((pixel) => pixel.ink === "void")).toBe(false);
-    // The silhouette is otherwise the same size, per the front/back contract.
-    expect(back.length).toBeGreaterThan(0);
+  it("shows two eyes from the front, one in profile, and none from behind", () => {
+    const eyes = (yaw: number) =>
+      renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, { yaw })
+        .filter((pixel) => pixel.ink === "void")
+        .map((pixel) => pixel.x)
+        .sort((a, b) => a - b);
+
+    expect(eyes(0)).toEqual([-1, 1]);
+    // Three-quarter: still both, slid a pixel toward the way he faces.
+    expect(eyes(Math.PI / 4)).toEqual([0, 2]);
+    expect(eyes(-Math.PI / 4)).toEqual([-2, 0]);
+    // Profile: the near eye only, on the side he faces.
+    expect(eyes(Math.PI / 2)).toEqual([1]);
+    expect(eyes(-Math.PI / 2)).toEqual([-1]);
+    // Anything with his back to the viewer shows none.
+    expect(eyes((3 * Math.PI) / 4)).toEqual([]);
+    expect(eyes(Math.PI)).toEqual([]);
+    expect(eyes((-3 * Math.PI) / 4)).toEqual([]);
+  });
+
+  it("keeps the sword in the same hand facing toward and away from the viewer", () => {
+    const swordSide = (yaw: number) => {
+      const xs = renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose, { yaw })
+        .filter((pixel) => pixel.ink === "cyan")
+        .map((pixel) => pixel.x);
+      return Math.sign(xs.reduce((sum, x) => sum + x, 0));
+    };
+    // Same hand, so it crosses the screen: the outline turned, not mirrored in place.
+    expect(swordSide(0)).toBe(1);
+    expect(swordSide(Math.PI)).toBe(-1);
   });
 
   it("carries the sword without the hat", () => {
