@@ -143,28 +143,85 @@ function previousNode(previous: GroundSample, frame: Frame, x: number, y: number
  * drawn as rock is exactly what the hero collides with.
  */
 export function sampleGround(pose: PlanetPose, bounds: LocalBounds, previous?: GroundSample): GroundSample {
+  const sample = emptySample(pose, bounds);
+  const read = nodeReader(sample, previous);
+  for (let b = 0; b < sample.latticeHeight; b += 1) {
+    for (let a = 0; a < sample.latticeWidth; a += 1) {
+      read(a, b);
+    }
+  }
+  return sample;
+}
+
+/** A sample whose nodes are read only where they are asked for. */
+export interface LazyGroundSample {
+  readonly sample: GroundSample;
+  /**
+   * Read every node a cell's keys and tufts can look at - its own and its
+   * eight neighbours' - if they have not been read yet. Call it before asking
+   * anything of the cell.
+   */
+  readonly readAround: (localX: number, localY: number) => void;
+}
+
+/**
+ * `sampleGround`, node by node on demand, for a region far bigger than what is
+ * read of it - the horizon lip, whose rectangle out to the horizon is seventeen
+ * times the field and whose frames read a tenth of it. Every node it reads is
+ * exactly the node `sampleGround` would have read.
+ */
+export function lazyGroundSample(pose: PlanetPose, bounds: LocalBounds, previous?: GroundSample): LazyGroundSample {
+  const sample = emptySample(pose, bounds);
+  const read = nodeReader(sample, previous);
+  const done = new Uint8Array(sample.terrain.length);
+  const readAround = (localX: number, localY: number): void => {
+    const { a, b } = cellLattice(sample, localX, localY);
+    for (let nb = Math.max(b - 2, 0); nb <= Math.min(b + 4, sample.latticeHeight - 1); nb += 1) {
+      for (let na = Math.max(a - 2, 0); na <= Math.min(a + 4, sample.latticeWidth - 1); na += 1) {
+        const index = nb * sample.latticeWidth + na;
+        if (done[index] === 0) {
+          done[index] = 1;
+          read(na, nb);
+        }
+      }
+    }
+  };
+  return { sample, readAround };
+}
+
+function emptySample(pose: PlanetPose, bounds: LocalBounds): GroundSample {
   const columns = bounds.maxX - bounds.minX + 1;
   const rows = bounds.maxY - bounds.minY + 1;
   const latticeWidth = columns * 2 + 1;
   const latticeHeight = rows * 2 + 1;
   const size = latticeWidth * latticeHeight;
-  const terrain = new Uint8Array(size);
-  const hashes = new Uint32Array(size);
-  const planetX = new Float32Array(size);
-  const planetY = new Float32Array(size);
+  return {
+    pose,
+    bounds,
+    columns,
+    rows,
+    latticeWidth,
+    latticeHeight,
+    terrain: new Uint8Array(size),
+    hashes: new Uint32Array(size),
+    planetX: new Float32Array(size),
+    planetY: new Float32Array(size),
+  };
+}
+
+/** Reads one lattice node of `sample` off the planet, inheriting `previous`'s hash where it can. */
+function nodeReader(sample: GroundSample, previous?: GroundSample): (a: number, b: number) => void {
+  const { pose, bounds } = sample;
   const frame = previous === undefined ? undefined : { cos: Math.cos(previous.pose.turn), sin: Math.sin(previous.pose.turn) };
-  for (let b = 0; b < latticeHeight; b += 1) {
-    for (let a = 0; a < latticeWidth; a += 1) {
-      const point = fromLocal(pose, { x: bounds.minX - 0.5 + a / 2, y: bounds.minY + b / 2 });
-      const index = b * latticeWidth + a;
-      terrain[index] = cachedTerrain(point.x, point.y);
-      const inherited = previous === undefined || frame === undefined ? -1 : previousNode(previous, frame, point.x, point.y);
-      hashes[index] = inherited >= 0 ? (previous?.hashes[inherited] ?? 0) : planetHash(point.x, point.y);
-      planetX[index] = point.x;
-      planetY[index] = point.y;
-    }
-  }
-  return { pose, bounds, columns, rows, latticeWidth, latticeHeight, terrain, hashes, planetX, planetY };
+  return (a, b) => {
+    const point = fromLocal(pose, { x: bounds.minX - 0.5 + a / 2, y: bounds.minY + b / 2 });
+    const index = b * sample.latticeWidth + a;
+    sample.terrain[index] = cachedTerrain(point.x, point.y);
+    const inherited = previous === undefined || frame === undefined ? -1 : previousNode(previous, frame, point.x, point.y);
+    sample.hashes[index] = inherited >= 0 ? (previous?.hashes[inherited] ?? 0) : planetHash(point.x, point.y);
+    sample.planetX[index] = point.x;
+    sample.planetY[index] = point.y;
+  };
 }
 
 let lastSample: GroundSample | undefined;

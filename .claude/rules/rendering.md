@@ -91,6 +91,7 @@ Measured on an Intel HD 530. A frame is 16.7 ms; the JS half of it should stay n
 | Scenery | ~1 ms + ≤ 3 ms of queued bakes | textures chosen per frame; bakes sliced |
 | Ground | ~0.5 ms | composed once per step into one surface |
 | Grass | ~1 ms | a baked tuft atlas; frames chosen from the wind |
+| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands | one surface; the lattice read on demand; tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped |
 | Each actor | ≤ 0.5 ms | small surfaces, caches keyed by quantised pose |
 | Lighting | ~0.5 ms | one render texture, a stamp per light |
 

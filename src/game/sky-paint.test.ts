@@ -4,12 +4,12 @@ import { atmosphereAt } from "./atmosphere";
 import { hexToRgb } from "./color";
 import { horizonLayout } from "./horizon";
 import { bufferPixel, createBuffer } from "./pixel-buffer";
-import { SkyPainter } from "./sky-paint";
+import { SkyPainter, unlitHaze } from "./sky-paint";
 
 const LAYOUT = horizonLayout(180);
 
 function paint(hours: number, overcast = 0, offset = 0): ReturnType<typeof createBuffer> {
-  const buffer = createBuffer(320, LAYOUT.bandHeight);
+  const buffer = createBuffer(320, LAYOUT.skyHeight);
   new SkyPainter(buffer, LAYOUT).paint(atmosphereAt(hours, overcast), offset, 0, 0);
   return buffer;
 }
@@ -53,5 +53,34 @@ describe("painting the sky band", () => {
     const b = paint(15, 0.3, 200);
     expect(a.data).not.toEqual(b.data);
     expect(paint(15, 0.3, 0).data).toEqual(a.data);
+  });
+
+  it("leaves the roll below the horizon line to the ground", () => {
+    const buffer = createBuffer(320, LAYOUT.bandHeight);
+    new SkyPainter(buffer, LAYOUT).paint(atmosphereAt(13), 0, 0, 0);
+    for (let x = 0; x < buffer.width; x += 7) {
+      expect(bufferPixel(buffer, x, LAYOUT.horizonY - 1)[3]).toBe(255);
+      expect(bufferPixel(buffer, x, LAYOUT.horizonY)[3]).toBe(0);
+    }
+  });
+});
+
+describe("the haze the roll dissolves into", () => {
+  it("lands on the atmosphere's haze once the lighting pass multiplies it back", () => {
+    for (const hours of [1, 7, 13, 19]) {
+      const atmosphere = atmosphereAt(hours);
+      const air = hexToRgb(atmosphere.haze);
+      const ambient = hexToRgb(atmosphere.ambient);
+      const haze = unlitHaze(atmosphere);
+      for (const channel of ["r", "g", "b"] as const) {
+        const lit = (haze[channel] * ambient[channel]) / 255;
+        // Exact unless the ambient is too dark to reach the air's colour, where it clamps.
+        if (haze[channel] < 255) {
+          expect(Math.abs(lit - air[channel])).toBeLessThan(1.5);
+        } else {
+          expect(lit).toBeLessThanOrEqual(air[channel] + 1);
+        }
+      }
+    }
   });
 });

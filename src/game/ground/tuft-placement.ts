@@ -113,12 +113,36 @@ export function placeTufts(sample: GroundSample): TuftPlacement[] {
   const { bounds } = sample;
   for (let localY = bounds.maxY; localY >= bounds.minY; localY -= 1) {
     for (let localX = bounds.minX; localX <= bounds.maxX; localX += 1) {
-      if (cellTerrain(sample, localX, localY) !== ROCK) {
-        cellTufts(sample, localX, localY, tufts);
-      }
+      tufts.push(...tuftsInCell(sample, localX, localY));
     }
   }
   return tufts;
+}
+
+/**
+ * The tufts rooted in one cell - none on rock. `placeTufts` is this over the
+ * whole grid; the horizon lip asks cell by cell, for only the cells it shows.
+ */
+export function tuftsInCell(sample: GroundSample, localX: number, localY: number): TuftPlacement[] {
+  const tufts: TuftPlacement[] = [];
+  if (cellTerrain(sample, localX, localY) !== ROCK) {
+    cellTufts(sample, localX, localY, tufts);
+  }
+  return tufts;
+}
+
+/** Bend levels per unit of `windAt`: a normal gust bends the tips two or three pixels. */
+const WIND_GAIN = 4;
+/** A little private sway, so a lull is not a freeze. */
+const IDLE_SWAY = 0.45;
+
+/**
+ * How far a tuft leans in a gust, in bend levels (`bendFrame` takes it): its
+ * share of the wind plus its private idle sway. One answer, so the field and
+ * the lip past it sway the same blade the same way.
+ */
+export function swayBend(tuft: TuftPlacement, gust: number, elapsedMs: number): number {
+  return gust * WIND_GAIN * tuft.flex + Math.sin(elapsedMs * 0.0021 + tuft.phase) * IDLE_SWAY;
 }
 
 /** A puddle as the grass sees it: a centre in grid pixels and its nominal radius. */

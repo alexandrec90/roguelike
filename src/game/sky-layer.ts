@@ -26,7 +26,10 @@
  *     clouds           fBm at a bearing, drifting, lit from the sun's side
  *     far ridge        seamless noise profile, hazed
  *     near ridge       the same, nearer and darker
- *     roll             ground curving away into haze
+ *
+ * It stops at the horizon line. Below it, over the roll, is ground rather than
+ * sky - the field carried over the lip, at the same depth - and that is
+ * `roll-ground-layer.ts`, which borrows only the haze colour from here.
  */
 
 import type Phaser from "phaser";
@@ -50,7 +53,7 @@ export class SkyLayer {
   private rendered = "";
 
   create(scene: Phaser.Scene, layout: HorizonLayout, width: number): void {
-    this.surface = new PixelSurface(scene, width, Math.max(layout.bandHeight, 1), "sky");
+    this.surface = new PixelSurface(scene, width, Math.max(layout.skyHeight, 1), "sky");
     this.surface.image.setDepth(HORIZON_DEPTH);
     this.painter = new SkyPainter(this.surface.buffer, layout);
   }
