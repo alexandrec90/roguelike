@@ -33,17 +33,17 @@ import type Phaser from "phaser";
 
 import { localPlacement, localReach, localRow, type LocalBounds } from "./camera";
 import type { FrameContext } from "./frame-context";
-import { ROLL_ROWS } from "./horizon";
+import { rowsToSink } from "./horizon";
 import { toLocal, type PlanetPose } from "./planet";
-import { RANK, TILE_WIDTH } from "./projection";
+import { RANK, standingDepth, TILE_WIDTH } from "./projection";
 import { quantizeLight, windLevelIndex } from "./scenery-bake";
 import { SceneryCache, type BakedTexture } from "./scenery-cache";
-import { sceneryNear, type SceneryFeature } from "./scenery-features";
-import { bodiesInView, keyOf, lendSlots } from "./scenery-slots";
+import { sceneryNear, speciesHeight, type SceneryFeature } from "./scenery-features";
+import { bodiesInView, keyOf, lendSlots, TALLEST_BODY } from "./scenery-slots";
 import { windAt } from "./wind";
 
-/** Bodies on screen at once, field and roll together. */
-const SCENERY_POOL = 72;
+/** Bodies on screen at once, field, roll and the sinking far side of the horizon together. */
+const SCENERY_POOL = 256;
 
 /** The widest body a slot may hold — a full chestnut crown. */
 const WIDEST_BODY = 80;
@@ -110,13 +110,16 @@ export class SceneryLayer {
       return;
     }
     // The affine row, even on the roll: it keeps decreasing with distance where
-    // the roll's few scanlines would tie, so far bodies still sort.
-    const row = Math.round(localRow(ctx.frame, local)) * TILE_WIDTH;
+    // the roll's few scanlines would tie, so far bodies still sort - among
+    // themselves and with the landforms, which take their depth the same way.
+    const row = Math.round(localRow(ctx.frame, local));
 
     if (placed.scale < 0.999) {
       const far = this.cache.scaled(feature, placed.scale);
       slot.shadow.setVisible(false);
-      show(slot.body, far, placed.x, placed.y, row + RANK.body);
+      show(slot.body, far, placed.x, placed.y, standingDepth(row, RANK.body));
+      clipAt(slot.body, placed.clipY);
+      slot.body.setTint(ctx.shade.tint(placed.x, placed.y));
       return;
     }
 
@@ -129,11 +132,14 @@ export class SceneryLayer {
       hide(slot);
       return;
     }
-    show(slot.body, lean.body, placed.x, placed.y, row + RANK.body);
+    show(slot.body, lean.body, placed.x, placed.y, standingDepth(row, RANK.body));
+    clipAt(slot.body, placed.clipY);
+    // A body stands over the cloud shadows' pass; the shadow at its foot is its tint.
+    slot.body.setTint(ctx.shade.tint(placed.x, placed.y));
     if (lean.shadow === null || ctx.atmosphere.shadowStrength < 0.05) {
       slot.shadow.setVisible(false);
     } else {
-      show(slot.shadow, lean.shadow, placed.x, placed.y, row + SHADOW_RANK);
+      show(slot.shadow, lean.shadow, placed.x, placed.y, standingDepth(row, SHADOW_RANK));
       slot.shadow.setAlpha(Math.min(1, ctx.atmosphere.shadowStrength * 1.15));
     }
   }
@@ -151,6 +157,7 @@ export class SceneryLayer {
       bounds: this.bounds,
       width: this.width,
       footprintWidth: WIDEST_BODY,
+      heightOf: (feature) => speciesHeight((feature as SceneryFeature).species),
     });
     const plans = lendSlots(
       this.slots.map((slot) => slot.key),
@@ -181,7 +188,7 @@ export class SceneryLayer {
    */
   private sweep(pose: PlanetPose): readonly SceneryFeature[] {
     if (this.swept !== pose) {
-      this.candidates = sceneryNear(pose, localReach(this.bounds) + ROLL_ROWS);
+      this.candidates = sceneryNear(pose, localReach(this.bounds) + rowsToSink(TALLEST_BODY));
       this.swept = pose;
       this.prewarmNearby(pose);
     }
@@ -222,6 +229,29 @@ function show(
     .setPosition(footX - baked.originX, footY - baked.originY)
     .setDepth(depth)
     .setVisible(true);
+}
+
+/**
+ * Cut a body off at the horizon line, for one past it: its foot has sunk
+ * below the line and only what still stands above it shows. Nothing is cut
+ * this side of the horizon.
+ */
+function clipAt(image: Phaser.GameObjects.Image, clipY: number): void {
+  if (!image.visible) {
+    return;
+  }
+  if (!Number.isFinite(clipY)) {
+    if (image.isCropped) {
+      image.setCrop();
+    }
+    return;
+  }
+  const shown = Math.floor(clipY - image.y);
+  if (shown <= 0) {
+    image.setVisible(false);
+    return;
+  }
+  image.setCrop(0, 0, image.width, Math.min(shown, image.height));
 }
 
 function hide(slot: Slot): void {

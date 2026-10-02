@@ -64,9 +64,11 @@ the ambient multiply colour, the sky's colours and the stars. `world-clock.ts` r
 (`?time=` pins it, `?day=` sets its length) and owns hit stop and shake (`impulse.ts`).
 
 `lighting-layer.ts` multiplies the world by the ambient and adds every `LightSource` the
-layers pushed this frame (`lights.ts`: baked, banded, dithered pools), plus drifting
-cloud shadows (`cloud-shadow.ts`) on a fair day and a faint additive halo round each light
-at night. So:
+layers pushed this frame (`lights.ts`: baked, banded, dithered pools), and a faint additive halo
+round each light at night. Drifting cloud shadows (`cloud-shadow.ts`) are a pass of
+their own under every standing thing, on the ground only, and `FrameContext.shade` hands
+the same pattern to each standing layer to tint itself at its foot, so a tower above the
+horizon line is shaded with the ground it stands on rather than cut by the sky rows. So:
 
 - **A layer never darkens itself for the night.** It draws its daylight colours; the pass
   does the rest. A flame stays bright because it sits at the centre of its own pool.
@@ -93,7 +95,8 @@ Measured on an Intel HD 530. A frame is 16.7 ms; the JS half of it should stay n
 | Scenery | ~1 ms + ≤ 3 ms of queued bakes | textures chosen per frame; bakes sliced |
 | Ground | ~0.5 ms | composed once per step into one surface |
 | Grass | ~1 ms | a baked tuft atlas; frames chosen from the wind |
-| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands. Standing rock and water added ~1 ms a frame and ~2–3 ms a step, measured on a faster machine (1.9 → 2.8 ms median, 3 → 5 ms p90) | one surface; the lattice read on demand, and never under a far pixel (`far` colours); tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped; rock answered per cell off the planet; puddle outlines and bodies cached by shape |
+| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands. Water added ~1 ms a frame and ~2–3 ms a step, measured on a faster machine | one surface; the lattice read on demand, and never under a far pixel (`far` colours); tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped; puddle outlines and bodies cached by shape |
+| Landforms | ~0.1 ms in open land; ~5 ms median beside a mountain, measured on a faster machine | a planet-fixed grid per landform, built once; the march visits only the columns each covers; far views kept between strides; one atlas upload of only the rows in use |
 | Each actor | ≤ 0.5 ms | small surfaces, caches keyed by quantised pose |
 | Lighting | ~0.5 ms | one render texture, a stamp per light |
 

@@ -221,6 +221,7 @@ export class SlimeLayer {
     image
       .setPosition(placed.x - FOOT_X, placed.y - FOOT_Y)
       .setDepth(Math.round(localRow(ctx.frame, slime.local)) * TILE_WIDTH + RANK.actor)
+      .setTint(ctx.shade.tint(placed.x, placed.y))
       .setVisible(true);
     this.reflections.push({ cloud: drawn.body, x: placed.x, y: placed.y });
     this.glow(ctx, slime, placed.x, placed.y - Math.round(slime.lift));

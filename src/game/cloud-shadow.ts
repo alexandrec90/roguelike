@@ -109,6 +109,71 @@ export function cloudShadowsAt(
   };
 }
 
+/** The seed of the one cloud-shadow tile the game draws. */
+export const CLOUD_SEED = 0xc1d5;
+
+let sharedTile: PixelBuffer | undefined;
+
+/** The game's cloud-shadow tile, baked once and shared by the lighting pass and every sampler. */
+export function cloudTile(): PixelBuffer {
+  sharedTile ??= cloudShadowTile(CLOUD_SEED);
+  return sharedTile;
+}
+
+/**
+ * The cloud shadow, as something a layer can ask about a screen point.
+ *
+ * The lighting pass multiplies the drifting tile over the *ground* - everything
+ * lying flat - and nothing standing: a screen-space overlay over a tree or a
+ * tower that rises past the horizon line would shade it on one side of the line
+ * and not the other, because the sky rows above the line must stay unshaded.
+ * So a standing thing asks here instead what shadow is on the ground at its foot
+ * and takes it as a tint, and a landform asks per pixel. Both read the very
+ * pattern the ground shows, so a tree goes dark exactly as the shadow reaches it.
+ */
+export interface CloudShade {
+  /** Changes whenever the pattern on the screen has moved a pixel or changed depth. */
+  readonly key: string;
+  /** The multiply level at a screen point: 1 in sunlight, less under cloud. */
+  at(x: number, y: number): number;
+  /** The same, as a tint colour for an image. */
+  tint(x: number, y: number): number;
+}
+
+/** No cloud: everything in full light. */
+export const CLEAR_SKY: CloudShade = { key: "clear", at: () => 1, tint: () => 0xffffff };
+
+/**
+ * Sample the cloud shadow the lighting pass stamps for `clouds`, the pass
+ * offset by `margin` pixels as its texture is - the same pixel, either way.
+ */
+export function cloudShade(
+  clouds: { readonly x: number; readonly y: number; readonly strength: number },
+  margin: number,
+  tile: PixelBuffer = cloudTile(),
+): CloudShade {
+  const strength = Math.min(clouds.strength, 1);
+  if (strength <= 0.02) {
+    return CLEAR_SKY;
+  }
+  const offsetX = Math.round(clouds.x);
+  const offsetY = Math.round(clouds.y);
+  const at = (x: number, y: number): number => {
+    const u = ((((Math.round(x) + margin - offsetX) % tile.width) + tile.width) % tile.width) | 0;
+    const v = ((((Math.round(y) + margin - offsetY) % tile.height) + tile.height) % tile.height) | 0;
+    const value = (tile.data[(v * tile.width + u) * 4] ?? 255) / 255;
+    return 1 - (1 - value) * strength;
+  };
+  return {
+    key: `${offsetX},${offsetY},${strength.toFixed(2)}`,
+    at,
+    tint: (x, y) => {
+      const level = Math.round(at(x, y) * 255);
+      return (level << 16) | (level << 8) | Math.min(255, level + 4);
+    },
+  };
+}
+
 /** The tile origins that cover a `width` × `height` view scrolled by (x, y). */
 export function tileOrigins(
   offsetX: number,

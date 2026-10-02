@@ -2,12 +2,14 @@ import Phaser from "phaser";
 
 import { AmbientLayer } from "./ambient-layer";
 import { visibleLocal, type CameraFrame, type LocalBounds } from "./camera";
-import { cloudShadowsAt } from "./cloud-shadow";
+import { cloudShade, cloudShadowsAt } from "./cloud-shadow";
 import { Encounter } from "./encounter";
 import { beginFrame, type FrameContext } from "./frame-context";
 import { GroundLayer } from "./ground-layer";
 import { HeroLayer, heroHeight } from "./hero-layer";
 import { horizonLayout, type HorizonLayout } from "./horizon";
+import { MAX_SHAKE } from "./impulse";
+import { LandformLayer } from "./landform-layer";
 import { LightingLayer } from "./lighting-layer";
 import type { MapOverlay } from "./map-overlay";
 import { createOdometer, trackScroll } from "./odometer";
@@ -17,7 +19,7 @@ import { RollGroundLayer } from "./roll-ground-layer";
 import { DEFAULT_SCENE_OPTIONS, type SceneOptions } from "./scene-options";
 import { SceneryLayer } from "./scenery-layer";
 import { SkyLayer } from "./sky-layer";
-import { openGround } from "./terrain";
+import { openGround } from "./landforms";
 import { VegetationLayer } from "./vegetation-layer";
 import { anchorFoot, walkableBand } from "./viewport";
 import { WaterLayer } from "./water-layer";
@@ -67,6 +69,7 @@ export class DemoScene extends Phaser.Scene {
   private readonly ground = new GroundLayer();
   private readonly vegetation = new VegetationLayer();
   private readonly scenery = new SceneryLayer();
+  private readonly landforms = new LandformLayer();
   private readonly encounter = new Encounter();
   private readonly water = new WaterLayer();
   private readonly weather: WeatherLayer;
@@ -101,6 +104,7 @@ export class DemoScene extends Phaser.Scene {
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
     this.scenery.create(this, this.bounds, WIDTH);
+    this.landforms.create(this, WIDTH, HEIGHT, heroHeight());
     this.encounter.create(this, WIDTH, HEIGHT, openGround(CAMPFIRE_AT));
     // Burnt ground has no grass on it until it greens over again.
     const fire = this.encounter.wildfire.fire;
@@ -146,6 +150,7 @@ export class DemoScene extends Phaser.Scene {
     this.rollGround.update(ctx, this.water.sizeScale());
     this.vegetation.update(ctx, this.grassPushers(ctx));
     this.scenery.update(ctx);
+    this.landforms.update(ctx, ctx.shade);
     this.hero.update(ctx);
     this.encounter.update(ctx, this.hero);
     this.drawWater(ctx);
@@ -184,7 +189,7 @@ export class DemoScene extends Phaser.Scene {
       lights: ctx.lights,
       flash: 0,
       night: 1 - ctx.atmosphere.daylight,
-      clouds: cloudShadowsAt(this.odometer, ctx.elapsedMs, ctx.atmosphere),
+      clouds: this.clouds(ctx),
       skyRows: this.layout.horizonY,
     });
     const shake = this.clock.shake();
@@ -194,18 +199,26 @@ export class DemoScene extends Phaser.Scene {
   /** The one description of this frame every layer reads. */
   private context(frame: CameraFrame, pose: PlanetPose): FrameContext {
     const sky = this.weather.weatherState(this.clock.elapsedMs);
+    const atmosphere = this.clock.atmosphere(sky.overcast);
     return beginFrame({
       frame,
       pose,
       elapsedMs: this.clock.elapsedMs,
       deltaMs: this.clock.deltaMs,
-      atmosphere: this.clock.atmosphere(sky.overcast),
+      atmosphere,
       wind: { strength: sky.wind, gustiness: 0.6 },
       rain: sky.rain,
+      // The lighting pass is offset by its shake margin; the sampler reads the same pixel.
+      shade: cloudShade(cloudShadowsAt(this.odometer, this.clock.elapsedMs, atmosphere), MAX_SHAKE),
       width: WIDTH,
       height: HEIGHT,
       impulse: this.clock.sink,
     });
+  }
+
+  /** Where the cloud shadows are this frame: the one answer the pass and the sampler share. */
+  private clouds(ctx: FrameContext): ReturnType<typeof cloudShadowsAt> {
+    return cloudShadowsAt(this.odometer, ctx.elapsedMs, ctx.atmosphere);
   }
 
   /**

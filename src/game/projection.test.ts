@@ -10,6 +10,7 @@ import {
   project,
   rootedDepth,
   rowsDown,
+  standingDepth,
   TILE_DEPTH,
   TILE_WIDTH,
   wallCapY,
@@ -84,6 +85,33 @@ describe("the pitched-back camera", () => {
     expect(depthOf({ x: 0, y: 3 })).toBeLessThan(depthOf({ x: 0, y: 4 }));
     expect(depthOf({ x: 0, y: 3 })).toBeLessThan(depthOf({ x: 0, y: 3, z: 8 }));
     expect(depthOf({ x: 0, y: 3, z: 8 })).toBeLessThan(depthOf({ x: 0, y: 4 }));
+  });
+});
+
+describe("standingDepth", () => {
+  it("is the field's own key on the field", () => {
+    for (const row of [-1, 0, 4, 12]) {
+      expect(standingDepth(row, RANK.body)).toBe(row * TILE_WIDTH + RANK.body);
+    }
+  });
+
+  it("keeps far rows in order however far, without sinking under the horizon band", () => {
+    // A mountain a hundred rows out sorts behind the tree in front of it, and
+    // both stay over the band and the ground; a linear key would bury them.
+    let last = standingDepth(-1, RANK.body);
+    for (let row = -2; row > -400; row -= 1) {
+      const depth = standingDepth(row, RANK.body);
+      expect(depth).toBeLessThan(last);
+      expect(depth).toBeGreaterThan(HORIZON_DEPTH + 200);
+      last = depth;
+    }
+  });
+
+  it("keeps a rank inside its own row out there, so it never leaps the row behind", () => {
+    for (const row of [-2, -10, -60, -200]) {
+      expect(standingDepth(row, RANK.actor)).toBeLessThan(standingDepth(row + 1, RANK.cap));
+      expect(standingDepth(row, RANK.actor)).toBeGreaterThan(standingDepth(row, RANK.cap));
+    }
   });
 });
 

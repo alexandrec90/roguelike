@@ -26,7 +26,7 @@ import { particleCloud } from "../fx/particles";
 import { PixelSurface } from "../pixel-surface";
 import { fromLocal, toLocal, type LocalPoint, type PlanetPoint, type PlanetPose } from "../planet";
 import { RANK, TILE_DEPTH, TILE_WIDTH } from "../projection";
-import { terrainAt } from "../terrain";
+import { blockedByLand } from "../landforms";
 import { pixelHash } from "../transforms";
 import { windAt } from "../wind";
 import { groundFoot, onField } from "./anchor";
@@ -175,7 +175,7 @@ export class SpellLayer {
 
   private updateFlight(flight: Flight, ctx: FrameContext): void {
     const blocked = (point: PlanetPoint): boolean =>
-      terrainAt(point) === "rock" || this.hitTest(toLocal(ctx.pose, point));
+      blockedByLand(point) || this.hitTest(toLocal(ctx.pose, point));
     const burst = flyFireball(flight.ball, ctx.deltaMs, blocked);
     if (burst !== null) {
       this.detonate(burst, flight.ball.seed, ctx);

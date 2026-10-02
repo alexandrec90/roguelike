@@ -16,8 +16,14 @@
  */
 
 import { localPlacement, type CameraFrame, type LocalBounds } from "./camera";
-import { ROLL_ROWS } from "./horizon";
+import { rowsToSink } from "./horizon";
 import { toLocal, type PlanetPoint, type PlanetPose } from "./planet";
+
+/**
+ * The tallest a scenery body stands, in pixels at full size: how far past the
+ * horizon a body can still show its crown, and so how far out to look for one.
+ */
+export const TALLEST_BODY = 96;
 
 /** A tree's identity: where it stands, which no amount of turning changes. */
 export interface SlotKeyed {
@@ -34,6 +40,8 @@ export interface SlotView {
   readonly width: number;
   /** Widest a body can be at full size, so one half off the edge still shows. */
   readonly footprintWidth: number;
+  /** How tall a body stands at full size; left out, every body is taken as `TALLEST_BODY`. */
+  readonly heightOf?: (feature: PlanetPoint) => number;
 }
 
 /**
@@ -57,11 +65,14 @@ export function bodiesInView<T extends PlanetPoint>(
   const kept: { feature: T; distance: number }[] = [];
   for (const feature of candidates) {
     const local = toLocal(pose, feature);
-    if (local.y < view.bounds.minY - 1 || local.y > view.bounds.maxY + 1 + ROLL_ROWS) {
+    if (local.y < view.bounds.minY - 1 || local.y > view.bounds.maxY + 1 + rowsToSink(TALLEST_BODY)) {
       continue;
     }
     const placed = localPlacement(view.frame, local);
+    // Past the horizon a body is only worth a slot while some of it stands over the curve.
+    const sunk = Number.isFinite(placed.clipY) && placed.y - (view.heightOf?.(feature) ?? TALLEST_BODY) * placed.scale >= placed.clipY;
     if (
+      !sunk &&
       placed.visible &&
       placed.x > -view.footprintWidth &&
       placed.x < view.width + view.footprintWidth

@@ -8,14 +8,13 @@ import {
   GRASS,
   lazyGroundSample,
   planetHash,
-  ROCK,
   sampleGround,
   sharedGroundSample,
 } from "./ground-sample";
 
 const BOUNDS = { minX: -4, maxX: 4, minY: -3, maxY: 5 };
 const POSE: PlanetPose = { x: 91.3, y: 17.8, turn: 0.4 };
-const CODES = { grass: GRASS, dirt: DIRT, rock: ROCK } as const;
+const CODES = { grass: GRASS, dirt: DIRT } as const;
 
 describe("the ground lattice", () => {
   const sample = sampleGround(POSE, BOUNDS);

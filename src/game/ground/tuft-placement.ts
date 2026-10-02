@@ -17,7 +17,7 @@ import { valueNoise2 } from "../procgen/noise";
 import { TILE_DEPTH, TILE_WIDTH } from "../projection";
 import { pixelHash } from "../transforms";
 import { dirtOf } from "./ground-plan";
-import { cellLattice, cellTerrain, latticeIndex, ROCK, type GroundSample } from "./ground-sample";
+import { cellLattice, latticeIndex, type GroundSample } from "./ground-sample";
 import { pathCover } from "./ground-tiles";
 import { TUFT_KINDS } from "./tufts";
 
@@ -120,14 +120,12 @@ export function placeTufts(sample: GroundSample): TuftPlacement[] {
 }
 
 /**
- * The tufts rooted in one cell - none on rock. `placeTufts` is this over the
- * whole grid; the horizon lip asks cell by cell, for only the cells it shows.
+ * The tufts rooted in one cell. `placeTufts` is this over the whole grid; the
+ * horizon lip asks cell by cell, for only the cells it shows.
  */
 export function tuftsInCell(sample: GroundSample, localX: number, localY: number): TuftPlacement[] {
   const tufts: TuftPlacement[] = [];
-  if (cellTerrain(sample, localX, localY) !== ROCK) {
-    cellTufts(sample, localX, localY, tufts);
-  }
+  cellTufts(sample, localX, localY, tufts);
   return tufts;
 }
 

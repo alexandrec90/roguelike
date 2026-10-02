@@ -38,6 +38,7 @@ import {
   type CameraFrame,
   type LocalBounds,
 } from "./camera";
+import type { CloudShade } from "./cloud-shadow";
 import type { FrameContext } from "./frame-context";
 import { sharedGroundSample } from "./ground/ground-sample";
 import {
@@ -93,6 +94,8 @@ export class VegetationLayer {
   private sampled: PlanetPose | undefined;
   private flat: CameraFrame | undefined;
   private bareGround: BareGround | undefined;
+  /** What the tufts were last tinted for: the cloud pattern, the scroll and the tufts in place. */
+  private shadedKey = "";
   private bareCheckedAt = Number.NEGATIVE_INFINITY;
   /** The last frame's cost, ms - read it from the console when profiling. */
   lastFrameMs = 0;
@@ -144,6 +147,27 @@ export class VegetationLayer {
    */
   update(ctx: FrameContext, pushers?: readonly GrassPusher[]): void {
     this.draw(ctx.frame, ctx.pose, ctx.elapsedMs, ctx.wind, pushers ?? [{ x: ctx.frame.footX, y: ctx.frame.footY }]);
+    this.shadeTufts(ctx.shade, ctx.frame);
+  }
+
+  /**
+   * Tint each tuft by the cloud shadow at its root. A tuft on the field sorts
+   * among the things standing there, over the cloud shadows' own pass, so it
+   * takes the shadow the ground under it has - re-tinted only when the pattern
+   * on the screen has moved.
+   */
+  private shadeTufts(shade: CloudShade, frame: CameraFrame): void {
+    const offset = scrollOffset(frame);
+    const key = `${shade.key}|${offset.x},${offset.y}`;
+    if (key === this.shadedKey) {
+      return;
+    }
+    this.shadedKey = key;
+    const left = this.origin.x + offset.x;
+    const top = this.origin.y + offset.y;
+    for (const tuft of this.tufts) {
+      tuft.bob.setTint(shade.tint(left + tuft.placement.x, top + tuft.placement.y));
+    }
   }
 
   draw(
@@ -158,6 +182,7 @@ export class VegetationLayer {
       this.resample(pose);
       this.sampled = pose;
       this.bareCheckedAt = Number.NEGATIVE_INFINITY;
+      this.shadedKey = "";
     }
     if (elapsedMs - this.bareCheckedAt >= BARE_CHECK_MS || elapsedMs < this.bareCheckedAt) {
       this.checkBare();

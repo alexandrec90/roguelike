@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { PLACED_SPECIES, pickSpecies, SCENERY_LATTICES, sceneryNear } from "./scenery-features";
+import { PLACED_SPECIES, pickSpecies, SCENERY_LATTICES, sceneryNear, speciesHeight } from "./scenery-features";
+import { TALLEST_BODY } from "./scenery-slots";
 import { featuresNear, terrainAt } from "./terrain";
 import { findSpecies } from "./trees";
 
@@ -58,5 +59,17 @@ describe("the scenery on the planet", () => {
     expect(bs).toBeGreaterThan(250);
     expect(bs).toBeLessThan(350);
     expect(pickSpecies(mix, 17)).toBe(pickSpecies(mix, 17));
+  });
+});
+
+describe("speciesHeight", () => {
+  it("knows every placed species, a tree taller than a bush, none taller than the tallest body", () => {
+    for (const species of PLACED_SPECIES) {
+      expect(speciesHeight(species)).toBeGreaterThan(0);
+      expect(speciesHeight(species)).toBeLessThanOrEqual(TALLEST_BODY);
+    }
+    expect(speciesHeight("sdf-crown")).toBeGreaterThan(speciesHeight("bush"));
+    expect(speciesHeight("mushroom-ring")).toBeLessThan(speciesHeight("boulder"));
+    expect(speciesHeight("no-such-species")).toBe(TALLEST_BODY);
   });
 });

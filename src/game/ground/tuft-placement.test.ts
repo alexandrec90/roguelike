@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { TILE_DEPTH, TILE_WIDTH } from "../projection";
 import { demoTerrain, syntheticSample } from "./field-preview";
 import { dirtOf } from "./ground-plan";
-import { cellTerrain, ROCK } from "./ground-sample";
 import { pathCover } from "./ground-tiles";
 import {
   inWater,
@@ -41,10 +40,9 @@ describe("tuft placement", () => {
     }
   });
 
-  it("never roots a tuft on rock or on the visible path", () => {
+  it("never roots a tuft on the visible path", () => {
     for (const tuft of tufts) {
       const cell = cellOf(tuft.x, tuft.y);
-      expect(cellTerrain(sample, cell.localX, cell.localY)).not.toBe(ROCK);
       expect(pathCover(dirtOf(sample, cell.localX, cell.localY), cell.dx, cell.dy)).toBeLessThanOrEqual(0.3);
     }
   });
@@ -70,20 +68,6 @@ describe("tuft placement", () => {
       }
     }
     expect(byCell).toEqual(tufts);
-  });
-
-  it("grows nothing in a rock cell", () => {
-    const { bounds } = sample;
-    let rocks = 0;
-    for (let localY = bounds.minY; localY <= bounds.maxY; localY += 1) {
-      for (let localX = bounds.minX; localX <= bounds.maxX; localX += 1) {
-        if (cellTerrain(sample, localX, localY) === ROCK) {
-          rocks += 1;
-          expect(tuftsInCell(sample, localX, localY)).toEqual([]);
-        }
-      }
-    }
-    expect(rocks).toBeGreaterThan(0);
   });
 });
 

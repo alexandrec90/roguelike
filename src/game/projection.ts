@@ -186,6 +186,38 @@ export const RANK = {
  */
 export const HORIZON_DEPTH = -880;
 
+/** The last affine row of the field: a foot on the seam is row -1. */
+const FIELD_FAR_ROW = -1;
+
+/** Depth past the field's far edge is squeezed into this much room, under the field and over the band. */
+const FAR_SPAN = 560;
+
+/** Rows over which the squeeze takes most of that room: the far distance stays ordered, ever more finely. */
+const FAR_ROWS = 60;
+
+/**
+ * Painter's key for a thing *standing* at an affine screen row - a tree, a
+ * landform's slice, an actor.
+ *
+ * On the field it is `row * TILE_WIDTH + rank`. Past the field's far edge rows
+ * go on to minus a hundred and more - a mountain is visible from that far - and
+ * a linear key would sink them under the horizon band and the ground. So the
+ * far rows are squeezed into the `FAR_SPAN` above the band, still in order:
+ * a tree behind a mountain stays behind it however far away both are. Every
+ * standing thing must take its depth from here, or two of them stop agreeing.
+ */
+export function standingDepth(row: number, rank: number): number {
+  if (row >= FIELD_FAR_ROW) {
+    return row * TILE_WIDTH + rank;
+  }
+  const beyond = FIELD_FAR_ROW - row;
+  const squeezed = FAR_SPAN * (1 - Math.exp(-beyond / FAR_ROWS));
+  // A row's share of the room shrinks with distance; a rank must shrink with it
+  // or it would leap a body past the row behind.
+  const spacing = Math.min(1, (FAR_SPAN / FAR_ROWS) * Math.exp(-beyond / FAR_ROWS) / TILE_WIDTH);
+  return FIELD_FAR_ROW * TILE_WIDTH - squeezed + rank * spacing;
+}
+
 /**
  * Painter's key for a thing *rooted in the ground* on a screen row - grass, a
  * puddle's ring - rather than standing on it.
