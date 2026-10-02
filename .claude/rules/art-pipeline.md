@@ -65,10 +65,11 @@ other module; the API table below covers the calls.
 | Smoke, fog, a swarm, spreading fire | a field over particles — see `procedural-effects.md` | `src/game/spark-emitter.ts` |
 | A puddle, a pool, water on the ground | a seeded outline plus its surface layers | `src/game/puddles.ts` |
 | A ring spreading from an impact | a pooled `Ripple`, aged by a clock | `src/game/ripples.ts` |
-| Where the water, trees and rock *are* | a seeded field over planet coordinates | `src/game/terrain.ts` |
+| Where the water and trees *are* | a seeded field over planet coordinates | `src/game/terrain.ts` |
+| A mountain, a mesa, a tower — anything tall | a height function per kind, drawn by the march | `src/game/landforms.ts` |
 | A recolour of anything at all | a `PaletteVariant` | `src/game/asset-registry.ts` |
 | A new creature | reuse `HUMANOID_SKELETON` if it is bipedal; else a new `SkeletonDef` | `src/game/models.ts` |
-| A ground tile, a rock face, a grass tuft | a generator baked once — never an authored mask | `src/game/ground/` |
+| A ground tile, a grass tuft | a generator baked once — never an authored mask | `src/game/ground/` |
 | A tree, a bush, a boulder | a species: seed + pose, baked by lean | `src/game/trees/`, `src/game/props/` |
 | Eyes, a badge — a mark that turns with the body | a `stamp` with an `offset` and `facing: "front"` | `src/game/models.ts` |
 | The same model facing **left**, **away**, or on a diagonal | nothing — pass `yaw` (`facingYaw(heading)` for one of the eight) | — |

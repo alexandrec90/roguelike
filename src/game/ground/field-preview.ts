@@ -4,24 +4,26 @@
  * Single tiles cannot show the two things that matter most about the ground:
  * that neighbours meet without a seam, and that a path winds instead of
  * stepping. So the lab also gets a whole field - a synthetic lattice with a
- * meandering path and a ragged outcrop - run through the same `planGround`,
- * the same tiles and the same tuft placement as the layers, and stamped in the
- * same painter's order (ground, then each row far to near: rock, then grass).
+ * meandering path - run through the same `planGround`, the same tiles and the
+ * same tuft placement as the layers, and stamped in the same painter's order
+ * (ground, then each row's grass far to near).
  */
 
 import type { LocalBounds } from "../camera";
 import { familyRamp, type Family } from "../palette";
 import type { InkId } from "../ink";
 import type { PlanetPose } from "../planet";
-import { TILE_DEPTH, WALL_RISE } from "../projection";
+import { WALL_RISE } from "../projection";
 import { windAt } from "../wind";
-import { FACE_TOP, planGround } from "./ground-plan";
-import { DIRT, GRASS, planetHash, ROCK, type GroundSample, type TerrainCode } from "./ground-sample";
+import { planGround } from "./ground-plan";
+import { DIRT, GRASS, planetHash, type GroundSample, type TerrainCode } from "./ground-sample";
 import { groundTile, unpackGroundKey } from "./ground-tiles";
 import { createGrid, gridAt, setGrid, stampGrid, type InkGrid } from "./ink-grid";
-import { capTile, faceTile, unpackCapKey, unpackFaceKey } from "./rock-tiles";
 import { placeTufts, windBetween, windGrid } from "./tuft-placement";
 import { bendFrame, TUFT_SHAPES, tuftCloud } from "./tufts";
+
+/** Scanlines of room over the far row, for its tallest blades; the frame the lab has always shown. */
+const HEADROOM = WALL_RISE;
 
 /** A field of `columns` x `rows` cells whose terrain is `terrain(x, y)` in local tiles. */
 export function syntheticSample(
@@ -59,18 +61,10 @@ export function syntheticSample(
   return sample;
 }
 
-/** The demo field: a path that meanders down the patch past an irregular outcrop. */
+/** The demo field: a path that meanders down the patch. */
 export function demoTerrain(x: number, y: number): TerrainCode {
   const pathCentre = 3.2 + 1.8 * Math.sin(y / 1.7) + 0.6 * Math.sin(y * 1.3);
-  if (Math.abs(x - pathCentre) < 0.62) {
-    return DIRT;
-  }
-  const dx = (x - 8.5) / 2.6;
-  const dy = (y - 5.5) / 1.8;
-  if (dx * dx + dy * dy + 0.25 * Math.sin(x * 2.1 + y) < 1) {
-    return ROCK;
-  }
-  return GRASS;
+  return Math.abs(x - pathCentre) < 0.62 ? DIRT : GRASS;
 }
 
 /** A shadow pixel over a ramp ink is that ink one step down its own ramp. */
@@ -88,34 +82,23 @@ function shaded(under: InkId | null): InkId | null {
 }
 
 /**
- * Compose the field at a moment of wind. The grid is `WALL_RISE` taller than
- * the ground, at the top, so the far row's rock caps have room to stand.
+ * Compose the field at a moment of wind. The grid is `HEADROOM` taller than
+ * the ground, at the top, so the far row's grass has room to rise.
  */
 export function composeField(sample: GroundSample, elapsedMs: number): InkGrid {
   const plan = planGround(sample);
-  const grid = createGrid(plan.width, plan.height + WALL_RISE);
+  const grid = createGrid(plan.width, plan.height + HEADROOM);
   for (const cell of plan.ground) {
-    stampGrid(grid, groundTile(unpackGroundKey(cell.key)), cell.x, cell.y + WALL_RISE);
+    stampGrid(grid, groundTile(unpackGroundKey(cell.key)), cell.x, cell.y + HEADROOM);
   }
   const wind = windGrid(sample);
   wind.value.forEach((_value, index) => {
     wind.value[index] = windAt(elapsedMs, wind.x[index] ?? 0, wind.y[index] ?? 0);
   });
   const tufts = placeTufts(sample);
-  for (let index = plan.rockRows.length - 1; index >= 0; index -= 1) {
-    const row = plan.rockRows[index];
-    if (row === undefined) {
-      continue;
-    }
-    const rowTop = (sample.bounds.maxY - row.localY) * TILE_DEPTH;
-    for (const cap of row.caps) {
-      stampGrid(grid, capTile(unpackCapKey(cap.key)), cap.x, rowTop);
-    }
-    for (const face of row.faces) {
-      stampGrid(grid, faceTile(unpackFaceKey(face.key)), face.x, rowTop + FACE_TOP);
-    }
+  for (let localY = sample.bounds.maxY; localY >= sample.bounds.minY; localY -= 1) {
     for (const tuft of tufts) {
-      if (tuft.localY !== row.localY) {
+      if (tuft.localY !== localY) {
         continue;
       }
       const bend = windBetween(wind, tuft.windU, tuft.windV) * 4 * tuft.flex;
@@ -125,7 +108,7 @@ export function composeField(sample: GroundSample, elapsedMs: number): InkGrid {
       }
       for (const pixel of tuftCloud(shape, bendFrame(bend))) {
         const x = tuft.x + pixel.x;
-        const y = tuft.y + WALL_RISE + pixel.y;
+        const y = tuft.y + HEADROOM + pixel.y;
         const ink = pixel.ink === "shadow-soft" ? shaded(gridAt(grid, x, y)) : pixel.ink;
         setGrid(grid, x, y, ink);
       }

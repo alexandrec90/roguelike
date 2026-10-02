@@ -5,7 +5,9 @@ import { TILE_DEPTH } from "./projection";
 import {
   DEFAULT_SKY_FRACTION,
   HORIZON_SCALE,
+  HORIZON_SINK_RATE,
   horizonLayout,
+  horizonSink,
   MAX_SKY_FRACTION,
   parseSkyFraction,
   ridgeProfile,
@@ -15,6 +17,7 @@ import {
   rollPlacement,
   rollRowAt,
   rollScale,
+  rowsToSink,
   skyBands,
   SKY_RAMP,
   starField,
@@ -23,11 +26,37 @@ import {
 /** The default roll: 24 scanlines on a 180px target. */
 const ROLL = 24;
 
+describe("past the horizon line", () => {
+  it("keeps shrinking a body, from HORIZON_SCALE on the line, as one over its distance", () => {
+    expect(rollScale(ROLL_ROWS, ROLL)).toBeCloseTo(HORIZON_SCALE, 12);
+    expect(rollScale(ROLL_ROWS + 1e-6, ROLL)).toBeCloseTo(HORIZON_SCALE, 6);
+    expect(rollScale(ROLL_ROWS * 2, ROLL)).toBeCloseTo(HORIZON_SCALE / 2, 12);
+  });
+
+  it("sinks a body behind the curve, foot first, faster the farther it is", () => {
+    expect(horizonSink(ROLL_ROWS)).toBe(0);
+    expect(horizonSink(ROLL_ROWS - 5)).toBe(0);
+    expect(horizonSink(ROLL_ROWS + 10)).toBeCloseTo(HORIZON_SINK_RATE * 100, 12);
+    expect(horizonSink(ROLL_ROWS + 20)).toBeGreaterThan(2 * horizonSink(ROLL_ROWS + 10));
+    expect(rollPlacement(ROLL_ROWS + 10, ROLL).sink).toBe(horizonSink(ROLL_ROWS + 10));
+    expect(rollPlacement(ROLL_ROWS + 10, ROLL).lift).toBe(1);
+    expect(rollPlacement(ROLL_ROWS + 10, ROLL).beyond).toBe(true);
+  });
+
+  it("says how far out a body of a given height is still over the curve", () => {
+    for (const height of [12, 96, 380]) {
+      expect(horizonSink(rowsToSink(height))).toBeCloseTo(height, 9);
+    }
+    expect(rowsToSink(380)).toBeGreaterThan(rowsToSink(96));
+    expect(rowsToSink(0)).toBe(ROLL_ROWS);
+  });
+});
+
 describe("the roll's projection", () => {
   it("is exactly full size at the seam with the flat field, so nothing pops", () => {
     expect(rollScale(0, ROLL)).toBe(1);
     expect(rollLift(0, ROLL)).toBe(0);
-    expect(rollPlacement(0, ROLL)).toEqual({ lift: 0, scale: 1, beyond: false });
+    expect(rollPlacement(0, ROLL)).toEqual({ lift: 0, scale: 1, beyond: false, sink: 0 });
   });
 
   it("treats a row inside the field as the seam rather than growing past 1", () => {

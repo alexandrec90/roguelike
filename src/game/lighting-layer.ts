@@ -22,7 +22,7 @@
 
 import Phaser from "phaser";
 
-import { CLOUD_TILE_HEIGHT, cloudShadowTile, tileOrigins } from "./cloud-shadow";
+import { CLOUD_TILE_HEIGHT, cloudTile, tileOrigins } from "./cloud-shadow";
 import { hexToInt, mixHex } from "./color";
 import { MAX_SHAKE } from "./impulse";
 import { lightPool, type LightSource } from "./lights";
@@ -31,6 +31,16 @@ import { installBuffer } from "./pixel-surface";
 /** Over everything in the world, under the weather's flash and the debug map. */
 export const LIGHTING_DEPTH = 4500;
 export const GLOW_DEPTH = 4550;
+
+/**
+ * The cloud shadows' own pass: over everything lying on the ground - the
+ * field, the horizon lip, water, scorch - and under everything standing, the
+ * deepest of which sorts at -576 (`standingDepth`). A standing thing takes its
+ * cloud shadow as a tint from `CloudShade` instead, so one that rises past the
+ * horizon line is shaded whole rather than cut in two by the sky rows the pass
+ * leaves clear.
+ */
+export const CLOUD_DEPTH = -700;
 
 /** Pixels of pass beyond each edge of the target: at least the largest shake. */
 const MARGIN = MAX_SHAKE;
@@ -61,18 +71,24 @@ export interface LightingFrame {
 export class LightingLayer {
   private scene!: Phaser.Scene;
   private shade!: Phaser.GameObjects.RenderTexture;
+  private clouds!: Phaser.GameObjects.RenderTexture;
   private glow!: Phaser.GameObjects.RenderTexture;
   private readonly baked = new Set<number>();
 
   create(scene: Phaser.Scene, width: number, height: number): void {
     this.scene = scene;
-    installBuffer(scene.textures, CLOUD_KEY, cloudShadowTile(0xc1d5));
+    installBuffer(scene.textures, CLOUD_KEY, cloudTile());
     // A margin all round, so a camera shake never slides an unlit strip of
     // the world out from under the pass.
     this.shade = scene.add
       .renderTexture(-MARGIN, -MARGIN, width + MARGIN * 2, height + MARGIN * 2)
       .setOrigin(0, 0)
       .setDepth(LIGHTING_DEPTH)
+      .setBlendMode(Phaser.BlendModes.MULTIPLY);
+    this.clouds = scene.add
+      .renderTexture(-MARGIN, -MARGIN, width + MARGIN * 2, height + MARGIN * 2)
+      .setOrigin(0, 0)
+      .setDepth(CLOUD_DEPTH)
       .setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.glow = scene.add
       .renderTexture(-MARGIN, -MARGIN, width + MARGIN * 2, height + MARGIN * 2)
@@ -81,19 +97,20 @@ export class LightingLayer {
       .setBlendMode(Phaser.BlendModes.ADD);
   }
 
-  /** Light one frame: ambient, then cloud shade, then every light's pool. */
+  /** Light one frame: cloud shadow on the ground, then ambient and every light's pool over all. */
   draw(frame: LightingFrame): void {
     const { lights, night } = frame;
     const lit = frame.flash > 0 ? mixHex(frame.ambient, "#ffffff", Math.min(frame.flash, 1)) : frame.ambient;
     const clouded = frame.clouds.strength > 0.02;
-    const plainDay = lit.toLowerCase() === "#ffffff" && lights.length === 0 && !clouded;
+    this.clouds.setVisible(clouded);
+    if (clouded) {
+      this.cloudShade(frame);
+    }
+    const plainDay = lit.toLowerCase() === "#ffffff" && lights.length === 0;
     this.shade.setVisible(!plainDay);
     if (!plainDay) {
       this.shade.clear();
       this.shade.fill(hexToInt(lit), 1);
-      if (clouded) {
-        this.cloudShade(frame, hexToInt(lit));
-      }
       for (const light of lights) {
         this.stamp(this.shade, light, light.radius, Math.min(light.intensity, 1.5) * 0.85);
       }
@@ -113,21 +130,25 @@ export class LightingLayer {
   }
 
   /**
-   * Multiply the drifting cloud tile over the ground, then paint the sky rows
-   * back to plain ambient: a cloud's shadow falls on the field, not on the sky.
+   * The drifting cloud tile over the ground, with the sky rows left clear: a
+   * cloud's shadow falls on the field, not on the sky. Its own pass, under
+   * everything that stands (`CLOUD_DEPTH`).
    */
-  private cloudShade(frame: LightingFrame, ambient: number): void {
-    const width = this.shade.width;
-    const height = this.shade.height;
+  private cloudShade(frame: LightingFrame): void {
+    const width = this.clouds.width;
+    const height = this.clouds.height;
+    this.clouds.clear();
+    this.clouds.fill(0xffffff, 1);
     for (const origin of tileOrigins(frame.clouds.x, frame.clouds.y, width, height + CLOUD_TILE_HEIGHT)) {
-      this.shade.stamp(CLOUD_KEY, undefined, origin.x, origin.y, {
+      this.clouds.stamp(CLOUD_KEY, undefined, origin.x, origin.y, {
         originX: 0,
         originY: 0,
         alpha: Math.min(frame.clouds.strength, 1),
         blendMode: Phaser.BlendModes.MULTIPLY,
       });
     }
-    this.shade.fill(ambient, 1, 0, 0, width, frame.skyRows + MARGIN);
+    this.clouds.fill(0xffffff, 1, 0, 0, width, frame.skyRows + MARGIN);
+    this.clouds.render();
   }
 
   private stamp(

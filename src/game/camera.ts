@@ -72,8 +72,58 @@ export function localFoot(frame: CameraFrame, local: LocalPoint): ScreenPoint {
 export interface Placement extends ScreenPoint {
   /** 1 anywhere in the flat field; `rollScale` past its far edge. */
   readonly scale: number;
-  /** False once the point has gone over the horizon. */
+  /** False once the point is so far over the horizon that nothing standing there could show. */
   readonly visible: boolean;
+  /**
+   * The first scanline that hides it: the horizon line for a body past it,
+   * whose foot has sunk below the line and whose top still shows above it;
+   * `Infinity` this side of the horizon.
+   */
+  readonly clipY: number;
+}
+
+/** How far down the line a body's sink may go before nothing on the planet is tall enough to show. */
+const DEEPEST_SINK = 900;
+
+/** What the projection does at one depth: where the ground is, and how large things are there. */
+export interface DepthProjection {
+  /** Screen y of the ground, continuous; past the horizon, the line pushed down by the sink. */
+  readonly ground: number;
+  /** 1 on the field, `rollScale` past it. */
+  readonly scale: number;
+  /** Rows past the field's far edge; 0 on the field. */
+  readonly rowsBeyond: number;
+  /** As `Placement.clipY`. */
+  readonly clipY: number;
+  /** Pixels of height, at full size, hidden below the horizon line. */
+  readonly sink: number;
+}
+
+/**
+ * The projection at a local depth `localY`, for everything that stands - the
+ * one answer the scenery, the landforms and the roll's own ground share.
+ *
+ * On the field it is the affine grid. Past its far edge the ground climbs the
+ * roll and things shrink (`rollPlacement`), and past the horizon line they sink
+ * behind the curve, foot first, and are cut off at the line: a mountain a
+ * hundred rows away is a peak over the horizon, not nothing, and nothing pops
+ * when it comes into view.
+ */
+export function projectDepth(frame: CameraFrame, localY: number): DepthProjection {
+  const affineY = frame.footY - (localY - frame.phaseY) * TILE_DEPTH;
+  if (affineY >= frame.groundTop) {
+    return { ground: affineY, scale: 1, rowsBeyond: 0, clipY: Number.POSITIVE_INFINITY, sink: 0 };
+  }
+  const rowsBeyond = (frame.groundTop - affineY) / TILE_DEPTH;
+  const roll = rollPlacement(rowsBeyond, frame.rollHeight);
+  const line = frame.groundTop - frame.rollHeight * roll.lift;
+  return {
+    ground: line + roll.sink * roll.scale,
+    scale: roll.scale,
+    rowsBeyond,
+    clipY: roll.beyond ? frame.groundTop - frame.rollHeight : Number.POSITIVE_INFINITY,
+    sink: roll.sink,
+  };
 }
 
 /**
@@ -91,31 +141,17 @@ export interface Placement extends ScreenPoint {
  * field: inside it the grid is affine and a column is a column.
  */
 export function localPlacement(frame: CameraFrame, local: LocalPoint): Placement {
-  const affineY = frame.footY - (local.y - frame.phaseY) * TILE_DEPTH;
-  if (affineY >= frame.groundTop) {
-    return { ...localFoot(frame, local), scale: 1, visible: true };
+  const depth = projectDepth(frame, local.y);
+  if (depth.rowsBeyond === 0) {
+    return { ...localFoot(frame, local), scale: 1, visible: true, clipY: depth.clipY };
   }
-  const roll = rollPlacement((frame.groundTop - affineY) / TILE_DEPTH, frame.rollHeight);
   return {
-    x: Math.round(frame.footX + (local.x - frame.phaseX) * TILE_WIDTH * roll.scale),
-    y: Math.round(frame.groundTop - frame.rollHeight * roll.lift),
-    scale: roll.scale,
-    visible: !roll.beyond,
+    x: Math.round(frame.footX + (local.x - frame.phaseX) * TILE_WIDTH * depth.scale),
+    y: Math.round(depth.ground),
+    scale: depth.scale,
+    visible: depth.sink < DEEPEST_SINK,
+    clipY: depth.clipY,
   };
-}
-
-/**
- * Whether something standing with its foot on screen row `footY` is the
- * field's to draw, rather than the horizon roll's.
- *
- * The field's grid runs a row or two past the seam so the scroll has a row to
- * slide on; those rows are under the roll, not seen. Anything standing on them
- * - a rock row - is drawn by the roll instead, at the roll's own scale
- * (`roll-rock.ts`), so it rolls on rather than floating full size over the
- * horizon. A foot exactly on the seam is the roll's: one owner per row, always.
- */
-export function standsOnField(footY: number, frame: Pick<CameraFrame, "groundTop">): boolean {
-  return footY > frame.groundTop;
 }
 
 /**

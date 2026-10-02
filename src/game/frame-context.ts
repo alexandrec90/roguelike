@@ -11,6 +11,7 @@
 
 import type { Atmosphere } from "./atmosphere";
 import type { CameraFrame } from "./camera";
+import type { CloudShade } from "./cloud-shadow";
 import type { ImpulseSink } from "./impulse";
 import type { LightSource } from "./lights";
 import type { PlanetPose } from "./planet";
@@ -29,6 +30,11 @@ export interface FrameContext {
   readonly wind: WindOptions;
   /** 0..1: how hard it is raining. Wetness, splashes and darkening read it. */
   readonly rain: number;
+  /**
+   * The cloud shadow on the ground at a screen point. The ground has it from the
+   * lighting pass; anything standing asks here and takes it as a tint.
+   */
+  readonly shade: CloudShade;
   /** Render-target size, logical pixels. */
   readonly width: number;
   readonly height: number;

@@ -16,7 +16,7 @@
 
 import { strikePush, type Element, type Strike } from "../combat";
 import { fromLocal, toLocal, type LocalPoint, type PlanetPoint, type PlanetPose } from "../planet";
-import { isRockAt } from "../terrain";
+import { blockedByLand } from "../landforms";
 import { pixelHash } from "../transforms";
 import {
   createSlime,
@@ -117,7 +117,7 @@ export function createSlimeSim(options: { readonly blocked?: Blocked } = {}): Sl
   return {
     slimes: [],
     dens: new Map(),
-    blocked: options.blocked ?? isRockAt,
+    blocked: options.blocked ?? blockedByLand,
     clockMs: 0,
     sweepMs: 0,
     nextId: 1,

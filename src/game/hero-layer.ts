@@ -74,7 +74,7 @@ import {
 } from "./player";
 import { RANK, rowAtFoot, TILE_WIDTH } from "./projection";
 import { MAX_STEP_MS } from "./spark-emitter";
-import { isRockAt } from "./terrain";
+import { blockedByLand } from "./landforms";
 import type { WindOptions } from "./wind";
 
 export interface Foot {
@@ -124,7 +124,7 @@ export class HeroLayer {
 
   constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
     this.player = createPlayer(start);
-    this.world = { radius, blocked: isRockAt };
+    this.world = { radius, blocked: blockedByLand };
   }
 
   create(scene: Phaser.Scene, groundTop: number, foot: Foot): void {
@@ -200,6 +200,8 @@ export class HeroLayer {
     this.lastDeltaMs = ctx.deltaMs;
     const sun: ShadowLight = { light: ctx.atmosphere.light, elevation: ctx.atmosphere.elevation };
     this.draw(sun, ctx.atmosphere.shadowStrength, ctx.wind);
+    // He stands, so the cloud shadow reaches him as a tint, not through the ground's pass.
+    this.body.image.setTint(ctx.shade.tint(this.foot.x, this.foot.y));
     const light = this.look.light(this.player, this.foot.x, this.foot.y, ctx.elapsedMs);
     if (light !== undefined) {
       ctx.lights.push(light);

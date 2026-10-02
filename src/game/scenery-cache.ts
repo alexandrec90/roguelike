@@ -73,10 +73,21 @@ interface Job {
 }
 
 /** How many bodies' textures are kept before the least recently seen go. */
-const MAX_RECORDS = 110;
+const MAX_RECORDS = 320;
 
-/** Horizon bakes are made at this spacing of scale, so a walk re-bakes rarely. */
-const SCALE_STEP = 0.05;
+/**
+ * Horizon bakes are made at this spacing of scale: fine enough that a body
+ * grows a pixel or two at a time as it comes down the roll, coarse enough that
+ * a walk re-bakes it a few dozen times rather than every frame.
+ */
+const SCALE_STEP = 0.025;
+
+/**
+ * Horizon bakes made on the spot per frame. A body that has crossed into a new
+ * scale step past this shows the nearest scale it already has for a frame or
+ * two - a pixel off its size, never missing - while the queue catches up.
+ */
+const SCALE_BAKES_PER_FRAME = 1;
 
 /**
  * A body this large on the roll is a few steps from the field: warm its
@@ -103,6 +114,8 @@ export class SceneryCache {
    * drawn a frame late rather than stalling the frame it scrolls in on.
    */
   private spotBakes = 1;
+  /** Horizon bakes still allowed on the spot this frame. */
+  private scaleBakes = SCALE_BAKES_PER_FRAME;
 
   constructor(textures: Phaser.Textures.TextureManager) {
     this.textures = textures;
@@ -166,9 +179,13 @@ export class SceneryCache {
       this.schedule(record, this.background);
     }
     const step = Math.max(SCALE_STEP, Math.round(scale / SCALE_STEP) * SCALE_STEP);
-    const key = `${step.toFixed(2)}|${this.lightId}`;
+    const key = `${step.toFixed(3)}|${this.lightId}`;
     let baked = record.scaled.get(key);
     if (baked === undefined) {
+      if (this.scaleBakes <= 0) {
+        return nearestScale(record.scaled, step, this.lightId);
+      }
+      this.scaleBakes -= 1;
       baked = this.install(bakeScaled(record.instance, this.light, step), `${record.id}-s`);
       record.scaled.set(key, baked);
     }
@@ -182,6 +199,7 @@ export class SceneryCache {
   pump(budgetMs: number): void {
     this.frame += 1;
     this.spotBakes = 1;
+    this.scaleBakes = SCALE_BAKES_PER_FRAME;
     for (const key of this.graveyard) {
       this.textures.remove(key);
     }
@@ -345,6 +363,25 @@ export class SceneryCache {
       }
     }
   }
+}
+
+/** The baked scale nearest `step` in this light, from keys `scale|light`; undefined if there is none. */
+function nearestScale(
+  scaled: ReadonlyMap<string, BakedTexture>,
+  step: number,
+  lightId: string,
+): BakedTexture | undefined {
+  let best: BakedTexture | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const [key, baked] of scaled) {
+    const [scale, light] = key.split("|");
+    const distance = Math.abs(Number(scale) - step);
+    if (light === lightId && distance < bestDistance) {
+      best = baked;
+      bestDistance = distance;
+    }
+  }
+  return best;
 }
 
 /** The ready lean closest to the one asked for, or undefined if none is. */

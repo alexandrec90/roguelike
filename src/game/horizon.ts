@@ -102,7 +102,9 @@ export function rollKnee(rollHeight: number, rows: number = ROLL_ROWS): number {
   if (rollHeight <= 0 || rows <= 0) {
     return 0;
   }
-  const key = `${rollHeight}:${rows}`;
+  // A number, not a string: this is asked several times per scanline of the
+  // lip and per step of a landform's march, and building a key was the cost.
+  const key = rollHeight * 4096 + rows;
   const cached = knees.get(key);
   if (cached !== undefined) {
     return cached;
@@ -126,7 +128,7 @@ export function rollKnee(rollHeight: number, rows: number = ROLL_ROWS): number {
   return knee;
 }
 
-const knees = new Map<string, number>();
+const knees = new Map<number, number>();
 
 /**
  * How far up the roll a row `rowsBeyond` the field lands, 0 at the seam and 1
@@ -173,6 +175,11 @@ export function rollScale(
   if (rowsBeyond <= 0 || rows <= 0) {
     return 1;
   }
+  if (rowsBeyond > rows) {
+    // Over the horizon a thing keeps receding: size falls as one over distance,
+    // from exactly `horizonScale` on the line, so nothing jumps as it crosses.
+    return (horizonScale * rows) / rowsBeyond;
+  }
   const knee = rollKnee(rollHeight, rows);
   if (knee === 0) {
     return horizonScale;
@@ -183,13 +190,39 @@ export function rollScale(
   return horizonScale + (1 - horizonScale) * Math.sqrt(share);
 }
 
+/**
+ * How fast the world past the horizon sinks behind the curve: pixels of a
+ * body's height hidden below the horizon line, per row past it, squared.
+ *
+ * The planet is round, so what is past the horizon is not gone - it is below
+ * the line, foot first. A tree a dozen rows over has sunk out of sight; a
+ * mountain shows its peak forty rows past the line and rises as it is
+ * approached. Steep enough that the far bodies in view stay a few dozen - each
+ * one is a slot and a bake - and shallow enough that the tallest landform is
+ * on the skyline from twice the horizon's distance.
+ */
+export const HORIZON_SINK_RATE = 0.25;
+
+/** Rows past the horizon line by which a body this tall, in pixels at full size, has sunk from sight. */
+export function rowsToSink(height: number, rows: number = ROLL_ROWS): number {
+  return rows + Math.sqrt(Math.max(height, 0) / HORIZON_SINK_RATE);
+}
+
+/** Pixels of a body's height, at full size, hidden below the horizon line. */
+export function horizonSink(rowsBeyond: number, rows: number = ROLL_ROWS): number {
+  const over = rowsBeyond - rows;
+  return over <= 0 ? 0 : HORIZON_SINK_RATE * over * over;
+}
+
 export interface RollPlacement {
   /** Fraction of the roll's height above the field's far edge, 0..1. */
   readonly lift: number;
-  /** Size relative to a body in the flat field, `HORIZON_SCALE`..1. */
+  /** Size relative to a body in the flat field: 1 at the seam, `HORIZON_SCALE` on the line, less past it. */
   readonly scale: number;
-  /** Past the horizon: over the curve and out of sight. */
+  /** Past the horizon line: drawn sunk by `sink` and cut off at the line. */
   readonly beyond: boolean;
+  /** Pixels of height, at full size, hidden below the horizon line; 0 this side of it. */
+  readonly sink: number;
 }
 
 /** Where a row past the field's far edge lands on a roll this tall, and how large. */
@@ -202,6 +235,7 @@ export function rollPlacement(
     lift: Math.min(rollLift(rowsBeyond, rollHeight, rows), 1),
     scale: rollScale(rowsBeyond, rollHeight, rows),
     beyond: rowsBeyond > rows,
+    sink: horizonSink(rowsBeyond, rows),
   };
 }
 

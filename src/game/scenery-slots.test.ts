@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { visibleLocal, type CameraFrame } from "./camera";
-import { ROLL_ROWS } from "./horizon";
+import { ROLL_ROWS, rowsToSink } from "./horizon";
 import { TILE_DEPTH } from "./projection";
-import { bodiesInView, keyOf, lendSlots, type SlotView } from "./scenery-slots";
+import { bodiesInView, keyOf, lendSlots, TALLEST_BODY, type SlotView } from "./scenery-slots";
 
 interface Tree {
   readonly x: number;
@@ -164,10 +164,19 @@ describe("bodiesInView", () => {
     expect(bodiesInView([at(0, 3), at(-4, -2)], pose, view)).toHaveLength(2);
   });
 
-  it("keeps a body on the roll all the way out to the horizon, and drops one past it", () => {
+  it("keeps a body on the roll out to the horizon, and past it while it still shows over the curve", () => {
     const onRoll = at(0, farEdge + ROLL_ROWS - 1);
-    const gone = at(0, farEdge + ROLL_ROWS + 2);
-    expect(bodiesInView([onRoll, gone], pose, view)).toEqual([onRoll]);
+    const sinking = at(0, farEdge + ROLL_ROWS + 2);
+    const sunk = at(0, farEdge + rowsToSink(TALLEST_BODY) + 2);
+    expect(bodiesInView([onRoll, sinking, sunk], pose, view)).toEqual([onRoll, sinking]);
+  });
+
+  it("lets a short body go sooner than a tall one, past the horizon", () => {
+    const rows = ROLL_ROWS + (rowsToSink(TALLEST_BODY) - ROLL_ROWS) / 2;
+    const bush = at(0, farEdge + rows);
+    const tree = at(1, farEdge + rows);
+    const heightOf = (feature: { x: number }): number => (feature.x === bush.x ? 20 : TALLEST_BODY);
+    expect(bodiesInView([bush, tree], pose, { ...view, heightOf })).toEqual([tree]);
   });
 
   it("judges the edge where a body is drawn, not by a box in tiles", () => {

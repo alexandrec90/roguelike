@@ -14,14 +14,18 @@
  * slides half a tile under a grid that never moved; turn, and the field flows
  * through that same grid. Nothing is ever resampled, rotated or scaled.
  *
- * Three fields, layered, all built from one wrapping value noise so the seam at
- * `PLANET_TILES` is not a seam:
+ * Two fields, both built from one wrapping value noise so the seam at
+ * `PLANET_TILES` is not a seam, and the point things laid over them:
  *
  * | Field     | Reads as                                                     |
  * | --------- | ------------------------------------------------------------ |
- * | elevation | fbm; above `ROCK_LEVEL` it is standing rock                   |
  * | path      | two octaves; the contour at 0.5 is trodden dirt, and meanders |
  * | features  | a jittered lattice of point things - trees, puddles           |
+ *
+ * The ground is flat. It used to stand up in blocks wherever an elevation field
+ * crossed a threshold, which put a grid on a planet that has none; anything
+ * with height is now a landform (`landforms.ts`), a shape at a planet point, and
+ * nothing grows inside one.
  *
  * Features are the exception that proves the rule: a tree is one sprite with an
  * identity, so it *does* get a discrete position, hashed out of a planet cell
@@ -29,15 +33,13 @@
  * than snapped to the grid, which is exactly why it may be.
  */
 
+import { blockedByLand } from "./landforms";
 import { PLANET_TILES, wrapTile, type PlanetPoint } from "./planet";
 
-export type Terrain = "grass" | "dirt" | "rock";
+export type Terrain = "grass" | "dirt";
 
 /** One seed for the whole planet, so a capture of it is reproducible. */
 export const PLANET_SEED = 0x5eed;
-
-/** Elevation above which the ground stands up as a rock block. */
-const ROCK_LEVEL = 0.622;
 
 /** Half-width of the contour band the path field draws, in field units. */
 const PATH_WIDTH = 0.025;
@@ -74,7 +76,7 @@ const PUDDLES: FeatureSpec = {
   density: 0.01,
   minSize: 6,
   maxSize: 13,
-  grows: (terrain) => terrain !== "rock",
+  grows: () => true,
 };
 
 function hashUnit(x: number, y: number, seed: number): number {
@@ -113,37 +115,13 @@ function wrapNoise(x: number, y: number, cells: number, seed: number): number {
 }
 
 /**
- * Four octaves, and the top two are the ones that matter.
- *
- * The screen sees about 23 by 18 tiles. An octave whose features are 50 tiles
- * across is a *continent*: correct on a map of the planet, and invisible from
- * the ground, because the whole window sits inside one of them. So the mix is
- * weighted toward `SCREEN_CELLS` and above - features of two to six tiles - and
- * the continent octave is left in only to decide which regions are stony at
- * all. Getting this wrong is not subtle and is not something a unit test will
- * tell you: the first build of this had 17% rock on the planet and none of it
- * in sight from anywhere a player would ever stand.
- */
-export function elevationAt(point: PlanetPoint): number {
-  return (
-    0.34 * wrapNoise(point.x, point.y, 5, PLANET_SEED) +
-    0.3 * wrapNoise(point.x, point.y, 17, PLANET_SEED ^ 0x1f) +
-    0.24 * wrapNoise(point.x, point.y, 43, PLANET_SEED ^ 0x2c) +
-    0.12 * wrapNoise(point.x, point.y, 97, PLANET_SEED ^ 0x3b)
-  );
-}
-
-/**
- * Grass unless the ground stands up or something has walked it flat.
+ * Grass, unless something has walked it to dirt.
  *
  * The path is a *contour* of a smooth field rather than a drawn line, which is
  * what gives it the one property a drawn line cannot have on a round world: it
  * closes. Follow it far enough and it comes back.
  */
 export function terrainAt(point: PlanetPoint): Terrain {
-  if (elevationAt(point) > ROCK_LEVEL) {
-    return "rock";
-  }
   // Two octaves so the contour meanders instead of drawing smooth ovals: the
   // coarse one decides where the path goes, the fine one gives it a wobble
   // roughly a tile wide, which is what makes it read as trodden rather than
@@ -155,43 +133,13 @@ export function terrainAt(point: PlanetPoint): Terrain {
   return Math.abs(path - 0.5) < PATH_WIDTH ? "dirt" : "grass";
 }
 
-export function isRockAt(point: PlanetPoint): boolean {
-  return terrainAt(point) === "rock";
-}
-
-/**
- * The nearest point to `near` that something can stand on.
- *
- * A generated world owes nobody a clear spawn: the point a scene wants to put
- * an actor is as likely to be inside an outcrop as not, and an actor inside
- * rock is invisible rather than obviously wrong. Spiralling out to the first
- * open point costs a handful of samples once and removes the whole class of
- * "why is the torch missing at this seed".
- */
-export function openGround(near: PlanetPoint): PlanetPoint {
-  for (let radius = 0; radius < 48; radius += 1) {
-    const steps = Math.max(1, radius * 6);
-    for (let step = 0; step < steps; step += 1) {
-      const angle = (step / steps) * Math.PI * 2;
-      const point = {
-        x: wrapTile(near.x + radius * Math.cos(angle)),
-        y: wrapTile(near.y + radius * Math.sin(angle)),
-      };
-      if (terrainAt(point) !== "rock") {
-        return point;
-      }
-    }
-  }
-  return near;
-}
-
 /**
  * Every feature of one kind within `reach` tiles of a planet point.
  *
  * Swept as a square of planet cells rather than as the rotated screen box:
  * `reach` is the radius that box fits inside, so the answer is independent of
  * which way the hero happens to be facing - a tree must not pop into being
- * because he turned round.
+ * because he turned round. Nothing grows inside a landform.
  */
 export function featuresNear(centre: PlanetPoint, reach: number, spec: FeatureSpec): Feature[] {
   const found: Feature[] = [];
@@ -210,7 +158,7 @@ export function featuresNear(centre: PlanetPoint, reach: number, spec: FeatureSp
         x: wrapTile(cellX + hashUnit(cellX, cellY, spec.seed ^ 0x11)),
         y: wrapTile(cellY + hashUnit(cellX, cellY, spec.seed ^ 0x22)),
       };
-      if (!spec.grows(terrainAt(point))) {
+      if (!spec.grows(terrainAt(point)) || blockedByLand(point)) {
         continue;
       }
       const shape = hashUnit(cellX, cellY, spec.seed ^ 0x33);

@@ -31,11 +31,10 @@ import { terrainAt, type Terrain } from "../terrain";
 
 export const GRASS = 0;
 export const DIRT = 1;
-export const ROCK = 2;
 
-export type TerrainCode = typeof GRASS | typeof DIRT | typeof ROCK;
+export type TerrainCode = typeof GRASS | typeof DIRT;
 
-const CODE: Readonly<Record<Terrain, TerrainCode>> = { grass: GRASS, dirt: DIRT, rock: ROCK };
+const CODE: Readonly<Record<Terrain, TerrainCode>> = { grass: GRASS, dirt: DIRT };
 
 export interface GroundSample {
   readonly pose: PlanetPose;
@@ -260,8 +259,4 @@ export function latticeIndex(sample: GroundSample, a: number, b: number): number
 export function cellTerrain(sample: GroundSample, x: number, y: number): TerrainCode {
   const { a, b } = cellLattice(sample, x, y);
   return (sample.terrain[latticeIndex(sample, a + 1, b)] ?? GRASS) as TerrainCode;
-}
-
-export function isRockCell(sample: GroundSample, x: number, y: number): boolean {
-  return cellTerrain(sample, x, y) === ROCK;
 }

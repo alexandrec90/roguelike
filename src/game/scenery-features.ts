@@ -25,6 +25,12 @@ interface Lattice {
   readonly spec: FeatureSpec;
   /** Species ids and their relative weights. */
   readonly mix: readonly (readonly [string, number])[];
+  /**
+   * About how tall its bodies stand, in pixels at full size: how far past the
+   * horizon one still shows over the curve, so a bush that has sunk from sight
+   * is not kept in a slot while a tree beyond it still shows its crown.
+   */
+  readonly height: number;
 }
 
 /**
@@ -47,6 +53,7 @@ const TREES: Lattice = {
     ["snow-conifer", 2],
     ["colonized-ash", 1],
   ],
+  height: 96,
 };
 
 const BUSHES: Lattice = {
@@ -58,6 +65,7 @@ const BUSHES: Lattice = {
     grows: (terrain) => terrain === "grass",
   },
   mix: [["bush", 1]],
+  height: 26,
 };
 
 const STONES: Lattice = {
@@ -66,9 +74,10 @@ const STONES: Lattice = {
     density: 0.008,
     minSize: 0,
     maxSize: 0,
-    grows: (terrain) => terrain !== "rock",
+    grows: () => true,
   },
   mix: [["boulder", 1]],
+  height: 24,
 };
 
 const FUNGI: Lattice = {
@@ -80,9 +89,19 @@ const FUNGI: Lattice = {
     grows: (terrain) => terrain === "grass",
   },
   mix: [["mushroom-ring", 1]],
+  height: 14,
 };
 
 export const SCENERY_LATTICES: readonly Lattice[] = [TREES, BUSHES, STONES, FUNGI];
+
+const HEIGHTS = new Map<string, number>(
+  SCENERY_LATTICES.flatMap((lattice) => lattice.mix.map(([species]) => [species, lattice.height] as const)),
+);
+
+/** About how tall a species stands, in pixels at full size; unknown species are taken as tall. */
+export function speciesHeight(species: string): number {
+  return HEIGHTS.get(species) ?? 96;
+}
 
 /** Every species the game can place — the bake cache warms from this list. */
 export const PLACED_SPECIES: readonly string[] = SCENERY_LATTICES.flatMap((lattice) =>

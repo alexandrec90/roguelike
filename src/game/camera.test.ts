@@ -6,8 +6,8 @@ import {
   localPlacement,
   localRow,
   localReach,
+  projectDepth,
   scrollOffset,
-  standsOnField,
   visibleLocal,
   type CameraFrame,
 } from "./camera";
@@ -34,7 +34,12 @@ describe("localPlacement", () => {
       { x: 5, y: -4 },
       { x: 2, y: FAR_EDGE },
     ]) {
-      expect(localPlacement(FRAME, local)).toEqual({ ...localFoot(FRAME, local), scale: 1, visible: true });
+      expect(localPlacement(FRAME, local)).toEqual({
+        ...localFoot(FRAME, local),
+        scale: 1,
+        visible: true,
+        clipY: Number.POSITIVE_INFINITY,
+      });
     }
   });
 
@@ -67,15 +72,27 @@ describe("localPlacement", () => {
     expect(far.x).toBeGreaterThan(FRAME.footX);
   });
 
-  it("stands a body on the horizon line at HORIZON_SCALE, and hides it past there", () => {
+  it("stands a body on the horizon line at HORIZON_SCALE, and sinks it behind the curve past there", () => {
+    // The regression: a body past the line used to vanish whole - a tree
+    // blinked out at the horizon, and a mountain could never be seen far off.
+    const horizonY = FRAME.groundTop - FRAME.rollHeight;
     const onLine = localPlacement(FRAME, { x: 0, y: FAR_EDGE + ROLL_ROWS });
-    const gone = localPlacement(FRAME, { x: 0, y: FAR_EDGE + ROLL_ROWS + 1 });
+    const past = localPlacement(FRAME, { x: 0, y: FAR_EDGE + ROLL_ROWS + 10 });
+    const farther = localPlacement(FRAME, { x: 0, y: FAR_EDGE + ROLL_ROWS + 20 });
 
-    expect(onLine.y).toBe(FRAME.groundTop - FRAME.rollHeight);
+    expect(onLine.y).toBe(horizonY);
     expect(onLine.scale).toBeCloseTo(HORIZON_SCALE, 12);
-    expect(onLine.visible).toBe(true);
-    expect(gone.visible).toBe(false);
-    expect(gone.y).toBe(onLine.y);
+    expect(onLine.clipY).toBe(Number.POSITIVE_INFINITY);
+    expect(past.visible).toBe(true);
+    expect(past.clipY).toBe(horizonY);
+    expect(past.y).toBeGreaterThan(horizonY);
+    expect(farther.y).toBeGreaterThan(past.y);
+    expect(past.scale).toBeLessThan(HORIZON_SCALE);
+    expect(farther.scale).toBeLessThan(past.scale);
+  });
+
+  it("gives up on a body once nothing on the planet could stand tall enough to show", () => {
+    expect(localPlacement(FRAME, { x: 0, y: FAR_EDGE + ROLL_ROWS + 200 }).visible).toBe(false);
   });
 
   it("reads the stride like the field does, so the roll scrolls with the ground", () => {
@@ -161,21 +178,41 @@ describe("localRow", () => {
   });
 });
 
-describe("standsOnField", () => {
-  it("gives the field everything whose foot is below the seam, and the roll the rest", () => {
-    // The regression: the field's last grid rows hang above the seam, and a
-    // rock row there stood full size over the roll with the sky behind it.
-    expect(standsOnField(FRAME.groundTop + 1, FRAME)).toBe(true);
-    expect(standsOnField(FRAME.groundTop, FRAME)).toBe(false);
-    expect(standsOnField(FRAME.groundTop - TILE_DEPTH, FRAME)).toBe(false);
+describe("projectDepth", () => {
+  it("is the affine field this side of the seam", () => {
+    const depth = projectDepth(FRAME, 2);
+    expect(depth.ground).toBe(FRAME.footY - 2 * TILE_DEPTH);
+    expect(depth.scale).toBe(1);
+    expect(depth.rowsBeyond).toBe(0);
+    expect(depth.sink).toBe(0);
   });
 
-  it("agrees with localPlacement about where the roll begins", () => {
-    const onField = localPlacement(FRAME, { x: 0, y: FAR_EDGE - 0.25 });
-    const onRoll = localPlacement(FRAME, { x: 0, y: FAR_EDGE + 0.25 });
-    expect(standsOnField(onField.y, FRAME)).toBe(onField.scale === 1);
-    expect(onRoll.scale).toBeLessThan(1);
-    expect(standsOnField(onRoll.y, FRAME)).toBe(false);
+  it("is continuous from the field over the roll and past the horizon line", () => {
+    // The game's own roll: a tiny one is legitimately steep, not discontinuous.
+    const game = { ...FRAME, groundTop: 40, rollHeight: 24 };
+    const edge = (game.footY - game.groundTop) / TILE_DEPTH;
+    let last = projectDepth(game, 0);
+    for (let y = 0.05; y < edge + ROLL_ROWS + 40; y += 0.05) {
+      const depth = projectDepth(game, y);
+      expect(depth.scale).toBeLessThanOrEqual(last.scale + 1e-9);
+      expect(Math.abs(depth.scale - last.scale)).toBeLessThan(0.02);
+      expect(Math.abs(depth.ground - last.ground)).toBeLessThan(1);
+      last = depth;
+    }
+    const onLine = projectDepth(game, edge + ROLL_ROWS);
+    const justOver = projectDepth(game, edge + ROLL_ROWS + 0.01);
+    expect(justOver.scale).toBeCloseTo(onLine.scale, 3);
+    expect(justOver.ground).toBeCloseTo(onLine.ground, 3);
+  });
+
+  it("agrees with localPlacement wherever a body stands", () => {
+    for (const y of [1, FAR_EDGE + 3, FAR_EDGE + ROLL_ROWS + 6]) {
+      const depth = projectDepth(FRAME, y);
+      const placed = localPlacement(FRAME, { x: 0, y });
+      expect(placed.y).toBe(Math.round(depth.ground));
+      expect(placed.scale).toBe(depth.scale);
+      expect(placed.clipY).toBe(depth.clipY);
+    }
   });
 });
 

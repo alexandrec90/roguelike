@@ -18,17 +18,17 @@ Seven modules, and no eighth place where any of this is decided:
 
 | Module | Owns |
 | --- | --- |
-| `src/game/projection.ts` | `TILE_WIDTH` 16, `TILE_DEPTH` 12, `WALL_RISE` 16, and `cellOrigin()` / `cellFoot()` / `rowAtFoot()` / `wallCapY()` / `wallFaceY()` / `depthOf()`. Draw order is `row * TILE_WIDTH + rank` — painter's algorithm down the screen. |
+| `src/game/projection.ts` | `TILE_WIDTH` 16, `TILE_DEPTH` 12, `WALL_RISE` 16, and `cellOrigin()` / `cellFoot()` / `rowAtFoot()` / `wallCapY()` / `wallFaceY()` / `depthOf()`. Draw order is `row * TILE_WIDTH + rank` — painter's algorithm down the screen — and `standingDepth(row, rank)` continues it past the field's far edge: rows on the roll squeezed into a band that stays in front of the cloud pass and the horizon band, still sorted far behind near. |
 | `src/game/planet.ts` | The round world: `PLANET_TILES`, the sideways circle's radius, `stepForward` / `stepStrafe` / `applyGait` (both walks at once, which is what a diagonal is), and the only conversion between planet and local coordinates (`fromLocal` / `toLocal`). |
-| `src/game/terrain.ts` | What the planet is made of, as a continuous seeded field — `terrainAt()`, `elevationAt()`, and the point features (`treesNear`, `puddlesNear`) hashed out of planet cells. |
-| `src/game/camera.ts` | The local frame on screen: the pixel the hero is nailed to, the sub-tile `scrollOffset` of a stride in flight, and `localFoot` / `localOrigin` / `localRow` — the one answer to "this is *x* tiles right and *y* ahead, where do I draw it". `localPlacement` is that answer continued past the field's far edge: where on the roll a body stands, how small it is, and whether it has gone over the horizon. |
-| `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, `ridgeProfile()` for distant silhouettes — which takes a `period` when the profile has to close on itself — and the roll's projection: `ROLL_ROWS` to the horizon, `HORIZON_SCALE` at it, and `rollPlacement(rowsBeyond, rollHeight)` → lift and scale, the one curve both the ground on the lip (`roll-ground.ts`, via `rollRowAt`) and every body standing on it are drawn from. The curve's knee is derived from `rollHeight`, never tuned: it is whatever makes the lip start at the flat field's slope and end on the horizon line. |
+| `src/game/terrain.ts` | What the planet is made of, as a continuous seeded field — `terrainAt()` (grass or dirt; the ground is flat) and the point features (`treesNear`, `puddlesNear`) hashed out of planet cells. Everything tall is `landforms.ts`. |
+| `src/game/camera.ts` | The local frame on screen: the pixel the hero is nailed to, the sub-tile `scrollOffset` of a stride in flight, and `localFoot` / `localOrigin` / `localRow` — the one answer to "this is *x* tiles right and *y* ahead, where do I draw it". `localPlacement` is that answer continued past the field's far edge: where on the roll a body stands, how small it is, how far it has sunk behind the horizon line and the scanline it is clipped at (`clipY`). `projectDepth` is the same answer for a continuous depth, which is what the landform march steps through. |
+| `src/game/horizon.ts` | `horizonLayout(height, skyFraction)` → `skyHeight`, `rollHeight`, `horizonY`, `groundTop`, `groundHeight`. Also the sky ramp, `ridgeProfile()` for distant silhouettes — which takes a `period` when the profile has to close on itself — and the roll's projection: `ROLL_ROWS` to the horizon, `HORIZON_SCALE` at it, and `rollPlacement(rowsBeyond, rollHeight)` → lift and scale, the one curve both the ground on the lip (`roll-ground.ts`, via `rollRowAt`) and every body standing on it are drawn from. The curve's knee is derived from `rollHeight`, never tuned: it is whatever makes the lip start at the flat field's slope and end on the horizon line. Past `ROLL_ROWS` the scale keeps falling and a body sinks foot first behind the line (`horizonSink`, `HORIZON_SINK_RATE`); `rowsToSink(height)` is how far out a body of that height still shows, and so how far any layer must sweep for it. |
 | `src/game/panorama.ts` | The horizon as a 360° loop: `PANORAMA_WIDTH` pixels to a full turn, `bearingOffset()` from a heading, and where a landmark at a bearing lands on screen. |
 | `src/game/viewport.ts` | What the window left of the render target: `visibleHeight()` (scanlines that survived the cover crop), `walkableBand()` (that, horizon roll excluded) and `anchorFoot()` (the pixel the hero — and therefore the whole world — is centred on). The one place the *window* is allowed to influence the simulation, and it now only re-frames. |
 
-`src/game/ground/` owns the terrain art itself: tiles generated procedurally (seamless grass, neighbour-aware path edges, rock caps and faces), baked once and composed per step, plus the baked tuft atlas the grass is drawn from.
+`src/game/ground/` owns the terrain art itself: tiles generated procedurally (seamless grass, neighbour-aware path edges), baked once and composed per step, plus the baked tuft atlas the grass is drawn from.
 
-The horizon lip is that same ground carried past the seam, in three passes over one surface: `roll-ground.ts` (tiles, tufts and the air's tint, each scanline asking `rollRowAt` which row it shows), `roll-water.ts` (the water layer's own puddles, grown by `growPuddles`, laid into world texels) and `roll-rock.ts` (rock standing, marched one screen column at a time so a nearer wall hides a farther one). **Which rows are the lip's is `standsOnField` in `camera.ts`**: the field's grid runs a row or two past the seam so the scroll has a row to slide on, and anything standing on those rows is the lip's to draw, at the lip's scale - drawn full size by the ground layer it floated over the sky. A far lip pixel spans many texels, so it shows its cell's *far colour* (`distantShare`) and never composes a tile; reading the lattice under the far lip is what made a step frame stall.
+The horizon lip is that same ground carried past the seam, in two passes over one surface: `roll-ground.ts` (tiles, tufts and the air's tint, each scanline asking `rollRowAt` which row it shows) and `roll-water.ts` (the water layer's own puddles, grown by `growPuddles`, laid into world texels). Nothing stands in the ground: what stands is a landform or a body, drawn by its own layer through the same projection, so the lip never has to know about it. A far lip pixel spans many texels, so it shows its cell's *far colour* (`distantShare`) and never composes a tile; reading the lattice under the far lip is what made a step frame stall.
 
 **The grid belongs to the screen, and the planet has no grid.** That is the load-bearing
 sentence, because it is what reconciles a camera that turns with a pixel contract that
@@ -76,6 +76,31 @@ step swings the sky.
 `map-drift.test.ts` pins that budget. Before changing turning, scrolling, or the
 radius, read [the camera-motion reference](../camera-motion.md) and inspect
 `?map=1`. A tighter radius needs per-object arc motion during a step.
+
+## Landforms: everything tall
+
+Mountains, mesas, spires and towers are not tiles and not sprites. Each is **a height
+function over planet coordinates**, evaluated once onto a grid fixed to the planet and
+drawn by one march over depth, so its shape cannot depend on the pose, the strafe or
+the screen's grid — the cause of every block that changed shape, popped in or floated
+over the sky when rock was grid-quantised cells.
+
+| Module | Owns |
+| --- | --- |
+| `src/game/landforms.ts` | Where they are (`planetLandforms`, a seeded lattice of `LANDFORM_CELL` cells), their shapes (`landformShape`), the per-landform `LandformField` (heights, normals, materials, detail, block maxima), and the gameplay half: `landHeightAt`, `blockedByLand` (taller than `BLOCK_HEIGHT`) and `openGround`. |
+| `src/game/landform-frame.ts` | What a frame is: `LandformView`, `LandformLight` (sun, haze, cloud shade, the hero's `Cutaway`), and `LandformPixels` — colour plus the affine row each pixel shows. |
+| `src/game/landform-march.ts` | The march: `marchSchedule` (depths near to far, each asking `projectDepth`), and `LandformPainter`, which keeps the highest scanline painted per column — a nearer slope hides a farther peak because it was reached first. |
+| `src/game/landform-colour.ts` | The look: posterised ramps per material, wrap light, a narrow dithered seam, and planet-fixed grain on standing faces (courses, ledges, strata, windows). Inks only. |
+| `src/game/landform-render.ts` | The frame-level passes: `viewsInSight`, near over far (`isFarView`, `mergeLandforms`), the outline. |
+| `src/game/landform-slices.ts` | Cutting the picture into one slice per row and 32-column chunk, shelf-packed into one atlas. |
+| `src/game/landform-layer.ts` | The Phaser wiring: re-render only when what it shows moved, far views kept between strides, each slice shown at `standingDepth(row)` so a tree behind a mesa is hidden and the hero walks round a flank. |
+
+Two things that are easy to break:
+
+- **Every depth goes through `projectDepth`.** A landform drawn by its own projection
+  would shear against the ground at the seam and pop at the horizon line.
+- **Slices sort; the picture does not.** A landform is one render but many depths. Draw
+  it as one image and it is either in front of every tree or behind them all.
 
 ## The ink pipeline
 

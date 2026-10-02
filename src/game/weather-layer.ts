@@ -27,6 +27,7 @@ import Phaser from "phaser";
 
 import { atmosphereAt, clockHours } from "./atmosphere";
 import { scrollOffset, type CameraFrame } from "./camera";
+import { CLEAR_SKY } from "./cloud-shadow";
 import { hexToInt } from "./color";
 import type { FrameContext } from "./frame-context";
 import { clearPool, createPool, particleCloud, stepParticles, type ParticlePool } from "./fx/particles";
@@ -168,6 +169,7 @@ export class WeatherLayer {
       atmosphere: atmosphereAt(clockHours(elapsedMs), state.overcast),
       wind: {},
       rain: state.rain,
+      shade: CLEAR_SKY,
       width: this.rainSurface.width,
       height,
       lights: [],
