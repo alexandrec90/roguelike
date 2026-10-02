@@ -68,7 +68,6 @@ import {
   groundPose,
   livePose,
   scrollPhase,
-  stepProgress,
   type PlayerState,
   type World,
 } from "./player";
@@ -241,7 +240,7 @@ export class HeroLayer {
     return this.player.enchanted;
   }
 
-  /** The pose the world is sampled from - frozen for the length of a step. */
+  /** The pose the world is sampled from - it moves a whole tile at a time. */
   groundPose(): PlanetPose {
     return groundPose(this.player);
   }
@@ -268,8 +267,9 @@ export class HeroLayer {
   } {
     return {
       live: livePose(this.player, this.world.radius),
-      gait: this.player.motion === "step" ? this.player.gait : undefined,
-      progress: stepProgress(this.player),
+      gait: this.player.gait,
+      // How far into the tile he is walking out of: the anchor moves at 1.
+      progress: Math.max(Math.abs(this.player.offset.x), Math.abs(this.player.offset.y)),
       radius: this.world.radius,
     };
   }

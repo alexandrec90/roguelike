@@ -67,8 +67,12 @@ head_bytes = 2000
 # that lands, `entrypoints` is the seam that exists for "the orphan rule must not see
 # this", and the reason here is a near neighbour of the one it was written for: the
 # module has a real importer, in a file the scan does not reach.
+#
+# `src/game/scenery-bake-worker.ts` is a Web Worker's entry: `scenery-baker.ts` starts it
+# with `new Worker(new URL("./scenery-bake-worker.ts", import.meta.url))`, which Vite
+# bundles but which is a URL, not an import, so the graph carries no edge to it.
 [structure]
-entrypoints = ["src/worktreePort.ts"]
+entrypoints = ["src/worktreePort.ts", "src/game/scenery-bake-worker.ts"]
 #exclude = ["roguelike/migrations/"]      # generated code the project does not answer for
 #entrypoints = ["roguelike/plugins/"]     # loaded by name, so the orphan rule must not see them
 #disabled = []                               # e.g. ["orphan"] for a library whose modules are its API

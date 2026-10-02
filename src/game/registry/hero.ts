@@ -130,10 +130,9 @@ function walkingAt(heading: "east" | "north") {
     ...STAND,
     heading,
     facing: heading,
-    motion: "step",
+    motion: "walk",
     gait,
-    motionMs: ms % STEP_MS,
-    steps: Math.floor(ms / STEP_MS),
+    walked: ms / STEP_MS,
   });
 }
 

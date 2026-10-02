@@ -18,17 +18,16 @@ import {
   castProgress,
   createPlayer,
   SWING_CONTACT_MS,
-  DIAGONAL_STEP_MS,
   facingYaw,
   gaitOf,
   groundPose,
   livePose,
   passable,
+  REACH_TILES,
   scrollPhase,
   STEP_MS,
-  stepDurationMs,
-  stepProgress,
   walkClipMs,
+  WALK_TILES_PER_MS,
   type Intent,
   type PlayerState,
   type World,
@@ -38,6 +37,7 @@ const R = DEFAULT_STRAFE_RADIUS;
 const START: PlanetPose = { x: 128, y: 128, turn: 0 };
 const OPEN: World = { radius: R, blocked: () => false };
 const WALLED: World = { radius: R, blocked: () => true };
+const FRAME_MS = 16;
 
 /** Rock filling everything more than half a tile to the right of the start. */
 const WALL_RIGHT: World = { radius: R, blocked: (p) => wrapDelta(p.x, START.x) > 0.5 };
@@ -55,20 +55,28 @@ const south = walk("south");
 const east = walk("east");
 const west = walk("west");
 
-/** Hold a heading for `steps` whole strides and hand back where it ended. */
-function hold(intent: Intent, steps: number, world: World = OPEN): PlayerState {
-  let player = createPlayer(START);
-  for (let step = 0; step < steps; step += 1) {
-    player = advancePlayer(player, intent, STEP_MS, world).player;
+/** Run `frames` frames of `intent` from `player` and hand back where it ended. */
+function run(player: PlayerState, intent: Intent, frames: number, world: World = OPEN): PlayerState {
+  let current = player;
+  for (let frame = 0; frame < frames; frame += 1) {
+    current = advancePlayer(current, intent, FRAME_MS, world).player;
   }
-  return advancePlayer(player, NOTHING, STEP_MS, world).player;
+  return current;
+}
+
+/** Hold a heading for exactly `tiles` tiles' worth of walking time from the start. */
+function hold(intent: Intent, tiles: number, world: World = OPEN): PlayerState {
+  const ms = tiles * STEP_MS;
+  const frames = Math.floor(ms / FRAME_MS);
+  const whole = run(createPlayer(START), intent, frames, world);
+  return advancePlayer(whole, intent, ms - frames * FRAME_MS, world).player;
 }
 
 describe("createPlayer", () => {
-  it("starts settled on the pose it was handed", () => {
+  it("starts standing on the pose it was handed", () => {
     const player = createPlayer(START);
-    expect(player.pose).toEqual(START);
     expect(groundPose(player)).toEqual(START);
+    expect(scrollPhase(player)).toEqual({ x: 0, y: 0 });
     expect(player.motion).toBe("idle");
     expect(player.gait).toBeUndefined();
     expect(player.attackMs).toBeUndefined();
@@ -88,90 +96,92 @@ describe("gaitOf", () => {
   });
 });
 
-describe("advancePlayer", () => {
-  it("commits a whole stride and runs it to completion", () => {
-    const started = advancePlayer(createPlayer(START), north, 0, OPEN);
-    expect(started.player.motion).toBe("step");
-    expect(started.usedHeading).toBe(true);
-    expect(started.player.pose.y).toBeCloseTo(129, 9);
-
-    // Half way through, the destination is already decided.
-    const half = advancePlayer(started.player, NOTHING, STEP_MS / 2, OPEN);
-    expect(half.player.motion).toBe("step");
-    expect(half.player.pose).toEqual(started.player.pose);
+describe("free movement", () => {
+  it("walks on the frame the heading arrives, by that frame's share of a tile", () => {
+    const tick = advancePlayer(createPlayer(START), north, FRAME_MS, OPEN);
+    expect(tick.player.motion).toBe("walk");
+    expect(tick.usedHeading).toBe(true);
+    expect(scrollPhase(tick.player).y).toBeCloseTo(FRAME_MS * WALK_TILES_PER_MS, 9);
+    expect(tick.player.stepped.y).toBeCloseTo(FRAME_MS * WALK_TILES_PER_MS, 9);
   });
 
-  it("refuses to interrupt the step it is in, and reads the input again when it lands", () => {
-    const stepping = advancePlayer(createPlayer(START), north, 0, OPEN).player;
-    const interrupted = advancePlayer(stepping, south, 10, OPEN);
-
-    expect(interrupted.player.motion).toBe("step");
-    expect(interrupted.player.pose).toEqual(stepping.pose);
-    expect(interrupted.usedHeading).toBe(false);
+  it("stops on the frame the heading is released, wherever he is", () => {
+    const walking = run(createPlayer(START), north, 3);
+    const stopped = advancePlayer(walking, NOTHING, FRAME_MS, OPEN).player;
+    expect(stopped.motion).toBe("idle");
+    expect(stopped.stepped).toEqual({ x: 0, y: 0 });
+    expect(scrollPhase(stopped)).toEqual(scrollPhase(walking));
+    // Mid-tile, and staying there.
+    expect(scrollPhase(stopped).y).toBeGreaterThan(0);
+    expect(scrollPhase(stopped).y).toBeLessThan(1);
   });
 
-  it("carries the overshoot into the next action so a held key strides evenly", () => {
-    const stepping = advancePlayer(createPlayer(START), north, 0, OPEN).player;
-    const next = advancePlayer(stepping, north, STEP_MS + 30, OPEN);
-
-    expect(next.player.motion).toBe("step");
-    expect(next.player.motionMs).toBe(30);
-    expect(next.player.steps).toBe(1);
+  it("turns round on the frame a new heading arrives, without finishing a tile first", () => {
+    const walking = run(createPlayer(START), north, 3);
+    const back = advancePlayer(walking, south, FRAME_MS, OPEN).player;
+    expect(scrollPhase(back).y).toBeLessThan(scrollPhase(walking).y);
   });
 
-  it("never carries more than one step's worth, however long the tab slept", () => {
-    const stepping = advancePlayer(createPlayer(START), north, 0, OPEN).player;
-    const next = advancePlayer(stepping, north, 10_000, OPEN);
-    expect(next.player.motionMs).toBe(STEP_MS);
+  it("covers a tile in STEP_MS whatever the frame rate", () => {
+    const fine = run(createPlayer(START), north, 90);
+    let coarse = createPlayer(START);
+    for (let frame = 0; frame < 30; frame += 1) {
+      coarse = advancePlayer(coarse, north, FRAME_MS * 3, OPEN).player;
+    }
+    expect(livePose(fine, R).y).toBeCloseTo(START.y + (90 * FRAME_MS) / STEP_MS, 6);
+    expect(livePose(coarse, R).y).toBeCloseTo(livePose(fine, R).y, 6);
   });
 
-  it("does not run time backwards on a negative delta", () => {
-    const stepping = advancePlayer(createPlayer(START), north, 0, OPEN).player;
-    const aged = advancePlayer(stepping, north, 50, OPEN).player;
-    expect(advancePlayer(aged, north, -100, OPEN).player.motionMs).toBe(50);
+  it("does not walk backwards on a negative delta", () => {
+    const walking = run(createPlayer(START), north, 2);
+    const after = advancePlayer(walking, north, -100, OPEN).player;
+    expect(scrollPhase(after)).toEqual(scrollPhase(walking));
   });
 
-  it("turns to face rock and stays put, spending the press either way", () => {
-    const blocked = advancePlayer(createPlayer(START), north, 0, WALLED);
-
+  it("turns to face rock and stays put, spending a queued tap either way", () => {
+    const blocked = advancePlayer(createPlayer(START), north, FRAME_MS, WALLED);
     expect(blocked.player.motion).toBe("idle");
-    expect(blocked.player.pose).toEqual(START);
+    expect(livePose(blocked.player, R)).toEqual(START);
     expect(blocked.player.facing).toBe("north");
     expect(blocked.usedHeading).toBe(true);
   });
 
+  it("stops short of rock by its reach, rather than standing half inside it", () => {
+    const against = hold(north, 3, WALL_AHEAD);
+    const ahead = wrapDelta(livePose(against, R).y, START.y);
+    expect(ahead).toBeLessThanOrEqual(0.5 - REACH_TILES + 1e-9);
+    expect(ahead).toBeGreaterThan(0.5 - REACH_TILES - FRAME_MS * WALK_TILES_PER_MS);
+  });
+
   it("does nothing at all with an empty intent", () => {
-    const idle = advancePlayer(createPlayer(START), NOTHING, 16, OPEN);
+    const idle = advancePlayer(createPlayer(START), NOTHING, FRAME_MS, OPEN);
     expect(idle.player.motion).toBe("idle");
     expect(idle.attacked).toBe(false);
     expect(idle.usedHeading).toBe(false);
   });
 });
 
-describe("the four presses", () => {
+describe("the four directions", () => {
   it("walk forward and back along the heading without turning", () => {
-    expect(hold(north, 4).pose.y).toBeCloseTo(132, 6);
-    expect(hold(north, 4).pose.turn).toBe(0);
-    expect(hold(south, 4).pose.y).toBeCloseTo(124, 6);
+    expect(livePose(hold(north, 4), R).y).toBeCloseTo(132, 6);
+    expect(livePose(hold(north, 4), R).turn).toBe(0);
+    expect(livePose(hold(south, 4), R).y).toBeCloseTo(124, 6);
   });
 
   it("walk sideways and turn while doing it", () => {
     // The whole shape of the planet in one assertion: pressing right moves you
     // right *and* swings the world, by one tile over the sideways circle.
-    const right = hold(east, 4);
-    expect(right.pose.turn).toBeCloseTo(4 / R, 6);
-    expect(wrapDelta(right.pose.x, START.x)).toBeGreaterThan(0);
+    const right = livePose(hold(east, 4), R);
+    expect(right.turn).toBeCloseTo(4 / R, 6);
+    expect(wrapDelta(right.x, START.x)).toBeGreaterThan(0);
 
-    const left = hold(west, 4);
-    expect(wrapDelta(left.pose.x, START.x)).toBeLessThan(0);
+    expect(wrapDelta(livePose(hold(west, 4), R).x, START.x)).toBeLessThan(0);
   });
 
   it("bring a sideways walk back to where it began after one lap", () => {
-    const lap = Math.round(strafeLap(R));
-    const round = hold(east, lap);
-
-    expect(Math.abs(wrapDelta(round.pose.x, START.x))).toBeLessThan(0.6);
-    expect(Math.abs(wrapDelta(round.pose.y, START.y))).toBeLessThan(0.6);
+    const round = livePose(hold(east, strafeLap(R)), R);
+    expect(Math.abs(wrapDelta(round.x, START.x))).toBeLessThan(0.6);
+    expect(Math.abs(wrapDelta(round.y, START.y))).toBeLessThan(0.6);
   });
 
   it("face the way they were pressed when nothing is aiming", () => {
@@ -182,15 +192,14 @@ describe("the four presses", () => {
   });
 });
 
-describe("stepping diagonally", () => {
-  it("walks forward and sideways at once when two keys are held", () => {
-    const player = advancePlayer(createPlayer(START), walk("northeast"), 0, OPEN).player;
-
+describe("walking diagonally", () => {
+  it("walks forward and sideways at once, and the strafe still turns the world", () => {
+    const player = hold(walk("northeast"), 2);
+    const live = livePose(player, R);
     expect(player.gait).toEqual({ forward: 1, strafe: 1 });
-    expect(wrapDelta(player.pose.x, START.x)).toBeGreaterThan(0);
-    expect(wrapDelta(player.pose.y, START.y)).toBeGreaterThan(0);
-    // A strafe is still a strafe on a diagonal, so the world still turns.
-    expect(player.pose.turn).toBeCloseTo(1 / R, 9);
+    expect(wrapDelta(live.x, START.x)).toBeGreaterThan(0);
+    expect(wrapDelta(live.y, START.y)).toBeGreaterThan(0);
+    expect(live.turn).toBeGreaterThan(0);
   });
 
   it("reaches all four corners", () => {
@@ -200,55 +209,45 @@ describe("stepping diagonally", () => {
       ["southeast", { x: 1, y: -1 }],
       ["southwest", { x: -1, y: -1 }],
     ] as const;
-
     for (const [heading, sign] of corners) {
-      const { pose } = advancePlayer(createPlayer(START), walk(heading), 0, OPEN).player;
-      expect(Math.sign(wrapDelta(pose.x, START.x))).toBe(sign.x);
-      expect(Math.sign(wrapDelta(pose.y, START.y))).toBe(sign.y);
+      const live = livePose(hold(walk(heading), 1), R);
+      expect(Math.sign(wrapDelta(live.x, START.x))).toBe(sign.x);
+      expect(Math.sign(wrapDelta(live.y, START.y))).toBe(sign.y);
     }
   });
 
-  it("takes root-two as long, so a zigzag is not a shortcut", () => {
-    const diagonal = advancePlayer(createPlayer(START), walk("northeast"), 0, OPEN).player;
-    expect(stepDurationMs(diagonal)).toBe(DIAGONAL_STEP_MS);
-    expect(DIAGONAL_STEP_MS / STEP_MS).toBeCloseTo(Math.SQRT2, 2);
-
-    // Still mid-step at the moment a cardinal one would have landed.
-    const early = advancePlayer(diagonal, NOTHING, STEP_MS, OPEN).player;
-    expect(early.motion).toBe("step");
-    expect(stepProgress(early)).toBeCloseTo(STEP_MS / DIAGONAL_STEP_MS, 5);
-
-    const landed = advancePlayer(early, NOTHING, DIAGONAL_STEP_MS - STEP_MS, OPEN).player;
-    expect(landed.motion).toBe("idle");
-    expect(landed.pose).toEqual(diagonal.pose);
+  it("walks at the same speed as a cardinal, so a zigzag is not a shortcut", () => {
+    const diagonal = hold(walk("northeast"), 3).walked;
+    const straight = hold(north, 3).walked;
+    expect(diagonal).toBeCloseTo(straight, 6);
+    const tick = advancePlayer(createPlayer(START), walk("northeast"), FRAME_MS, OPEN).player;
+    expect(Math.hypot(tick.stepped.x, tick.stepped.y)).toBeCloseTo(FRAME_MS * WALK_TILES_PER_MS, 9);
   });
 
   it("slides along the wall it clips instead of stopping dead against it", () => {
     // Rock to the right: the sideways half of the diagonal is refused, so it
-    // walks the forward half rather than cancelling the whole step.
-    const sideways = advancePlayer(createPlayer(START), walk("northeast"), 0, WALL_RIGHT);
-    expect(sideways.player.gait).toEqual({ forward: 1, strafe: 0 });
-    expect(sideways.player.pose.y).toBeCloseTo(129, 9);
-    expect(sideways.usedHeading).toBe(true);
+    // walks the forward half rather than stopping.
+    const sideways = livePose(hold(walk("northeast"), 1, WALL_RIGHT), R);
+    expect(wrapDelta(sideways.x, START.x)).toBeLessThanOrEqual(0.5 - REACH_TILES + 1e-9);
+    expect(wrapDelta(sideways.y, START.y)).toBeGreaterThan(0.6);
 
     // Rock straight ahead: the forward half is gone too, so it strafes.
-    const ahead = advancePlayer(createPlayer(START), walk("northeast"), 0, WALL_AHEAD);
-    expect(ahead.player.gait).toEqual({ forward: 0, strafe: 1 });
-    expect(ahead.player.pose.turn).toBeCloseTo(1 / R, 9);
+    const ahead = livePose(hold(walk("northeast"), 1, WALL_AHEAD), R);
+    expect(wrapDelta(ahead.y, START.y)).toBeLessThanOrEqual(0.5 - REACH_TILES + 1e-9);
+    expect(wrapDelta(ahead.x, START.x)).toBeGreaterThan(0.6);
+    expect(ahead.turn).toBeGreaterThan(0);
   });
 
   it("still refuses when neither half of the diagonal is open", () => {
-    const corner = advancePlayer(createPlayer(START), walk("southwest"), 0, WALLED);
-
-    expect(corner.player.pose).toEqual(START);
+    const corner = advancePlayer(createPlayer(START), walk("southwest"), FRAME_MS, WALLED);
+    expect(livePose(corner.player, R)).toEqual(START);
     expect(corner.player.motion).toBe("idle");
     expect(corner.usedHeading).toBe(true);
   });
 
   it("faces the diagonal it walks", () => {
     for (const heading of ["northeast", "northwest", "southeast", "southwest"] as const) {
-      const player = advancePlayer(createPlayer(START), walk(heading), 0, OPEN).player;
-      expect(player.facing).toBe(heading);
+      expect(advancePlayer(createPlayer(START), walk(heading), FRAME_MS, OPEN).player.facing).toBe(heading);
     }
   });
 });
@@ -271,58 +270,41 @@ describe("facingYaw", () => {
 
 describe("aiming", () => {
   it("faces the aim instead of the heading, so he can walk one way and look another", () => {
-    const tick = advancePlayer(
-      createPlayer(START),
-      { heading: "north", aim: "south", attack: false },
-      0,
-      OPEN,
-    );
+    const tick = advancePlayer(createPlayer(START), { heading: "north", aim: "south", attack: false }, FRAME_MS, OPEN);
     expect(tick.player.facing).toBe("south");
-    // The legs do not care: he still steps north.
-    expect(tick.player.motion).toBe("step");
-    expect(tick.player.pose.y).toBeCloseTo(129, 9);
+    // The legs do not care: he still walks north.
+    expect(tick.player.motion).toBe("walk");
+    expect(scrollPhase(tick.player).y).toBeGreaterThan(0);
     expect(tick.usedHeading).toBe(true);
   });
 
   it("turns to the aim while standing still", () => {
-    const tick = advancePlayer(createPlayer(START), { aim: "northwest", attack: false }, 16, OPEN);
+    const tick = advancePlayer(createPlayer(START), { aim: "northwest", attack: false }, FRAME_MS, OPEN);
     expect(tick.player.facing).toBe("northwest");
     expect(tick.player.motion).toBe("idle");
     expect(tick.usedHeading).toBe(false);
   });
 
   it("keeps facing the aim for the whole of a held walk", () => {
-    const backpedal: Intent = { heading: "south", aim: "north", attack: false };
-    expect(hold(backpedal, 3).facing).toBe("north");
+    expect(hold({ heading: "south", aim: "north", attack: false }, 3).facing).toBe("north");
   });
 
   it("keeps the last facing when neither aim nor heading says anything", () => {
     const aimed = advancePlayer(createPlayer(START), { aim: "east", attack: false }, 0, OPEN);
-    expect(advancePlayer(aimed.player, NOTHING, 16, OPEN).player.facing).toBe("east");
+    expect(advancePlayer(aimed.player, NOTHING, FRAME_MS, OPEN).player.facing).toBe("east");
   });
 
   it("faces the aim when walking into rock, not the rock", () => {
-    const blocked = advancePlayer(
-      createPlayer(START),
-      { heading: "north", aim: "west", attack: false },
-      0,
-      WALLED,
-    );
+    const blocked = advancePlayer(createPlayer(START), { heading: "north", aim: "west", attack: false }, 0, WALLED);
     expect(blocked.player.facing).toBe("west");
     expect(blocked.usedHeading).toBe(true);
   });
 });
 
 describe("facing", () => {
-  it("turns the instant the input arrives, without waiting for the foot to land", () => {
-    const stepping = advancePlayer(createPlayer(START), east, 0, OPEN).player;
-    const turned = advancePlayer(stepping, north, STEP_MS / 2, OPEN).player;
-
-    // He is still sliding east - the committed step is not interrupted - but he
-    // already faces north, which is what a player reads as the game hearing him.
-    expect(turned.facing).toBe("north");
-    expect(turned.motion).toBe("step");
-    expect(turned.pose).toEqual(stepping.pose);
+  it("turns the instant the input arrives", () => {
+    const walking = run(createPlayer(START), east, 3);
+    expect(advancePlayer(walking, north, FRAME_MS, OPEN).player.facing).toBe("north");
   });
 });
 
@@ -333,93 +315,81 @@ describe("groundPose and scrollPhase", () => {
     expect(scrollPhase(idle)).toEqual({ x: 0, y: 0 });
   });
 
-  it("freeze the sample and carry the motion in the phase instead", () => {
-    // The contract the whole renderer rests on: during a stride the world is
-    // read from where it started, and the picture is offset by how far it has
-    // got. Sampling from the live pose would flip a tile mid-stride.
-    let player = advancePlayer(createPlayer(START), north, 0, OPEN).player;
-    player = advancePlayer(player, NOTHING, STEP_MS / 2, OPEN).player;
-
+  it("hold the sample on whole tiles and carry the rest in the phase", () => {
+    // The contract the whole renderer rests on: the world is read from the
+    // anchor, and the picture is offset by how far past it he stands.
+    const player = hold(north, 0.5);
     expect(groundPose(player)).toEqual(START);
     expect(scrollPhase(player).y).toBeCloseTo(0.5, 6);
     expect(scrollPhase(player).x).toBe(0);
   });
 
-  it("reach exactly one tile as the sample advances one tile, so the two cancel", () => {
-    let player = advancePlayer(createPlayer(START), north, 0, OPEN).player;
-    player = advancePlayer(player, NOTHING, STEP_MS - 1, OPEN).player;
-    const phase = scrollPhase(player);
-
-    expect(phase.y).toBeGreaterThan(0.99);
-    // ...and one frame later the sample has moved on by that same tile.
-    const settled = advancePlayer(player, NOTHING, 2, OPEN).player;
-    expect(groundPose(settled).y).toBeCloseTo(START.y + 1, 6);
-    expect(scrollPhase(settled)).toEqual({ x: 0, y: 0 });
+  it("hand a whole tile to the anchor as the phase passes it, so the two cancel", () => {
+    let player = createPlayer(START);
+    let before = player;
+    while (groundPose(player) === groundPose(before)) {
+      before = player;
+      player = advancePlayer(player, north, FRAME_MS, OPEN).player;
+    }
+    expect(groundPose(player).y).toBeCloseTo(START.y + 1, 6);
+    // The live pose is continuous across the hand-over: one frame's walk, no jump.
+    const jump = livePose(player, R).y - livePose(before, R).y;
+    expect(jump).toBeCloseTo(FRAME_MS * WALK_TILES_PER_MS, 9);
+    expect(scrollPhase(player).y).toBeLessThan(FRAME_MS * WALK_TILES_PER_MS + 1e-9);
   });
 
-  it("put a sideways stride on the sideways axis", () => {
-    let player = advancePlayer(createPlayer(START), east, 0, OPEN).player;
-    player = advancePlayer(player, NOTHING, STEP_MS / 2, OPEN).player;
+  it("keep the phase under a tile on each axis, walking either way", () => {
+    for (const heading of ["north", "south", "east", "west", "northwest", "southeast"] as const) {
+      const phase = scrollPhase(hold(walk(heading), 2.7));
+      expect(Math.abs(phase.x)).toBeLessThan(1);
+      expect(Math.abs(phase.y)).toBeLessThan(1);
+    }
+  });
 
+  it("put a sideways walk on the sideways axis", () => {
+    const player = hold(east, 0.5);
     expect(scrollPhase(player).x).toBeCloseTo(0.5, 6);
     expect(scrollPhase(player).y).toBe(0);
   });
 
   it("slide both axes together through a diagonal", () => {
-    let player = advancePlayer(createPlayer(START), walk("northwest"), 0, OPEN).player;
-    player = advancePlayer(player, NOTHING, DIAGONAL_STEP_MS / 2, OPEN).player;
-
-    expect(scrollPhase(player).x).toBeCloseTo(-0.5, 6);
-    expect(scrollPhase(player).y).toBeCloseTo(0.5, 6);
+    const player = hold(walk("northwest"), Math.SQRT2 / 2);
+    expect(scrollPhase(player).x).toBeCloseTo(-0.5, 2);
+    expect(scrollPhase(player).y).toBeCloseTo(0.5, 2);
   });
 });
 
 describe("livePose", () => {
-  it("is the settled pose whenever nothing is running", () => {
+  it("is the anchor whenever he stands on it", () => {
     expect(livePose(createPlayer(START), R)).toEqual(START);
   });
 
-  it("turns continuously through a sideways stride, unlike the ground", () => {
+  it("turns continuously through a sideways walk, unlike the ground", () => {
     // The horizon is the only thing far enough away to show the turn smoothly,
     // so this is the one view that must not be quantised.
-    let player = advancePlayer(createPlayer(START), east, 0, OPEN).player;
-    player = advancePlayer(player, NOTHING, STEP_MS / 2, OPEN).player;
-
-    expect(livePose(player, R).turn).toBeCloseTo(0.5 / R, 9);
+    const player = hold(east, 0.5);
+    expect(livePose(player, R).turn).toBeCloseTo(0.5 / R, 6);
     expect(groundPose(player).turn).toBe(0);
   });
 
-  it("walks the arc, so mid-stride is on the circle rather than across it", () => {
-    let player = advancePlayer(createPlayer(START), east, 0, OPEN).player;
-    player = advancePlayer(player, NOTHING, STEP_MS / 2, OPEN).player;
-    const half = livePose(player, R);
-
-    expect(half.y).not.toBeCloseTo((START.y + player.pose.y) / 2, 9);
-  });
-
-  it("lands on the committed pose at the end of a diagonal", () => {
-    const started = advancePlayer(createPlayer(START), walk("southeast"), 0, OPEN).player;
-    const done = advancePlayer(started, NOTHING, DIAGONAL_STEP_MS - 1, OPEN).player;
-    const live = livePose(done, R);
-
-    // Within a hundredth of a tile of the pose the step committed to - the gap
-    // is the last frame of arc still unwalked, not a drift.
-    expect(Math.abs(live.x - started.pose.x)).toBeLessThan(0.01);
-    expect(Math.abs(live.y - started.pose.y)).toBeLessThan(0.01);
+  it("walks the arc, so mid-tile is on the circle rather than across it", () => {
+    const half = livePose(hold(east, 0.5), R);
+    const whole = livePose(hold(east, 1.0001), R);
+    expect(half.y).not.toBeCloseTo((START.y + whole.y) / 2, 9);
   });
 });
 
-describe("stepProgress and walkClipMs", () => {
-  it("is 1 whenever no step is running", () => {
-    expect(stepProgress(createPlayer(START))).toBe(1);
+describe("walkClipMs", () => {
+  it("is one stride per tile, the next leading with the other leg", () => {
+    const first = { ...createPlayer(START), motion: "walk" as const, walked: 0 };
+    expect(walkClipMs(first, 400)).toBe(0);
+    expect(walkClipMs({ ...first, walked: 1 }, 400)).toBe(200);
+    expect(walkClipMs({ ...first, walked: 2.5 }, 400)).toBe(100);
   });
 
-  it("leads the next stride with the other leg", () => {
-    const first = { ...createPlayer(START), motion: "step" as const, motionMs: 0, steps: 0 };
-    const second = { ...first, steps: 1 };
-
-    expect(walkClipMs(first, 400)).toBe(0);
-    expect(walkClipMs(second, 400)).toBe(200);
+  it("counts every tile walked, in any direction", () => {
+    expect(hold(south, 2).walked).toBeCloseTo(2, 1);
+    expect(hold(walk("southwest"), 2).walked).toBeCloseTo(2, 1);
   });
 });
 
@@ -442,7 +412,6 @@ describe("attacking", () => {
   it("swings again when the button is still held after the first one lands", () => {
     const first = advancePlayer(createPlayer(START), { attack: true }, 0, OPEN).player;
     const second = advancePlayer(first, { attack: true }, ATTACK_MS, OPEN);
-
     expect(second.attacked).toBe(true);
     expect(second.player.attackMs).toBe(0);
   });
@@ -453,54 +422,34 @@ describe("attacking", () => {
   });
 
   it("leaves him standing still when he is only attacking", () => {
-    const tick = advancePlayer(createPlayer(START), { attack: true }, 0, OPEN);
+    const tick = advancePlayer(createPlayer(START), { attack: true }, FRAME_MS, OPEN);
     expect(tick.player.motion).toBe("idle");
-    expect(tick.player.pose).toEqual(START);
+    expect(livePose(tick.player, R)).toEqual(START);
   });
 });
 
 describe("attacking while moving", () => {
   it("starts both on the same frame, and faces where he is going", () => {
-    const tick = advancePlayer(createPlayer(START), { heading: "north", attack: true }, 0, OPEN);
-
+    const tick = advancePlayer(createPlayer(START), { heading: "north", attack: true }, FRAME_MS, OPEN);
     expect(tick.attacked).toBe(true);
     expect(tick.player.attackMs).toBe(0);
-    expect(tick.player.motion).toBe("step");
-    expect(tick.player.pose.y).toBeCloseTo(129, 9);
+    expect(tick.player.motion).toBe("walk");
     expect(tick.player.facing).toBe("north");
-    // The swing no longer costs him the step, so the heading is spent too.
     expect(tick.usedHeading).toBe(true);
   });
 
-  it("swings mid-step without waiting for the foot to land", () => {
-    const stepping = advancePlayer(createPlayer(START), east, 0, OPEN).player;
-    const during = advancePlayer(stepping, { attack: true }, STEP_MS / 2, OPEN);
-
-    expect(during.attacked).toBe(true);
-    expect(during.player.motion).toBe("step");
-    // The step is untouched: same destination, same clock.
-    expect(during.player.pose).toEqual(stepping.pose);
-    expect(stepProgress(during.player)).toBeCloseTo(0.5);
+  it("keeps walking at full speed through a swing", () => {
+    const swinging = run(createPlayer(START), { heading: "north", attack: true }, 20);
+    const walking = run(createPlayer(START), north, 20);
+    expect(livePose(swinging, R).y).toBeCloseTo(livePose(walking, R).y, 9);
+    expect(swinging.attackMs).toBeDefined();
   });
 
-  it("keeps walking through a swing that outlasts several steps", () => {
-    let player = advancePlayer(createPlayer(START), { heading: "north", attack: true }, 0, OPEN)
-      .player;
-    for (let step = 0; step < 2; step += 1) {
-      player = advancePlayer(player, north, STEP_MS, OPEN).player;
-    }
-
-    expect(player.pose.y).toBeCloseTo(131, 6);
-    expect(player.attackMs).toBe(2 * STEP_MS);
-  });
-
-  it("lets the swing end without disturbing the step under it", () => {
-    const swinging = advancePlayer(createPlayer(START), { heading: "east", attack: true }, 0, OPEN)
-      .player;
+  it("lets the swing end without disturbing the walk under it", () => {
+    const swinging = advancePlayer(createPlayer(START), { heading: "east", attack: true }, 0, OPEN).player;
     const later = advancePlayer(swinging, east, ATTACK_MS, OPEN).player;
-
     expect(later.attackMs).toBeUndefined();
-    expect(later.motion).toBe("step");
+    expect(later.motion).toBe("walk");
   });
 });
 
@@ -509,7 +458,7 @@ describe("the swing's contact beat", () => {
     let player = advancePlayer(createPlayer(START), { attack: true }, 0, OPEN).player;
     let strikes = 0;
     for (let frame = 0; frame < 40; frame += 1) {
-      const tick = advancePlayer(player, NOTHING, 16, OPEN);
+      const tick = advancePlayer(player, NOTHING, FRAME_MS, OPEN);
       strikes += tick.struck ? 1 : 0;
       if (tick.struck) {
         expect(player.attackMs).toBeLessThan(SWING_CONTACT_MS);
@@ -523,8 +472,8 @@ describe("the swing's contact beat", () => {
   it("lands once per swing when the button is held", () => {
     let player = createPlayer(START);
     let strikes = 0;
-    for (let frame = 0; frame < Math.ceil((ATTACK_MS * 3) / 16); frame += 1) {
-      const tick = advancePlayer(player, { attack: true }, 16, OPEN);
+    for (let frame = 0; frame < Math.ceil((ATTACK_MS * 3) / FRAME_MS); frame += 1) {
+      const tick = advancePlayer(player, { attack: true }, FRAME_MS, OPEN);
       strikes += tick.struck ? 1 : 0;
       player = tick.player;
     }
@@ -534,24 +483,19 @@ describe("the swing's contact beat", () => {
 
 describe("casting", () => {
   it("runs its own clock beside the sword and the legs, and never waits for them", () => {
-    const tick = advancePlayer(
-      createPlayer(START),
-      { heading: "east", attack: true, cast: true },
-      0,
-      OPEN,
-    );
+    const tick = advancePlayer(createPlayer(START), { heading: "east", attack: true, cast: true }, FRAME_MS, OPEN);
     expect(tick.cast).toBe(true);
     expect(tick.attacked).toBe(true);
     expect(tick.player.castMs).toBe(0);
     expect(tick.player.attackMs).toBe(0);
-    expect(tick.player.motion).toBe("step");
+    expect(tick.player.motion).toBe("walk");
   });
 
   it("releases once, at the clip's release beat", () => {
     let player = advancePlayer(createPlayer(START), { attack: false, cast: true }, 0, OPEN).player;
     const releases: number[] = [];
-    for (let elapsed = 16; elapsed <= CAST_CYCLE_MS + 16; elapsed += 16) {
-      const tick = advancePlayer(player, NOTHING, 16, OPEN);
+    for (let elapsed = FRAME_MS; elapsed <= CAST_CYCLE_MS + FRAME_MS; elapsed += FRAME_MS) {
+      const tick = advancePlayer(player, NOTHING, FRAME_MS, OPEN);
       if (tick.released) {
         releases.push(elapsed);
       }
@@ -559,7 +503,7 @@ describe("casting", () => {
     }
     expect(releases).toHaveLength(1);
     expect(releases[0]).toBeGreaterThanOrEqual(CAST_RELEASE_MS);
-    expect(releases[0]).toBeLessThan(CAST_RELEASE_MS + 16);
+    expect(releases[0]).toBeLessThan(CAST_RELEASE_MS + FRAME_MS);
     expect(player.castMs).toBeUndefined();
   });
 
@@ -583,10 +527,9 @@ describe("casting", () => {
 describe("the heading he remembers", () => {
   it("keeps all eight, including diagonals the drawing cannot show", () => {
     expect(createPlayer(START).heading).toBe("south");
-    const tick = advancePlayer(createPlayer(START), walk("northeast"), 0, OPEN);
+    const tick = advancePlayer(createPlayer(START), walk("northeast"), FRAME_MS, OPEN);
     expect(tick.player.heading).toBe("northeast");
-    const later = advancePlayer(tick.player, NOTHING, STEP_MS * 2, OPEN);
-    expect(later.player.heading).toBe("northeast");
+    expect(advancePlayer(tick.player, NOTHING, STEP_MS * 2, OPEN).player.heading).toBe("northeast");
   });
 });
 
@@ -595,10 +538,10 @@ describe("enchanting the blade", () => {
     const lit = advancePlayer(createPlayer(START), { attack: false, enchant: true }, 0, OPEN);
     expect(lit.toggled).toBe(true);
     expect(lit.player.enchanted).toBe(true);
-    const still = advancePlayer(lit.player, NOTHING, 16, OPEN);
+    const still = advancePlayer(lit.player, NOTHING, FRAME_MS, OPEN);
     expect(still.toggled).toBe(false);
     expect(still.player.enchanted).toBe(true);
-    const out = advancePlayer(still.player, { attack: false, enchant: true }, 16, OPEN);
+    const out = advancePlayer(still.player, { attack: false, enchant: true }, FRAME_MS, OPEN);
     expect(out.player.enchanted).toBe(false);
   });
 });

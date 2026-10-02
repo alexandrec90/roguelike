@@ -45,13 +45,20 @@ diffs it against the CPU — but the game draws scenery from bakes.
 
 `scenery-bake.ts` poses a species at each of `WIND_LEVELS` by stepping it under a wind
 held fixed (`WindOptions.fixed`) until its own springs settle, then flattens body, outline
-and cast shadow to buffers. `scenery-cache.ts` turns those into textures: one bake per
-body per lean per light, a newly seen body baking only the lean it needs *now* and
-queueing the rest (one bake per frame within `BAKE_BUDGET_MS`), bodies on the horizon
-roll re-sampled at a quantised scale and warming their full-size leans as they approach,
-and a re-bake when the sun crosses a step that keeps the old picture until the new one is
-whole. `scenery-layer.ts` only chooses: the lean nearest the travelling wind at the body's
-planet point, eased.
+and cast shadow to buffers. **Bakes never run on the frame:** `scenery-baker.ts` runs
+them on Web Workers (`scenery-bake-worker.ts`, over the pure `scenery-bake-jobs.ts`), and
+`scenery-cache.ts` only submits jobs and uploads what comes back within a per-frame
+budget. Variety is bounded on purpose — every body is one of `SCENERY_VARIANTS` shapes
+per species (`scenery-features.ts`) — so the whole wood is a few dozen bodies, all asked
+for at `create`, and the scene holds its first frame behind a fade until each has a
+picture. A body is never hidden for want of a bake it once had: a horizon body between
+scale steps shows its nearest scale in any light, and a re-bake for a new sun keeps the
+old picture until the new one is whole. `scenery-layer.ts` only chooses: the lean nearest
+the travelling wind at the body's planet point, eased.
+
+Unbounded variety is what this replaced: one seed per tree put ~900 distinct bodies in
+reach against a 320-entry cache, bakes never caught up, and the horizon filled in one
+body a frame while the hero stood still.
 
 Which body stands where is `scenery-features.ts`: seeded lattices of trees (a weighted
 species mix), bushes, boulders and mushroom rings over the planet.
@@ -92,7 +99,7 @@ Measured on an Intel HD 530. A frame is 16.7 ms; the JS half of it should stay n
 
 | Where | Budget | How it stays there |
 | --- | --- | --- |
-| Scenery | ~1 ms + ≤ 3 ms of queued bakes | textures chosen per frame; bakes sliced |
+| Scenery | ~1 ms idle, ~2 ms walking, measured on a faster machine | textures chosen per frame; bakes on workers, only uploads (≤ 2 ms) on the frame |
 | Ground | ~0.5 ms | composed once per step into one surface |
 | Grass | ~1 ms | a baked tuft atlas; frames chosen from the wind |
 | Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands. Water added ~1 ms a frame and ~2–3 ms a step, measured on a faster machine | one surface; the lattice read on demand, and never under a far pixel (`far` colours); tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped; puddle outlines and bodies cached by shape |

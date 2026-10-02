@@ -22,7 +22,7 @@
  *
  * Measured under Node on the dev machine, settle plus bake, per lean: chestnut
  * 7.9 ms, boulder 4.1, spruce 2.6, mushrooms 2.5, bush 1.8, beech 1.5, ash 1.4,
- * oak 1.1. Hence one lean per frame from a queue, never a whole body at once.
+ * oak 1.1. Hence never on the frame: `scenery-baker.ts` runs them on workers.
  *
  * Pure and Phaser-free; `scenery-cache.ts` owns the textures these become.
  */

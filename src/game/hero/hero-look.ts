@@ -15,7 +15,7 @@ import type { PixelCloud } from "../ink";
 import type { LightSource } from "../lights";
 import { BLADE_SPAN, CAST, HERO_EQUIPPED, WALK } from "../models";
 import { solveModel, type SolvedPose } from "../rig";
-import { facingYaw, stepDurationMs, walkClipMs, type PlayerState } from "../player";
+import { facingYaw, walkClipMs, type PlayerState } from "../player";
 import { TILE_DEPTH, TILE_WIDTH } from "../projection";
 import { windAt, type WindOptions } from "../wind";
 import {
@@ -123,7 +123,7 @@ export class HeroLook {
       this.settled = true;
     }
     const { player } = input;
-    const gait = player.motion === "step" ? player.gait : undefined;
+    const gait = player.motion === "walk" ? player.gait : undefined;
     const wind = windAt(input.elapsedMs, 0, 0, input.wind ?? {}) * SCARF_WIND;
     const drive = {
       x: -(gait?.strafe ?? 0) * SCARF_DRAG + wind,
@@ -141,11 +141,10 @@ export class HeroLook {
    */
   private stepParticles(player: PlayerState, blade: BladeSegment | undefined, deltaMs: number): void {
     const delta = Math.min(Math.max(deltaMs, 0), 50);
-    const gait = player.motion === "step" ? player.gait : undefined;
-    if (gait !== undefined) {
-      const share = delta / stepDurationMs(player);
-      const dx = -gait.strafe * TILE_WIDTH * share;
-      const dy = gait.forward * TILE_DEPTH * share;
+    const { stepped } = player;
+    if (stepped.x !== 0 || stepped.y !== 0) {
+      const dx = -stepped.x * TILE_WIDTH;
+      const dy = stepped.y * TILE_DEPTH;
       for (const particle of this.pool.particles) {
         particle.x += dx;
         particle.y += dy;
@@ -169,7 +168,7 @@ export class HeroLook {
 export function tracksOf(player: PlayerState, elapsedMs: number): Parameters<typeof layeredPose>[0] {
   return {
     idleMs: elapsedMs,
-    walkMs: player.motion === "step" ? walkClipMs(player, WALK.durationMs) : undefined,
+    walkMs: player.motion === "walk" ? walkClipMs(player, WALK.durationMs) : undefined,
     castMs: player.castMs !== undefined && player.castMs < CAST.durationMs ? player.castMs : undefined,
     swingMs: player.attackMs,
   };

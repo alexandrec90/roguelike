@@ -185,7 +185,8 @@ species nobody has written yet.
 | `src/game/props/` | A boulder, a bush and a mushroom, built from the same three calls as a crown. |
 | `src/game/gpu/` | The volume shader (`volume-shader.ts`), its uniforms (`volume-uniforms.ts`), and `volume-gl.ts`, the tree lab's host for its readback and parity diff. The game no longer draws with it. |
 | `src/game/lod.ts` | The detail budget. A distant body evaluates the **same field** more cheaply — never a different, simpler model — so it gains detail as you walk toward it instead of popping. |
-| `src/game/scenery-bake.ts`, `scenery-cache.ts` | Bodies baked once per lean, per light, per horizon scale — posed by stepping the species under a fixed wind — into textures, on a sliced queue. |
+| `src/game/scenery-bake.ts`, `scenery-cache.ts` | Bodies baked once per lean, per light, per horizon scale — posed by stepping the species under a fixed wind — into textures. |
+| `src/game/scenery-bake-jobs.ts`, `scenery-baker.ts`, `scenery-bake-worker.ts` | A bake as plain data, and where it runs: Web Workers, routed so one body's leans settle in order on one bench, or inline where there are none (the tests). |
 | `src/game/scenery-features.ts`, `scenery-layer.ts` | Which species stands where on the planet; the Phaser wiring that picks a baked lean from the wind. |
 | `src/game/scenery-slots.ts` | Which body gets which slot, pure and tested — the pool is smaller than the planet, so a slot is *lent* to whichever tree is in reach and an incumbent keeps it. |
 

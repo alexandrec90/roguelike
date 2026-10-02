@@ -1,37 +1,32 @@
 /**
  * The baked scenery, as textures: one per body, per lean, per light.
  *
- * `scenery-bake.ts` turns a posed body into pixels; this owns what those pixels
- * become on the GPU and when they are made. Three rules keep it cheap:
+ * `scenery-bake.ts` turns a posed body into pixels and `scenery-baker.ts` runs
+ * that off the main thread; this owns what the pixels become on the GPU and
+ * when they are asked for. Four rules keep it cheap and keep it from popping:
  *
- * - **Nothing is baked twice.** A body is keyed by species and seed — its
- *   identity on the planet — so walking away from a tree and back finds it
- *   already baked.
- * - **Nothing big is baked in one frame.** A body arrives with only the lean it
- *   needs *now* baked on the spot; its other leans join a queue that `pump`
- *   drains one bake at a time within a per-frame budget. A newly seen tree
- *   stands still for a moment and then starts to sway, which reads as a lull in
- *   the wind rather than as loading.
+ * - **Nothing is baked twice, and there is little to bake.** A body is keyed by
+ *   species and seed, and seeds are drawn from `SCENERY_VARIANTS` per species,
+ *   so the planet's whole wood is a few dozen bodies. `warm` asks for every one
+ *   of them before the first frame is shown.
+ * - **Nothing is baked on the frame.** Jobs go to the baker; `pump` only
+ *   uploads what came back, within a budget.
+ * - **A body is never hidden for want of a bake it once had.** A horizon body
+ *   between scale steps shows the nearest scale it has, in any light; a body
+ *   whose lean is not back yet shows its nearest lean.
  * - **The old picture holds until the new one is whole.** When the sun crosses
- *   a step every body is re-baked through the same queue, and each keeps
- *   drawing its previous light until all of its new leans are ready, so dusk
- *   creeps across a wood rather than flickering through it.
+ *   a step every body is re-baked, and each keeps drawing its previous light
+ *   until all of its new leans are back, so dusk creeps across a wood rather
+ *   than flickering through it.
  */
 
 import type Phaser from "phaser";
 
 import type { BakedCloud } from "./pixel-buffer";
 import { installBuffer } from "./pixel-surface";
-import type { SceneryInstance, ScenerySpecies } from "./scenery";
-import {
-  bakePose,
-  bakeScaled,
-  lightKey,
-  settleAt,
-  WIND_LEVELS,
-  type BakeLight,
-} from "./scenery-bake";
-import type { SceneryFeature } from "./scenery-features";
+import { lightKey, WIND_LEVELS, type BakeLight } from "./scenery-bake";
+import { speciesSways, type BakeJob, type BakeResult } from "./scenery-bake-jobs";
+import { createBaker, type Baker } from "./scenery-baker";
 import { findSpecies } from "./trees";
 
 /** A baked picture on the GPU: its texture key and where its foot is inside it. */
@@ -46,34 +41,41 @@ export interface BakedLean {
   readonly shadow: BakedTexture | null;
 }
 
+/** A body or a scale, identified by what `recordFor` needs. */
+export interface BodyRef {
+  readonly species: string;
+  readonly seed: number;
+}
+
 interface LightSet {
   readonly light: string;
   readonly bake: BakeLight;
   readonly leans: (BakedLean | undefined)[];
+  readonly asked: boolean[];
+}
+
+interface ScaledBake {
+  readonly light: string;
+  readonly texture: BakedTexture;
 }
 
 interface BodyRecord {
   readonly id: string;
-  readonly species: ScenerySpecies;
-  readonly instance: SceneryInstance;
+  readonly species: string;
+  readonly seed: number;
   /** False for a body with no integrator — it is baked at one lean only. */
   readonly sways: boolean;
   current: LightSet;
   next: LightSet | undefined;
-  /** Whether `current`'s leans have been queued yet. */
-  queued: boolean;
-  readonly scaled: Map<string, BakedTexture>;
-  used: number;
+  /** Horizon bakes by scale step, each in the light it was made in. */
+  readonly scaled: Map<number, ScaledBake>;
+  /** Scale steps asked for and not back, as `step|light`. */
+  readonly scaling: Set<string>;
 }
 
-interface Job {
-  readonly record: BodyRecord;
-  readonly set: LightSet;
-  readonly lean: number;
-}
-
-/** How many bodies' textures are kept before the least recently seen go. */
-const MAX_RECORDS = 320;
+type Ticket =
+  | { readonly kind: "lean"; readonly record: BodyRecord; readonly set: LightSet; readonly lean: number }
+  | { readonly kind: "scale"; readonly record: BodyRecord; readonly step: number; readonly light: string };
 
 /**
  * Horizon bakes are made at this spacing of scale: fine enough that a body
@@ -82,49 +84,34 @@ const MAX_RECORDS = 320;
  */
 const SCALE_STEP = 0.025;
 
-/**
- * Horizon bakes made on the spot per frame. A body that has crossed into a new
- * scale step past this shows the nearest scale it already has for a frame or
- * two - a pixel off its size, never missing - while the queue catches up.
- */
-const SCALE_BAKES_PER_FRAME = 1;
+/** The scales `warm` asks for up front, so every body has a horizon picture near any size. */
+const WARM_SCALES: readonly number[] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.85];
 
-/**
- * A body this large on the roll is a few steps from the field: warm its
- * full-size leans in the background so they are ready when it arrives.
- */
-const PREWARM_SCALE = 0.55;
+/** Milliseconds of uploads allowed a frame, beyond the first. */
+const UPLOAD_BUDGET_MS = 2;
 
 let serial = 0;
 
 export class SceneryCache {
   private readonly textures: Phaser.Textures.TextureManager;
+  private readonly baker: Baker;
   private readonly records = new Map<string, BodyRecord>();
-  /** Bodies on the field, drawn this frame from whatever lean was nearest. */
-  private readonly urgent: Job[] = [];
-  /** Bodies still on the horizon, and re-bakes for a light that moved. */
-  private readonly background: Job[] = [];
+  private readonly tickets = new Map<number, Ticket>();
+  /** Finished bakes not yet uploaded, oldest first. */
+  private landed: { ticket: number; result: BakeResult | null }[] = [];
   /** Texture keys retired this frame, removed next frame once nothing shows them. */
   private graveyard: string[] = [];
   private light: BakeLight = { light: { x: -0.6, y: -0.8 }, elevation: 0.7 };
   private lightId = lightKey(this.light);
-  private frame = 0;
-  /**
-   * Bakes allowed on the spot this frame. A body with nothing baked yet is
-   * drawn a frame late rather than stalling the frame it scrolls in on.
-   */
-  private spotBakes = 1;
-  /** Horizon bakes still allowed on the spot this frame. */
-  private scaleBakes = SCALE_BAKES_PER_FRAME;
 
-  constructor(textures: Phaser.Textures.TextureManager) {
+  constructor(textures: Phaser.Textures.TextureManager, baker: Baker = createBaker()) {
     this.textures = textures;
+    this.baker = baker;
   }
 
   /**
    * The light bakes are made in. A change re-bakes each body the next time it
-   * is drawn — never the ones out of sight, which would spend the budget on
-   * trees nobody is looking at.
+   * is drawn — never the ones out of sight.
    */
   setLight(light: BakeLight): void {
     const id = lightKey(light);
@@ -139,167 +126,197 @@ export class SceneryCache {
     }
   }
 
-  /** The body at the lean nearest `leanIndex`, baking on the spot if it has none. */
-  lean(feature: SceneryFeature, leanIndex: number): BakedLean | undefined {
+  /**
+   * Ask for every body there is: each one's rest lean and a ladder of horizon
+   * scales first, then its other leans. `warmed` says when the first half is in.
+   */
+  warm(bodies: readonly BodyRef[]): void {
+    const records = bodies.flatMap((body) => this.recordFor(body) ?? []);
+    for (const record of records) {
+      this.askLean(record, record.current, restLean(record));
+    }
+    for (const record of records) {
+      for (const scale of WARM_SCALES) {
+        this.askScale(record, stepOf(scale));
+      }
+    }
+    for (const record of records) {
+      this.schedule(record);
+    }
+  }
+
+  /** Whether every known body has a picture to show, at full size and on the horizon. */
+  warmed(): boolean {
+    for (const record of this.records.values()) {
+      if (record.current.leans.every((lean) => lean === undefined) || record.scaled.size === 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** The body at the lean nearest `leanIndex`, or undefined until its first bake is back. */
+  lean(feature: BodyRef, leanIndex: number): BakedLean | undefined {
     const record = this.recordFor(feature);
     if (record === undefined) {
       return undefined;
     }
-    const index = record.sways ? leanIndex : 0;
-    this.schedule(record, this.urgent);
-    const ready = nearestReady(record.current.leans, index);
-    if (ready !== undefined) {
-      return ready;
-    }
-    if (this.spotBakes <= 0) {
-      return undefined;
-    }
-    this.spotBakes -= 1;
-    return this.bakeNow(record, record.current, index);
+    this.schedule(record);
+    return nearestReady(record.current.leans, record.sways ? leanIndex : 0);
   }
 
-  /**
-   * Start baking a body that is not in view yet but soon will be — just off
-   * the edge of the screen, where a strafe or a step will bring it in.
-   */
-  prewarm(feature: SceneryFeature): void {
+  /** Start baking a body that is not in view yet but soon will be. */
+  prewarm(feature: BodyRef): void {
     const record = this.recordFor(feature);
     if (record !== undefined) {
-      this.schedule(record, this.background);
+      this.schedule(record);
     }
   }
 
-  /** The body re-sampled for the horizon roll, at a quantised scale. */
-  scaled(feature: SceneryFeature, scale: number): BakedTexture | undefined {
+  /** The body re-sampled for the horizon roll, at the nearest scale it has. */
+  scaled(feature: BodyRef, scale: number): BakedTexture | undefined {
     const record = this.recordFor(feature);
     if (record === undefined) {
       return undefined;
     }
-    if (scale >= PREWARM_SCALE) {
-      this.schedule(record, this.background);
+    const step = stepOf(scale);
+    const exact = record.scaled.get(step);
+    if (exact?.light === this.lightId) {
+      return exact.texture;
     }
-    const step = Math.max(SCALE_STEP, Math.round(scale / SCALE_STEP) * SCALE_STEP);
-    const key = `${step.toFixed(3)}|${this.lightId}`;
-    let baked = record.scaled.get(key);
-    if (baked === undefined) {
-      if (this.scaleBakes <= 0) {
-        return nearestScale(record.scaled, step, this.lightId);
-      }
-      this.scaleBakes -= 1;
-      baked = this.install(bakeScaled(record.instance, this.light, step), `${record.id}-s`);
-      record.scaled.set(key, baked);
-    }
-    return baked;
+    this.askScale(record, step);
+    return exact?.texture ?? nearestScale(record.scaled, step, this.lightId);
   }
 
-  /**
-   * Run queued bakes until `budgetMs` has been spent — always at least one, so
-   * the queue drains even on a slow machine.
-   */
-  pump(budgetMs: number): void {
-    this.frame += 1;
-    this.spotBakes = 1;
-    this.scaleBakes = SCALE_BAKES_PER_FRAME;
+  /** Upload what the baker finished, within `budgetMs` — always at least one. */
+  pump(budgetMs: number = UPLOAD_BUDGET_MS): void {
     for (const key of this.graveyard) {
       this.textures.remove(key);
     }
     this.graveyard = [];
+    this.landed.push(...this.baker.collect(budgetMs));
     const start = performance.now();
-    for (;;) {
-      const job = this.urgent.shift() ?? this.background.shift();
-      if (job === undefined) {
-        break;
+    while (this.landed.length > 0) {
+      const done = this.landed.shift();
+      if (done !== undefined) {
+        this.land(done.ticket, done.result);
       }
-      if (job.set.leans[job.lean] === undefined && this.isLive(job)) {
-        this.bakeNow(job.record, job.set, job.lean);
-      }
-      this.promote(job.record);
       if (performance.now() - start >= budgetMs) {
         break;
       }
     }
-    this.evict();
   }
 
-  /** Bodies still waiting on a bake — for the debug readout and the tests. */
+  /** Bakes asked for and not yet on the GPU — for the debug readout and the tests. */
   pending(): number {
-    return this.urgent.length + this.background.length;
+    return this.tickets.size;
   }
 
-  /**
-   * Make sure a body's leans are on their way: its first bake if it has never
-   * been queued, or a re-bake if the light has moved since it was.
-   */
-  private schedule(record: BodyRecord, queue: Job[]): void {
-    if (!record.queued) {
-      record.queued = true;
-      this.enqueueAll(record, record.current, queue);
+  /** Make sure every lean of a body is on its way, in the light it should be drawn in. */
+  private schedule(record: BodyRecord): void {
+    if (record.current.light !== this.lightId && record.next === undefined) {
+      record.next = this.freshSet();
+    }
+    const set = record.next ?? record.current;
+    if (set.asked.every(Boolean)) {
       return;
     }
-    if (record.current.light !== this.lightId && record.next === undefined) {
-      record.next = this.freshSet(record);
-      this.enqueueAll(record, record.next, queue);
+    for (const lean of leanOrder(record, set)) {
+      this.askLean(record, set, lean);
     }
   }
 
-  private recordFor(feature: SceneryFeature): BodyRecord | undefined {
+  private askLean(record: BodyRecord, set: LightSet, lean: number): void {
+    if (set.asked[lean] === true) {
+      return;
+    }
+    set.asked[lean] = true;
+    const job: BakeJob = { kind: "lean", species: record.species, seed: record.seed, light: set.bake, lean };
+    this.tickets.set(this.baker.submit(job, record.id), { kind: "lean", record, set, lean });
+  }
+
+  private askScale(record: BodyRecord, step: number): void {
+    const asked = `${step}|${this.lightId}`;
+    if (record.scaling.has(asked) || record.scaled.get(step)?.light === this.lightId) {
+      return;
+    }
+    record.scaling.add(asked);
+    const job: BakeJob = {
+      kind: "scale",
+      species: record.species,
+      seed: record.seed,
+      light: this.light,
+      scale: step * SCALE_STEP,
+    };
+    this.tickets.set(this.baker.submit(job, record.id), { kind: "scale", record, step, light: this.lightId });
+  }
+
+  private land(id: number, result: BakeResult | null): void {
+    const ticket = this.tickets.get(id);
+    this.tickets.delete(id);
+    if (ticket === undefined || result === null) {
+      return;
+    }
+    if (ticket.kind === "scale") {
+      this.landScale(ticket, result.body);
+      return;
+    }
+    const { record, set, lean } = ticket;
+    if (set !== record.current && set !== record.next) {
+      return;
+    }
+    set.leans[lean] = {
+      body: this.install(result.body, `${record.id}-b`),
+      shadow: result.shadow === null ? null : this.install(result.shadow, `${record.id}-h`),
+    };
+    this.promote(record);
+  }
+
+  private landScale(ticket: Extract<Ticket, { kind: "scale" }>, body: BakedCloud): void {
+    const { record, step, light } = ticket;
+    record.scaling.delete(`${step}|${light}`);
+    const held = record.scaled.get(step);
+    // A bake from a light already passed still beats nothing, never a newer one.
+    if (held !== undefined && (light !== this.lightId || held.light === this.lightId)) {
+      return;
+    }
+    if (held !== undefined) {
+      this.graveyard.push(held.texture.key);
+    }
+    record.scaled.set(step, { light, texture: this.install(body, `${record.id}-s`) });
+  }
+
+  private recordFor(feature: BodyRef): BodyRecord | undefined {
     const id = `${feature.species}:${feature.seed}`;
     let record = this.records.get(id);
     if (record === undefined) {
-      const species = findSpecies(feature.species);
-      if (species === undefined) {
+      if (findSpecies(feature.species) === undefined) {
         return undefined;
       }
-      const instance = species.create(feature.seed);
-      const created: BodyRecord = {
+      record = {
         id,
-        species,
-        instance,
-        sways: instance.step !== undefined,
-        current: { light: "", bake: this.light, leans: [] },
+        species: feature.species,
+        seed: feature.seed,
+        sways: speciesSways(feature.species, feature.seed),
+        current: { light: "", bake: this.light, leans: [], asked: [] },
         next: undefined,
-        queued: false,
         scaled: new Map(),
-        used: this.frame,
+        scaling: new Set(),
       };
-      created.current = this.freshSet(created);
-      this.records.set(id, created);
-      record = created;
+      record.current = this.freshSet(record.sways);
+      this.records.set(id, record);
     }
-    record.used = this.frame;
     return record;
   }
 
-  private freshSet(record: BodyRecord): LightSet {
-    const count = record.sways ? WIND_LEVELS.length : 1;
-    return { light: this.lightId, bake: this.light, leans: Array.from({ length: count }, () => undefined) };
-  }
-
-  /** Queue every lean of a set, from rest outward, so the likeliest arrive first. */
-  private enqueueAll(record: BodyRecord, set: LightSet, queue: Job[]): void {
-    const rest = record.sways ? Math.floor(WIND_LEVELS.length / 2) : 0;
-    const order = set.leans
-      .map((_unused, index) => index)
-      .sort((a, b) => Math.abs(a - rest) - Math.abs(b - rest));
-    for (const lean of order) {
-      queue.push({ record, set, lean });
-    }
-  }
-
-  private isLive(job: Job): boolean {
-    return job.record.current === job.set || job.record.next === job.set;
-  }
-
-  private bakeNow(record: BodyRecord, set: LightSet, index: number): BakedLean {
-    const wind = record.sways ? (WIND_LEVELS[index] ?? 0) : 0;
-    settleAt(record.instance, wind, set.bake);
-    const pose = bakePose(record.instance, set.bake, wind);
-    const lean: BakedLean = {
-      body: this.install(pose.body, `${record.id}-b`),
-      shadow: pose.shadow === null ? null : this.install(pose.shadow, `${record.id}-h`),
+  private freshSet(sways = true): LightSet {
+    const count = sways ? WIND_LEVELS.length : 1;
+    return {
+      light: this.lightId,
+      bake: this.light,
+      leans: Array.from({ length: count }, () => undefined),
+      asked: Array.from({ length: count }, () => false),
     };
-    set.leans[index] = lean;
-    return lean;
   }
 
   /** Swap a finished re-bake in, and retire the light it replaces. */
@@ -311,12 +328,6 @@ export class SceneryCache {
     this.retire(record.current);
     record.current = next;
     record.next = undefined;
-    for (const [key, baked] of record.scaled) {
-      if (!key.endsWith(`|${next.light}`)) {
-        this.graveyard.push(baked.key);
-        record.scaled.delete(key);
-      }
-    }
   }
 
   private retire(set: LightSet | undefined): void {
@@ -336,48 +347,32 @@ export class SceneryCache {
     installBuffer(this.textures, key, baked.buffer);
     return { key, originX: baked.originX, originY: baked.originY };
   }
-
-  /** Drop the least recently seen bodies once there are too many. */
-  private evict(): void {
-    if (this.records.size <= MAX_RECORDS) {
-      return;
-    }
-    const stale = [...this.records.values()]
-      .filter((record) => record.used < this.frame - 1)
-      .sort((a, b) => a.used - b.used)
-      .slice(0, this.records.size - MAX_RECORDS);
-    for (const record of stale) {
-      this.retire(record.current);
-      this.retire(record.next);
-      for (const baked of record.scaled.values()) {
-        this.graveyard.push(baked.key);
-      }
-      this.records.delete(record.id);
-    }
-    const gone = new Set(stale);
-    for (const queue of [this.urgent, this.background]) {
-      for (let index = queue.length - 1; index >= 0; index -= 1) {
-        if (gone.has((queue[index] as Job).record)) {
-          queue.splice(index, 1);
-        }
-      }
-    }
-  }
 }
 
-/** The baked scale nearest `step` in this light, from keys `scale|light`; undefined if there is none. */
-function nearestScale(
-  scaled: ReadonlyMap<string, BakedTexture>,
-  step: number,
-  lightId: string,
-): BakedTexture | undefined {
+/** A scale as a whole number of `SCALE_STEP`s, never below one. */
+function stepOf(scale: number): number {
+  return Math.max(1, Math.round(scale / SCALE_STEP));
+}
+
+function restLean(record: BodyRecord): number {
+  return record.sways ? Math.floor(WIND_LEVELS.length / 2) : 0;
+}
+
+/** Every lean of a set, from rest outward, so the likeliest arrive first. */
+function leanOrder(record: BodyRecord, set: LightSet): number[] {
+  const rest = restLean(record);
+  return set.leans.map((_unused, index) => index).sort((a, b) => Math.abs(a - rest) - Math.abs(b - rest));
+}
+
+/** The baked scale nearest `step`, preferring this light; undefined if there is none at all. */
+function nearestScale(scaled: ReadonlyMap<number, ScaledBake>, step: number, lightId: string): BakedTexture | undefined {
   let best: BakedTexture | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
-  for (const [key, baked] of scaled) {
-    const [scale, light] = key.split("|");
-    const distance = Math.abs(Number(scale) - step);
-    if (light === lightId && distance < bestDistance) {
-      best = baked;
+  for (const [held, baked] of scaled) {
+    // Another light costs as much as being a whole range of scales off.
+    const distance = Math.abs(held - step) + (baked.light === lightId ? 0 : 1000);
+    if (distance < bestDistance) {
+      best = baked.texture;
       bestDistance = distance;
     }
   }
