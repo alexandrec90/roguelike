@@ -28,6 +28,8 @@ Seven modules, and no eighth place where any of this is decided:
 
 `src/game/ground/` owns the terrain art itself: tiles generated procedurally (seamless grass, neighbour-aware path edges, rock caps and faces), baked once and composed per step, plus the baked tuft atlas the grass is drawn from.
 
+The horizon lip is that same ground carried past the seam, in three passes over one surface: `roll-ground.ts` (tiles, tufts and the air's tint, each scanline asking `rollRowAt` which row it shows), `roll-water.ts` (the water layer's own puddles, grown by `growPuddles`, laid into world texels) and `roll-rock.ts` (rock standing, marched one screen column at a time so a nearer wall hides a farther one). **Which rows are the lip's is `standsOnField` in `camera.ts`**: the field's grid runs a row or two past the seam so the scroll has a row to slide on, and anything standing on those rows is the lip's to draw, at the lip's scale - drawn full size by the ground layer it floated over the sky. A far lip pixel spans many texels, so it shows its cell's *far colour* (`distantShare`) and never composes a tile; reading the lattice under the far lip is what made a step frame stall.
+
 **The grid belongs to the screen, and the planet has no grid.** That is the load-bearing
 sentence, because it is what reconciles a camera that turns with a pixel contract that
 forbids rotating a sprite. A tile is a *sample the screen takes*, not a thing the world

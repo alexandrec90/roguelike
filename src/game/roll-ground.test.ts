@@ -7,13 +7,19 @@ import { ROLL_ROWS } from "./horizon";
 import { INK_COLORS, type PixelCloud } from "./ink";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import {
+  distantShare,
   gridTexels,
+  HAZE_STEPS,
+  hazeInto,
+  HORIZON_HAZE,
   lipBounds,
   rollFog,
   rollGroundPixels,
   rollScanlines,
+  tileMode,
   type CellLook,
   type TileTexels,
+  type WaterLook,
 } from "./roll-ground";
 import { packCloud, TUFT_ROWS, type TuftPiece } from "./roll-grass";
 
@@ -95,6 +101,7 @@ describe("rollScanlines", () => {
       expect(above?.rowsBeyond).toBeGreaterThan(below?.rowsBeyond ?? 0);
       expect(above?.scale).toBeLessThan(below?.scale ?? 0);
       expect(above?.fog).toBeGreaterThan(below?.fog ?? 0);
+      expect(above?.stride).toBeGreaterThanOrEqual(below?.stride ?? 0);
     }
     expect(lines[0]?.rowsBeyond).toBeLessThanOrEqual(ROLL_ROWS);
     expect(lines[0]?.rowsBeyond).toBeGreaterThan(ROLL_ROWS / 3);
@@ -106,12 +113,72 @@ describe("rollScanlines", () => {
 });
 
 describe("rollFog", () => {
-  it("is clear at the seam, total at the horizon, and clamps either side", () => {
+  it("is clear at the seam, a tint rather than a wall at the horizon, and clamps either side", () => {
     expect(rollFog(0)).toBe(0);
-    expect(rollFog(1)).toBe(1);
+    expect(rollFog(1)).toBe(HORIZON_HAZE);
+    expect(HORIZON_HAZE).toBeLessThan(1);
     expect(rollFog(-1)).toBe(0);
-    expect(rollFog(2)).toBe(1);
-    expect(rollFog(0.5)).toBeLessThan(0.5);
+    expect(rollFog(2)).toBe(HORIZON_HAZE);
+  });
+
+  it("leaves the near half of the lip untouched, so it reads as the field carried on", () => {
+    expect(rollFog(0.5) * HAZE_STEPS).toBeLessThan(1);
+  });
+});
+
+describe("hazeInto", () => {
+  const pixel = (): Uint8ClampedArray => new Uint8ClampedArray([40, 120, 30, 255]);
+
+  it("does nothing without air", () => {
+    const rgba = pixel();
+    hazeInto(rgba, 0, HAZE, 0, 0, 0);
+    expect(Array.from(rgba)).toEqual([40, 120, 30, 255]);
+  });
+
+  it("tints toward the haze by a whole step, never all the way at the horizon's share", () => {
+    const rgba = pixel();
+    hazeInto(rgba, 0, HAZE, HORIZON_HAZE, 0, 0);
+    const [r, g, b] = Array.from(rgba);
+    expect(r).toBeGreaterThan(40);
+    expect(r).toBeLessThan(HAZE.r);
+    expect(b).toBeGreaterThan(30);
+    expect(g).not.toBe(HAZE.g);
+  });
+
+  it("dithers between neighbouring steps only: two pixels of one share differ by at most a step", () => {
+    const fog = 2.5 / HAZE_STEPS;
+    const shares = [0, 1, 2, 3].map((x) => {
+      const rgba = new Uint8ClampedArray([0, 0, 0, 255]);
+      hazeInto(rgba, 0, { r: 255, g: 255, b: 255 }, fog, x, 0);
+      return Math.round(((rgba[0] ?? 0) / 255) * HAZE_STEPS);
+    });
+    expect(new Set(shares)).toEqual(new Set([2, 3]));
+  });
+});
+
+describe("tileMode", () => {
+  it("is the tile's commonest opaque colour - an ink it is made of, not an average", () => {
+    const grid = createGrid(3, 2, "grass-3");
+    setGrid(grid, 2, 1, "stone-2");
+    const grass = hexToRgb(INK_COLORS["grass-3"]);
+    expect(tileMode(gridTexels(grid))).toBe((grass.r << 16) | (grass.g << 8) | grass.b);
+  });
+
+  it("does not count a hole as a colour", () => {
+    const rgba = new Uint8ClampedArray(4 * 4);
+    rgba.set([10, 20, 30, 255], 0);
+    expect(tileMode({ width: 4, rgba })).toBe((10 << 16) | (20 << 8) | 30);
+  });
+});
+
+describe("distantShare", () => {
+  it("point-samples while a pixel spans a texel or two, and settles wholly to the far colour by half a tile", () => {
+    expect(distantShare(1)).toBe(0);
+    expect(distantShare(2)).toBe(0);
+    expect(distantShare(4)).toBeGreaterThan(0);
+    expect(distantShare(4)).toBeLessThan(1);
+    expect(distantShare(TILE_WIDTH / 2)).toBe(1);
+    expect(distantShare(40)).toBe(1);
   });
 });
 
@@ -271,16 +338,81 @@ describe("rollGroundPixels", () => {
     expect((r ?? 0) + (g ?? 0) + (b ?? 0)).toBeLessThan((under[0] ?? 0) + (under[1] ?? 0) + (under[2] ?? 0));
   });
 
-  it("dissolves into the haze it is handed toward the horizon line", () => {
+  it("takes on the haze toward the horizon line, and is still ground there rather than haze", () => {
+    // The regression: the far lip used to be dithered *to* the haze, and since
+    // the lip folds forty rows into its top scanlines the horizon read as a
+    // grey band that turned green only as it rolled onto the field.
     const rgba = rollGroundPixels(FRAME, WIDTH, ALL_MEADOW, HAZE);
-    let hazy = 0;
+    const mode = tileMode(MEADOW);
+    const modeRgb = [(mode >> 16) & 0xff, (mode >> 8) & 0xff, mode & 0xff];
+    const distance = (a: readonly number[], b: readonly number[]): number =>
+      Math.hypot((a[0] ?? 0) - (b[0] ?? 0), (a[1] ?? 0) - (b[1] ?? 0), (a[2] ?? 0) - (b[2] ?? 0));
+    const haze = [HAZE.r, HAZE.g, HAZE.b];
     for (let x = 0; x < WIDTH; x += 1) {
-      const [r, g, b] = pixelAt(rgba, x, 0);
-      if (r === HAZE.r && g === HAZE.g && b === HAZE.b) {
-        hazy += 1;
+      const top = pixelAt(rgba, x, 0).slice(0, 3);
+      expect(top).not.toEqual(haze);
+      expect(distance(top, haze)).toBeLessThan(distance(modeRgb, haze));
+    }
+  });
+
+  it("settles a far scanline onto its tiles' commonest colour, so a step of scroll cannot reshuffle it", () => {
+    const top = rollScanlines(FRAME)[0];
+    expect(distantShare(top?.stride ?? 0)).toBeGreaterThan(0.5);
+    const unhazed = rollGroundPixels(FRAME, WIDTH, ALL_MEADOW, { r: 0, g: 0, b: 0 });
+    const shifted = rollGroundPixels({ ...FRAME, phaseX: 0.25 }, WIDTH, ALL_MEADOW, { r: 0, g: 0, b: 0 });
+    let same = 0;
+    for (let x = 0; x < WIDTH; x += 1) {
+      if (pixelAt(unhazed, x, 0).join() === pixelAt(shifted, x, 0).join()) {
+        same += 1;
       }
     }
-    expect(hazy / WIDTH).toBeGreaterThan(0.85);
+    expect(same / WIDTH).toBeGreaterThan(0.5);
+  });
+
+  it("shows a far cell's far colour without composing its tile", () => {
+    // Composing a far cell's tile reads the lattice round it, and the far lip
+    // crosses a hundred cells a scanline: that was a step frame's worst stall.
+    const far = 0x123456;
+    const composed = new Set<number>();
+    const look: CellLook = {
+      tile: (cellX, cellY) => {
+        composed.add(cellY);
+        return MEADOW;
+      },
+      tuft: () => null,
+      far: () => far,
+    };
+    // Haze the far colour itself, so the air's tint leaves it as it is.
+    const rgba = rollGroundPixels(FRAME, WIDTH, look, { r: 0x12, g: 0x34, b: 0x56 });
+    const top = rollScanlines(FRAME)[0];
+    expect(distantShare(top?.stride ?? 0)).toBe(1);
+    expect(pixelAt(rgba, 5, 0)).toEqual([0x12, 0x34, 0x56, 255]);
+    const seam = (FRAME.footY - FRAME.groundTop) / TILE_DEPTH;
+    const farthestComposed = Math.max(...composed);
+    expect(farthestComposed).toBeLessThan(seam + ROLL_ROWS / 4);
+  });
+
+  it("lays water over the tile where the lip's water says, and keeps the grass off it", () => {
+    const blue = [10, 40, 200];
+    const water: WaterLook = {
+      wetCell: (cellX, cellY) => cellX === 0 && cellY === 5,
+      blendInto: (_gx, _gy, rgba, at) => {
+        rgba.set(blue, at);
+        return true;
+      },
+    };
+    const look: CellLook = {
+      tile: () => MEADOW,
+      tuft: (cellX, cellY) => (cellX === 0 && cellY === 5 ? piece({ x: 0, y: -1, ink: "neon-green" }) : null),
+      water,
+    };
+    const rgba = rollGroundPixels(FRAME, WIDTH, look, HAZE);
+    const row = FRAME.rollHeight - 1;
+    expect(pixelAt(rgba, FRAME.footX, row)).toEqual([...blue, 255]);
+    // A dry cell is never asked, so the water costs nothing where there is none.
+    expect(pixelAt(rgba, FRAME.footX + TILE_WIDTH, row)).toEqual(
+      fieldPixel(FRAME, FRAME.footX + TILE_WIDTH, FRAME.groundTop - 1, MEADOW),
+    );
   });
 
   it("is opaque everywhere, so no tile hanging above the seam shows through", () => {
@@ -293,7 +425,10 @@ describe("rollGroundPixels", () => {
   it("asks for tufts only near the seam, where a blade can still be seen", () => {
     // A work count, not a stopwatch: at full width a scanline far up the lip
     // crosses a hundred cells, and stamping every one of their tufts each frame
-    // cost more than everything else on the lip together. 299 when written.
+    // cost more than everything else on the lip together. 299 when written;
+    // 324 once the far lip stopped being dithered *to* haze, because the
+    // pixels the haze used to replace are ground now and show their grass. A
+    // blurred pixel asks for none (`distantShare`), which is what holds it there.
     const frame = { ...FRAME, footX: 160 };
     const seam = (frame.footY - frame.groundTop) / TILE_DEPTH;
     let asked = 0;
@@ -313,7 +448,7 @@ describe("rollGroundPixels", () => {
     );
 
     expect(farthest).toBeLessThanOrEqual(seam + TUFT_ROWS + 1);
-    expect(asked).toBeLessThanOrEqual(320);
+    expect(asked).toBeLessThanOrEqual(340);
   });
 
   it("is deterministic, and empty with no roll", () => {

@@ -10,7 +10,7 @@ import { hexToRgb, mixHex, type Rgb } from "./color";
 import { starField, type HorizonLayout, type Star } from "./horizon";
 import { panoramaColumn, panoramaRidge, PANORAMA_WIDTH, wrapPanorama } from "./panorama";
 import type { PixelBuffer } from "./pixel-buffer";
-import { fbm3 } from "./procgen/noise";
+import { cloudTones, paintCloudDecks } from "./sky-clouds";
 import { ditherThreshold } from "./shading";
 
 const RIDGE_FAR = { seed: 7, base: 3, amplitude: 3, wavelength: 55 } as const;
@@ -20,7 +20,6 @@ export class SkyPainter {
   private readonly stars: readonly Star[];
   private readonly ridges: { readonly profile: readonly number[]; readonly near: boolean }[];
   private readonly width: number;
-  private clouds: Float32Array | undefined;
 
   constructor(
     private readonly buffer: PixelBuffer,
@@ -32,21 +31,6 @@ export class SkyPainter {
       profile: panoramaRidge({ ...ridge, maxHeight: layout.horizonY }),
       near: index === 1,
     }));
-  }
-
-  /** Cloud density over the whole panorama, two rows of margin above: built once. */
-  private cloudField(): Float32Array {
-    if (this.clouds === undefined) {
-      const rows = this.layout.skyHeight + 2;
-      const field = new Float32Array(PANORAMA_WIDTH * rows);
-      for (let row = 0; row < rows; row += 1) {
-        for (let column = 0; column < PANORAMA_WIDTH; column += 1) {
-          field[row * PANORAMA_WIDTH + column] = cloudAt(column, row - 2);
-        }
-      }
-      this.clouds = field;
-    }
-    return this.clouds;
   }
 
   /** The whole band for one moment: `offset` is the bearing, `drift` the clouds' own travel. */
@@ -168,35 +152,24 @@ export class SkyPainter {
   }
 
   /**
-   * Cloud: fBm at a bearing, thresholded by how overcast it is, and lit — the
-   * edge facing the sun catches it, the belly facing away is the sky's shade.
+   * Cloud: pixel-art cumulus on two decks at a bearing, drifting, lit from the
+   * crown and the sun's side (`sky-clouds.ts`). The decks' noise is built once
+   * for the whole panorama, which keeps a continuous turn - a repaint every
+   * frame - cheap.
    */
   private paintClouds(atmosphere: Atmosphere, offset: number, drift: number): void {
-    const cover = 0.62 - atmosphere.overcast * 0.34;
-    const lit = hexToRgb(mixHex(mixHex(atmosphere.skyHorizon, "#ffffff", 0.55), atmosphere.ambient, 0.3));
-    const shade = hexToRgb(mixHex(atmosphere.skyTop, atmosphere.skyHorizon, 0.55));
-    const sunSide = Math.sign(atmosphere.light.x) || 1;
-    const height = this.layout.skyHeight;
-    // The cloud field is static at a bearing and only *drifts*, so it is
-    // evaluated once for the whole panorama and every repaint reads it — which
-    // is what keeps a continuous turn, repainting every frame, cheap.
-    const field = this.cloudField();
-    const start = Math.round(offset + drift);
-    const sample = (x: number, y: number): number =>
-      field[(y + 2) * PANORAMA_WIDTH + wrapPanorama(start + x)] ?? 0;
-    for (let y = 0; y < height - 1; y += 1) {
-      const band = 1 - Math.abs(y / height - 0.45) * 1.4;
-      for (let x = 0; x < this.width; x += 1) {
-        const density = sample(x, y) * band;
-        if (density < cover) {
-          continue;
-        }
-        const ahead = sample(x + sunSide * 3, y - 2) * band;
-        const bright = ahead < density ? 1 : 0.35;
-        const level = Math.min(1, (density - cover) * 7) * bright;
-        this.put(x, y, level > ditherThreshold(x, y) ? lit : shade, 0.9);
-      }
-    }
+    paintCloudDecks(
+      {
+        width: this.width,
+        skyHeight: this.layout.skyHeight,
+        offset,
+        drift,
+        overcast: atmosphere.overcast,
+        sunSide: Math.sign(atmosphere.light.x) || 1,
+        tones: cloudTones(atmosphere),
+      },
+      (x, y, rgb, alpha) => this.put(x, y, rgb, alpha),
+    );
   }
 
   private paintRidges(atmosphere: Atmosphere, offset: number): void {
@@ -234,17 +207,4 @@ export function unlitHaze(atmosphere: Atmosphere): Rgb {
     g: Math.min(255, Math.round((air.g * 255) / Math.max(light.g, 1))),
     b: Math.min(255, Math.round((air.b * 255) / Math.max(light.b, 1))),
   };
-}
-
-/** Radius of the circle the cloud noise is read around, in noise units. */
-const CLOUD_RING = PANORAMA_WIDTH / (Math.PI * 2) / 38;
-
-/**
- * Cloud density at a panorama column, read around a circle in noise space so
- * the sky closes on itself: a full turn comes back to the same cloud with no
- * seam where the panorama wraps.
- */
-function cloudAt(column: number, y: number): number {
-  const angle = (wrapPanorama(column) / PANORAMA_WIDTH) * Math.PI * 2;
-  return fbm3(Math.cos(angle) * CLOUD_RING, Math.sin(angle) * CLOUD_RING, y / 7, 0xc10d, { octaves: 3 });
 }

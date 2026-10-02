@@ -5,7 +5,7 @@ import { INK_ALPHA, type InkId, type PixelCloud } from "../ink";
 import { bufferPixel, createBuffer } from "../pixel-buffer";
 import { createPuddle, puddleHolds } from "../puddles";
 import { createRippleField, spawnRipple } from "../ripples";
-import { puddleBody, SHALLOW_INK, WET_INK } from "./body";
+import { puddleBody, relativeBody, SHALLOW_INK, WET_INK } from "./body";
 import { clipToMask, createMask, fillMask, maskAt } from "./mask";
 import { paintBodies, paintSurface } from "./paint";
 import { darkenInk, reflectionCloud } from "./reflect";
@@ -97,6 +97,31 @@ describe("puddleBody", () => {
   it("is still: the same sky makes the same body", () => {
     expect(puddleBody(puddle, NOON)).toEqual(body);
     expect(puddleBody(puddle, NIGHT)).not.toEqual(body);
+  });
+
+  it("is the body painted afresh even when it comes from the cache of a puddle a step away", () => {
+    // Bodies are kept about their centres, per sky, by where the centre falls
+    // on the 4x4 dither. A step moves a puddle 12 pixels forward or 16 across,
+    // so the kept body is reused - and must be exactly what painting it would give.
+    const sky = skyReflection(atmosphereAt(13));
+    const moved = (dx: number, dy: number): typeof puddle =>
+      createPuddle({ id: "t", centerX: 40 + dx, centerY: 30 + dy, radius: 12, seed: 0x51bd });
+    puddleBody(moved(0, 0), sky);
+    for (const [dx, dy] of [
+      [0, 12],
+      [16, 0],
+      [-16, 24],
+      [1, 0],
+      [0, 3],
+    ] as const) {
+      const fresh = skyReflection(atmosphereAt(13));
+      expect(puddleBody(moved(dx, dy), sky)).toEqual(puddleBody(moved(dx, dy), fresh));
+    }
+  });
+
+  it("gives the same pixels about the centre as it does on the screen", () => {
+    const relative = relativeBody(puddle, NOON);
+    expect(relative.map((pixel) => ({ ...pixel, x: pixel.x + 40, y: pixel.y + 30 }))).toEqual(body);
   });
 });
 

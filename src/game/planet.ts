@@ -164,6 +164,21 @@ export function fromLocal(pose: PlanetPose, local: LocalPoint): PlanetPoint {
   };
 }
 
+/**
+ * `fromLocal` for one pose and many points: the turn's sine and cosine taken
+ * once rather than per point - the horizon lip asks thousands of cells a step.
+ * The same arithmetic as `fromLocal`, so the same answer to the last bit;
+ * `planet.test.ts` holds the two together.
+ */
+export function localFrame(pose: PlanetPose): (x: number, y: number) => PlanetPoint {
+  const cos = Math.cos(pose.turn);
+  const sin = Math.sin(pose.turn);
+  return (x, y) => ({
+    x: wrapTile(pose.x + x * cos + y * sin),
+    y: wrapTile(pose.y - x * sin + y * cos),
+  });
+}
+
 /** Planet to local - the exact inverse of `fromLocal`, seam included. */
 export function toLocal(pose: PlanetPose, point: PlanetPoint): LocalPoint {
   const dx = wrapDelta(point.x, pose.x);

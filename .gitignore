@@ -1,7 +1,10 @@
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+# No trailing slash on `.venv` or `node_modules`: a worktree gets each as a *symlink*
+# (`worktree.symlinkDirectories` in `.claude/settings.json`), and `name/` matches only a
+# directory, so the link was committed and CI's `uv sync` then found `.venv` in its way.
+.venv
 venv/
 *.egg-info/
 .eggs/
@@ -17,7 +20,7 @@ venv/
 .coverage.*
 htmlcov/
 .benchmarks/
-node_modules/
+node_modules
 dist/
 
 # Secrets and local environment. `.env.example` IS committed; `.env` never is —

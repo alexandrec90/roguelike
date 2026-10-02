@@ -24,7 +24,9 @@ sheer: a cast shadow darkens what it falls on rather than replacing it.
 What survives from the old rule is the part that did the work: **art names inks, never
 hexes.** A new colour is a new step in a family, added in `palette.ts`. The legacy inks
 (`bone`, `cyan`, `void`, …) still resolve so old art keeps working; new art uses families.
-The sky is the one continuous gradient, and the only place colour is computed.
+The sky is the one continuous gradient, and the only place colour is computed - which
+includes the air it lays over the far edge of the world: the horizon lip's haze is a
+tint in eight dithered steps, and the clouds are three computed tones.
 
 ## Three ways to get pixels on screen — pick by how often they change
 
@@ -91,7 +93,7 @@ Measured on an Intel HD 530. A frame is 16.7 ms; the JS half of it should stay n
 | Scenery | ~1 ms + ≤ 3 ms of queued bakes | textures chosen per frame; bakes sliced |
 | Ground | ~0.5 ms | composed once per step into one surface |
 | Grass | ~1 ms | a baked tuft atlas; frames chosen from the wind |
-| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands | one surface; the lattice read on demand; tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped |
+| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands. Standing rock and water added ~1 ms a frame and ~2–3 ms a step, measured on a faster machine (1.9 → 2.8 ms median, 3 → 5 ms p90) | one surface; the lattice read on demand, and never under a far pixel (`far` colours); tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped; rock answered per cell off the planet; puddle outlines and bodies cached by shape |
 | Each actor | ≤ 0.5 ms | small surfaces, caches keyed by quantised pose |
 | Lighting | ~0.5 ms | one render texture, a stamp per light |
 

@@ -27,6 +27,28 @@ function column(ink: PixelCloud[number]["ink"] = "bone"): PixelCloud {
   return Array.from({ length: 8 }, (_unused, index) => ({ x: 0, y: -index, ink }));
 }
 
+describe("createPuddle's traced outlines", () => {
+  it("are the same shape wherever the puddle lies, moved rather than re-traced", () => {
+    const here = puddle({ centerX: 60, centerY: 90 });
+    const there = puddle({ centerX: 205, centerY: -31 });
+    const relative = (water: Puddle["water"], cx: number, cy: number): string[] =>
+      water.map((pixel) => `${pixel.x - cx},${pixel.y - cy}`);
+    expect(relative(there.water, 205, -31)).toEqual(relative(here.water, 60, 90));
+    expect(relative(there.rim, 205, -31)).toEqual(relative(here.rim, 60, 90));
+    expect(puddleHolds(there, 205, -31)).toBe(true);
+    expect(puddleHolds(there, 60, 90)).toBe(false);
+  });
+
+  it("are told apart by seed and by radius", () => {
+    const base = puddle().water.length;
+    expect(puddle({ radius: 12 }).water.length).not.toBe(base);
+    const other = puddle({ seed: 0x1234 });
+    expect(other.water.map((pixel) => `${pixel.x},${pixel.y}`)).not.toEqual(
+      puddle().water.map((pixel) => `${pixel.x},${pixel.y}`),
+    );
+  });
+});
+
 describe("createPuddle", () => {
   it("is deterministic per seed and different across seeds", () => {
     expect(puddle().water).toEqual(puddle().water);
