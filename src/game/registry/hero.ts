@@ -114,6 +114,14 @@ function simulated(
 
 const STAND = createPlayer({ x: 0, y: 0, turn: 0 });
 
+/** Facing the viewer, then told to face away at `atMs` — the hardest turn there is. */
+function aboutFaceAt(atMs: number) {
+  return (ms: number): PlayerState => ({ ...STAND, facing: ms < atMs ? facingYaw("south") : facingYaw("north") });
+}
+
+/** Sixteen yaws round a full turn: the eight, and the eight between them nobody drew either. */
+const SIXTEEN = Array.from({ length: 16 }, (_unused, index) => (index / 16) * 2 * Math.PI);
+
 /** Swinging on a loop from `startMs`, burning or not. */
 function swingingAt(enchanted: boolean, startMs: number) {
   return (ms: number): PlayerState => ({
@@ -129,7 +137,7 @@ function walkingAt(heading: "east" | "north") {
   return (ms: number): PlayerState => ({
     ...STAND,
     heading,
-    facing: heading,
+    facing: facingYaw(heading),
     motion: "step",
     gait,
     motionMs: ms % STEP_MS,
@@ -156,6 +164,12 @@ export const HERO_ASSETS: readonly AssetEntry[] = [
   entry("hero-facings", "Hero body — eight facings", COMPASS.flatMap((facing) => frames(1, idle, { yaw: facingYaw(facing) })), 400,
     "One skeleton turned an eighth at a time, clockwise from facing the viewer. No view was drawn: " +
       "the eyes slide round the head and hide behind it, and the sword never changes hands."),
+  entry("hero-facings-free", "Hero body — any yaw", SIXTEEN.flatMap((yaw) => frames(1, idle, { yaw })), 200,
+    "The mouse aims at any angle, so the rig turns to any yaw. Odd frames are the in-betweens " +
+      "of the eight: the same skeleton, no more art and no more cost."),
+  entry("hero-about-face", "Hero — about-face, eased", simulated(8, aboutFaceAt(32), { everyMs: 16, warmMs: 32 }), 64,
+    "Facing flips south to north in one frame; the drawn yaw chases it (turn.ts), sweeping " +
+      "round in about 0.1 s instead of cutting. One frame per 16 ms step."),
   entry("hero-body-walk", "Hero body — walk, front", frames(8, walk), 80, "WALK on the volumetric rig."),
   entry("hero-body-walk-side", "Hero body — walk, east", frames(8, walk, { yaw: facingYaw("east") }), 80,
     "The same clip turned a quarter: a true profile, one eye showing, striding across the screen."),

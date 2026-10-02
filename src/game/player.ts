@@ -124,6 +124,18 @@ export function facingYaw(facing: Heading): number {
   return Math.atan2(dx, dy);
 }
 
+/**
+ * Which way the hero looks, as the turn of his rig: radians about the vertical
+ * axis, 0 facing the viewer and a quarter turn clockwise for east - the
+ * convention `facingYaw` writes a heading in.
+ *
+ * An angle rather than a `Heading` because the rig never needed the eight: it is
+ * one skeleton turned, so any yaw costs the same to draw as one of the eight,
+ * and the mouse points at any of them. Only a key press is snapped, because a
+ * key *is* one of the eight.
+ */
+export type Facing = number;
+
 export interface PlayerState {
   /** Where the current step lands; equal to `from` whenever one is not running. */
   readonly pose: PlanetPose;
@@ -132,7 +144,7 @@ export interface PlayerState {
   /** What the running step is walking; absent whenever one is not running. */
   readonly gait?: Gait;
   /** Which way the sprite looks on screen - the aim, or failing one the heading. */
-  readonly facing: Heading;
+  readonly facing: Facing;
   readonly motion: Motion;
   /** Elapsed ms in the current step; 0 whenever none is running. */
   readonly motionMs: number;
@@ -173,9 +185,9 @@ export interface Intent {
   /**
    * Where he is told to look - the second stick. When present it owns facing
    * outright, so he can walk north while facing south; when absent he faces
-   * the way he walks.
+   * the way he walks. Any angle, not one of eight: the cursor is free.
    */
-  readonly aim?: Heading;
+  readonly aim?: Facing;
   readonly attack: boolean;
   readonly cast?: boolean;
   /** The frost nova: the same hands and track as `cast`, a different spell. */
@@ -213,7 +225,7 @@ export function createPlayer(pose: PlanetPose): PlayerState {
   return {
     pose,
     from: pose,
-    facing: "south",
+    facing: facingYaw("south"),
     motion: "idle",
     motionMs: 0,
     steps: 0,
@@ -335,7 +347,7 @@ export function advancePlayer(
   // even *looks* the way he was told to is the difference a player reads as lag.
   const oriented = {
     ...player,
-    facing: intent.aim ?? intent.heading ?? player.facing,
+    facing: intent.aim ?? (intent.heading === undefined ? player.facing : facingYaw(intent.heading)),
     heading: intent.heading ?? player.heading,
   };
   const toggled = intent.enchant === true;

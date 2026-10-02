@@ -21,6 +21,7 @@ import {
   wantsEnchant,
 } from "./controls";
 import { DEFAULT_KEYBINDINGS, type Keybindings } from "./keybindings";
+import { facingYaw } from "./player";
 import { DEPTH_RATIO } from "./projection";
 
 describe("aiming", () => {
@@ -31,35 +32,44 @@ describe("aiming", () => {
   it("aims at the cursor, and keeps aiming there once it stops moving", () => {
     const controls = createControls();
     aimAt(controls, 0, 40);
-    expect(currentAim(controls)).toBe("south");
-    expect(currentAim(controls)).toBe("south");
-    aimAt(controls, -30, -30);
-    expect(currentAim(controls)).toBe("northwest");
+    expect(currentAim(controls)).toBeCloseTo(facingYaw("south"), 9);
+    expect(currentAim(controls)).toBeCloseTo(facingYaw("south"), 9);
+    aimAt(controls, -30, -30 * DEPTH_RATIO);
+    expect(currentAim(controls)).toBeCloseTo(facingYaw("northwest"), 9);
   });
 
-  it("measures the diagonal on the ground, not on the foreshortened screen", () => {
+  it("is not snapped to the eight headings: the cursor is free", () => {
+    const controls = createControls();
+    // Ten degrees off east on the ground, which the eight would have rounded away.
+    const angle = (10 * Math.PI) / 180;
+    aimAt(controls, Math.cos(angle), Math.sin(angle) * DEPTH_RATIO);
+    expect(currentAim(controls)).toBeCloseTo(facingYaw("east") - angle, 9);
+  });
+
+  it("measures the angle on the ground, not on the foreshortened screen", () => {
     const controls = createControls();
     // Equal on the ground is squashed on screen: this reads as a true diagonal.
     aimAt(controls, 20, 20 * DEPTH_RATIO);
-    expect(currentAim(controls)).toBe("southeast");
-    // 10 across and 20 down is 63 degrees on screen - south-east, read naively -
-    // but 26.7 down on the ground, which is past the 67.5 boundary into south.
+    expect(currentAim(controls)).toBeCloseTo(facingYaw("southeast"), 9);
+    // 10 across and 20 down is 63 degrees below level on screen, but 26.7 down
+    // on the ground: steeper, so nearer to facing the viewer.
     aimAt(controls, 10, 20);
-    expect(currentAim(controls)).toBe("south");
+    expect(currentAim(controls)).toBeCloseTo(Math.atan2(10, 20 / DEPTH_RATIO), 9);
+    expect(currentAim(controls)).toBeLessThan(Math.atan2(10, 20));
   });
 
   it("keeps its aim with the cursor dead on his chest", () => {
     const controls = createControls();
     aimAt(controls, 5, 0);
     aimAt(controls, 0, 0);
-    expect(currentAim(controls)).toBe("east");
+    expect(currentAim(controls)).toBeCloseTo(facingYaw("east"), 9);
   });
 
   it("survives the window losing focus, because nothing was held", () => {
     const controls = createControls();
     aimAt(controls, -5, 0);
     releaseAll(controls);
-    expect(currentAim(controls)).toBe("west");
+    expect(currentAim(controls)).toBeCloseTo(facingYaw("west"), 9);
   });
 
   it("does not move the legs", () => {
