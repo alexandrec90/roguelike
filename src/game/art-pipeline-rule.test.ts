@@ -157,4 +157,16 @@ describe("the /art-check skill", () => {
       );
     }
   });
+
+  it("drives the game's loop by hand for an in-scene check, through the handle main.ts exposes", () => {
+    // An extension-driven tab is hidden, so Chrome freezes rAF and Phaser pauses
+    // its loop; the skill once said such a check needed a human to foreground the
+    // tab, and a session found `__game.step()` plus `renderer.snapshot()` worked.
+    const main = readFileSync(resolve(REPO_ROOT, "src", "main.ts"), "utf8");
+    expect(main, "src/main.ts no longer exposes window.__game").toMatch(/\.__game = game;/);
+    for (const call of ["__game", ".step(", ".renderer.snapshot("]) {
+      expect(SKILL, `the skill never names ${call}`).toContain(call);
+    }
+    expect(SKILL).not.toContain("foregrounded for its whole duration");
+  });
 });

@@ -57,20 +57,34 @@ state they *settled on*, so a zoom that did not fit or a `tile` flag on a non-ti
 visible rather than silently assumed — read the return value, do not assume the patch.
 With `play=0`, `seek(ms)` is byte-identical on every run.
 
-### Checking an input change, where none of the above applies
+### Checking the game itself, where none of the above applies
 
-This skill drives a scene that **renders on demand**, and that is the whole reason it
-works from an extension-driven tab. The game does not: a backgrounded tab has
-`requestAnimationFrame` frozen by Chrome, so the Phaser loop stops between tool calls.
-A held synthetic keydown then moves the hero about one cell per screenshot, and a
-`Runtime.evaluate` that awaits rAF times out outright — the capture shows a game that
-is not running, which reads as a movement bug rather than as a stopped loop.
+The lab **renders on demand**, which is why it works from an extension-driven tab. The
+game runs on a loop, and that tab is usually hidden (`document.visibilityState` reads
+`hidden`): Chrome freezes `requestAnimationFrame` and Phaser pauses `game.loop`, so the
+scene stops between tool calls. A held synthetic keydown then moves the hero about one
+cell per screenshot, and a `Runtime.evaluate` that awaits rAF times out outright — the
+capture shows a game that is not running, which reads as a movement bug.
 
-So an input or live-loop check needs the tab **foregrounded for its whole duration**,
-which means a human is watching it. When it cannot be, come back here: `lab.html`
-answers every question about what a frame *looks like* without needing a loop at all,
-and the questions it cannot answer belong in a unit test over the input handler rather
-than in a screenshot.
+**Step the loop by hand rather than waiting for it.** Hiding the tab pauses only
+`game.loop`: `game.step(time, delta)` still runs every system and renders. In the dev
+build `window.__game` is the `Phaser.Game` (`src/main.ts`), and
+`renderer.snapshot(callback)` captures the frame the *next* step renders, so schedule
+it before the last one:
+
+```js
+const g = window.__game, dt = 1000 / 60;
+let t = performance.now();
+for (let i = 0; i < 29; i++) g.step((t += dt), dt);
+const png = new Promise((done) => g.renderer.snapshot((img) => done(img.src)));
+g.step((t += dt), dt);
+await png; // a PNG data URL of frame 30
+```
+
+For an input check, dispatch the keydown first, then step: the keyboard plugin reads
+its queue inside the step. A fixed `dt` makes the same steps give the same frames, so
+two runs can be compared the way `seek(t)` is compared in the lab. What a frame *looks
+like* is still the lab's question; this is for what the game *does* with it.
 
 ## 4. Judge it
 
