@@ -25,7 +25,7 @@ import Phaser from "phaser";
 import { localOrigin, scrollOffset, type CameraFrame, type LocalBounds } from "./camera";
 import type { FrameContext } from "./frame-context";
 import { planGround, type GroundPlan } from "./ground/ground-plan";
-import { sharedGroundSample } from "./ground/ground-sample";
+import { prefetchGroundSample, sharedGroundSample } from "./ground/ground-sample";
 import { groundTile, unpackGroundKey } from "./ground/ground-tiles";
 import { blitWords, createTileCache, type TileCache, type WordTarget } from "./ground/tile-cache";
 import { PixelSurface } from "./pixel-surface";
@@ -61,6 +61,8 @@ export class GroundLayer {
   private sampled: PlanetPose | undefined;
   /** A plan whose tiles did not all fit in last frame's bake budget. */
   private pending: GroundPlan | undefined;
+  /** The plan made ahead for the anchor the hero is walking into. */
+  private ahead: { readonly pose: PlanetPose; readonly plan: GroundPlan } | undefined;
   private wetness = 0;
   private readonly groundTiles: TileCache = createTileCache(TILE_WIDTH, TILE_DEPTH, (key) =>
     groundTile(unpackGroundKey(key)),
@@ -91,6 +93,7 @@ export class GroundLayer {
     this.groundTarget = wordTarget(this.ground);
     this.sampled = undefined;
     this.pending = undefined;
+    this.ahead = undefined;
     this.applyWetness();
   }
 
@@ -164,8 +167,27 @@ export class GroundLayer {
    * this pixel contract.
    */
   private resample(pose: PlanetPose, budgetMs: number): void {
-    const plan = planGround(sharedGroundSample(pose, this.bounds));
+    // Called first so the sample taken ahead becomes the one on screen either way.
+    const sample = sharedGroundSample(pose, this.bounds);
+    const plan = this.ahead?.pose === pose ? this.ahead.plan : planGround(sample);
+    this.ahead = undefined;
     this.paintGround(plan, budgetMs);
+  }
+
+  /**
+   * Plan the ground for the anchor the hero is walking into, and make every
+   * tile it needs, ahead of the frame that crosses into it - which then only
+   * copies tiles. A guess that does not come true is dropped unused.
+   */
+  prefetch(pose: PlanetPose): void {
+    if (this.ahead?.pose === pose || this.sampled === pose) {
+      return;
+    }
+    const plan = planGround(prefetchGroundSample(pose, this.bounds));
+    for (const cell of plan.ground) {
+      this.groundTiles.get(cell.key);
+    }
+    this.ahead = { pose, plan };
   }
 
   /**

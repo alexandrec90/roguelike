@@ -261,8 +261,17 @@ export function lipBounds(frame: CameraFrame, width: number): LocalBounds {
  * `haze` is the air the far ground dissolves into, already divided by the
  * ambient (`unlitHaze`): the ground is lit by the lighting pass like the field,
  * and the haze then lands on the sky's own colour at the horizon line.
+ *
+ * `rows` limits the work to a band of scanlines, `[from, to)` from the top -
+ * for warming a lip ahead a band a frame; the rest of the result is left black.
  */
-export function rollGroundPixels(frame: CameraFrame, width: number, look: CellLook, haze: Rgb): Uint8ClampedArray {
+export function rollGroundPixels(
+  frame: CameraFrame,
+  width: number,
+  look: CellLook,
+  haze: Rgb,
+  rows: { readonly from: number; readonly to: number } = { from: 0, to: Number.POSITIVE_INFINITY },
+): Uint8ClampedArray {
   const height = Math.max(frame.rollHeight, 0);
   const rgba = new Uint8ClampedArray(width * height * 4);
   const shift = scrollOffset(frame);
@@ -271,6 +280,9 @@ export function rollGroundPixels(frame: CameraFrame, width: number, look: CellLo
   const field = new WorldTexels(look, look.grass ?? new TuftOverlay(tuftBounds(frame, width)));
 
   rollScanlines(frame).forEach((line, index) => {
+    if (index < rows.from || index >= rows.to) {
+      return;
+    }
     const gy = Math.floor((seam + line.rowsBeyond) * TILE_DEPTH);
     const span = TILE_WIDTH * line.scale;
     const tufted = line.rowsBeyond <= TUFT_ROWS;

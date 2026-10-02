@@ -102,6 +102,12 @@ export interface WaterActors {
   readonly reflectables?: readonly Reflectable[];
 }
 
+/** How far round the hero the puddles are grown: every tile the target can show. */
+function reachOf(ctx: FrameContext): number {
+  const flat: CameraFrame = { ...ctx.frame, phaseX: 0, phaseY: 0 };
+  return localReach(visibleLocal(flat, ctx.width, ctx.height));
+}
+
 export class WaterLayer {
   private puddles: Puddle[] = [];
   private ripples: RippleField = createRippleField();
@@ -110,6 +116,10 @@ export class WaterLayer {
   private surface!: PixelSurface;
   private sky: SkyReflection = skyReflection(atmosphereAt(13));
   private sampled: PlanetPose | undefined;
+  /** The puddles grown ahead for the anchor the hero is walking into. */
+  private ahead:
+    | { readonly pose: PlanetPose; readonly scale: number; readonly reach: number; readonly puddles: Puddle[] }
+    | undefined;
   private bakedKey = "";
   private atmosphereKey = "";
   private scale = 1;
@@ -132,9 +142,13 @@ export class WaterLayer {
    * `actors` are in screen pixels, feet where they are drawn.
    */
   update(ctx: FrameContext, actors: WaterActors = {}): void {
-    const flat: CameraFrame = { ...ctx.frame, phaseX: 0, phaseY: 0 };
-    this.relocate(ctx.frame, ctx.pose, localReach(visibleLocal(flat, ctx.width, ctx.height)));
+    this.relocate(ctx.frame, ctx.pose, reachOf(ctx));
     this.draw(ctx.frame, ctx.atmosphere, ctx.elapsedMs, ctx.deltaMs, actors);
+  }
+
+  /** `prefetch` for the anchor the hero is walking into, at the reach `update` sweeps. */
+  prefetchFor(ctx: FrameContext, pose: PlanetPose): void {
+    this.prefetch(ctx.frame, pose, reachOf(ctx));
   }
 
   /**
@@ -151,8 +165,21 @@ export class WaterLayer {
     }
     this.sampled = pose;
     this.bakedKey = "";
-    this.puddles = growPuddles(frame, pose, reach, this.scale);
+    const ahead = this.ahead;
+    this.puddles =
+      ahead?.pose === pose && ahead.scale === this.scale && ahead.reach === reach
+        ? ahead.puddles
+        : growPuddles(frame, pose, reach, this.scale);
+    this.ahead = undefined;
     fillMask(this.mask, this.puddles);
+  }
+
+  /** Grow the puddles for the anchor the hero is walking into, ahead of the frame that crosses into it. */
+  prefetch(frame: CameraFrame, pose: PlanetPose, reach: number): void {
+    if (this.sampled === pose || (this.ahead?.pose === pose && this.ahead.scale === this.scale)) {
+      return;
+    }
+    this.ahead = { pose, scale: this.scale, reach, puddles: growPuddles(frame, pose, reach, this.scale) };
   }
 
   /** How much the wet weather has swollen every puddle: the radius multiplier. */

@@ -15,11 +15,11 @@
  * across the screen - he *is* the screen's origin, nailed to `footX, footY`
  * while the planet slides and swings beneath him. So this layer is also the
  * place the rest of the scene comes to ask where the world has got to: it holds
- * the pose, and hands out the three views of it (`groundPose`, `phase`, `turn`)
- * that `camera.ts` and `panorama.ts` need.
+ * the pose, and hands out the views of it (`whereabouts`) that `camera.ts`,
+ * `panorama.ts` and the prefetcher need.
  *
  * Two calls a frame. `animate(delta, elapsed)` runs the simulation — it must
- * come first, because the scene builds its camera frame from `phase()`. Then
+ * come first, because the scene builds its camera frame from `whereabouts()`. Then
  * `update(ctx)` draws with the frame's light, pushes the burning blade's light
  * into `ctx.lights`, and ages the effects. A scene that never calls `update`
  * still gets a drawn hero from `animate` alone, under a default sun.
@@ -68,7 +68,9 @@ import {
   groundPose,
   livePose,
   scrollPhase,
+  upcomingAnchor,
   type PlayerState,
+  type UpcomingAnchor,
   type World,
 } from "./player";
 import { RANK, rowAtFoot, TILE_WIDTH } from "./projection";
@@ -79,6 +81,19 @@ import type { WindOptions } from "./wind";
 export interface Foot {
   readonly x: number;
   readonly y: number;
+}
+
+/**
+ * The views of the hero's pose `camera.ts` and the scene need: the pose the
+ * world is sampled from (it moves a whole tile at a time), how far the world
+ * has slid out from under him in tiles, the continuous heading only the
+ * horizon is far enough away to show, and the anchor he is walking into.
+ */
+export interface Whereabouts {
+  readonly ground: PlanetPose;
+  readonly phase: { readonly x: number; readonly y: number };
+  readonly turn: number;
+  readonly upcoming: UpcomingAnchor | undefined;
 }
 
 /**
@@ -240,19 +255,14 @@ export class HeroLayer {
     return this.player.enchanted;
   }
 
-  /** The pose the world is sampled from - it moves a whole tile at a time. */
-  groundPose(): PlanetPose {
-    return groundPose(this.player);
-  }
-
-  /** How far the world has slid out from under him, in tiles. */
-  phase(): { readonly x: number; readonly y: number } {
-    return scrollPhase(this.player);
-  }
-
-  /** The continuous heading, which only the horizon is far enough away to show. */
-  turn(): number {
-    return livePose(this.player, this.world.radius).turn;
+  /** Where the world has got to under him: the views of the pose the scene hands on. */
+  whereabouts(): Whereabouts {
+    return {
+      ground: groundPose(this.player),
+      phase: scrollPhase(this.player),
+      turn: livePose(this.player, this.world.radius).turn,
+      upcoming: upcomingAnchor(this.player, this.world.radius),
+    };
   }
 
   /**

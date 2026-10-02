@@ -149,27 +149,87 @@ export function featuresNear(centre: PlanetPoint, reach: number, spec: FeatureSp
 
   for (let row = 0; row < span; row += 1) {
     for (let column = 0; column < span; column += 1) {
-      const cellX = wrapTile(left + column);
-      const cellY = wrapTile(top + row);
-      if (hashUnit(cellX, cellY, spec.seed) >= spec.density) {
-        continue;
+      const feature = featureIn(wrapTile(left + column), wrapTile(top + row), spec);
+      if (feature !== undefined) {
+        found.push(feature);
       }
-      const point = {
-        x: wrapTile(cellX + hashUnit(cellX, cellY, spec.seed ^ 0x11)),
-        y: wrapTile(cellY + hashUnit(cellX, cellY, spec.seed ^ 0x22)),
-      };
-      if (!spec.grows(terrainAt(point)) || blockedByLand(point)) {
-        continue;
-      }
-      const shape = hashUnit(cellX, cellY, spec.seed ^ 0x33);
-      found.push({
-        ...point,
-        seed: Math.floor(shape * 0xffff),
-        size: Math.round(spec.minSize + shape * (spec.maxSize - spec.minSize)),
-      });
     }
   }
   return found;
+}
+
+/** The feature one planet cell holds, if any: its hash, its jitter, and the ground it would stand on. */
+function featureIn(cellX: number, cellY: number, spec: FeatureSpec): Feature | undefined {
+  if (hashUnit(cellX, cellY, spec.seed) >= spec.density) {
+    return undefined;
+  }
+  const point = {
+    x: wrapTile(cellX + hashUnit(cellX, cellY, spec.seed ^ 0x11)),
+    y: wrapTile(cellY + hashUnit(cellX, cellY, spec.seed ^ 0x22)),
+  };
+  if (!spec.grows(terrainAt(point)) || blockedByLand(point)) {
+    return undefined;
+  }
+  const shape = hashUnit(cellX, cellY, spec.seed ^ 0x33);
+  return {
+    ...point,
+    seed: Math.floor(shape * 0xffff),
+    size: Math.round(spec.minSize + shape * (spec.maxSize - spec.minSize)),
+  };
+}
+
+/** Planet cells per side of a cached chunk of features. */
+const FEATURE_CHUNK = 16;
+
+const FEATURE_CHUNKS = new Map<number, Map<number, readonly (Feature | undefined)[]>>();
+
+/**
+ * `featuresNear`, from a cache: the same cells in the same order, each chunk of
+ * them hashed once and kept, since features never move. Asked every time the
+ * hero crosses a tile out to the horizon, the uncached sweep - a square over a
+ * hundred cells a side, each candidate checked against every landform - was
+ * the largest part of the horizon lip's cost on that frame.
+ */
+export function cachedFeaturesNear(centre: PlanetPoint, reach: number, spec: FeatureSpec): Feature[] {
+  let chunks = FEATURE_CHUNKS.get(spec.seed);
+  if (chunks === undefined) {
+    chunks = new Map();
+    FEATURE_CHUNKS.set(spec.seed, chunks);
+  }
+  const found: Feature[] = [];
+  const left = Math.floor(centre.x - reach);
+  const top = Math.floor(centre.y - reach);
+  const span = Math.ceil(reach * 2) + 1;
+  for (let row = 0; row < span; row += 1) {
+    for (let column = 0; column < span; column += 1) {
+      const cellX = wrapTile(left + column);
+      const cellY = wrapTile(top + row);
+      const feature = chunkOf(chunks, cellX, cellY, spec)[(cellY % FEATURE_CHUNK) * FEATURE_CHUNK + (cellX % FEATURE_CHUNK)];
+      if (feature !== undefined) {
+        found.push(feature);
+      }
+    }
+  }
+  return found;
+}
+
+function chunkOf(
+  chunks: Map<number, readonly (Feature | undefined)[]>,
+  cellX: number,
+  cellY: number,
+  spec: FeatureSpec,
+): readonly (Feature | undefined)[] {
+  const chunkX = Math.floor(cellX / FEATURE_CHUNK);
+  const chunkY = Math.floor(cellY / FEATURE_CHUNK);
+  const key = chunkY * (PLANET_TILES / FEATURE_CHUNK) + chunkX;
+  let chunk = chunks.get(key);
+  if (chunk === undefined) {
+    chunk = Array.from({ length: FEATURE_CHUNK * FEATURE_CHUNK }, (_unused, index) =>
+      featureIn(chunkX * FEATURE_CHUNK + (index % FEATURE_CHUNK), chunkY * FEATURE_CHUNK + Math.floor(index / FEATURE_CHUNK), spec),
+    );
+    chunks.set(key, chunk);
+  }
+  return chunk;
 }
 
 export function treesNear(centre: PlanetPoint, reach: number): readonly Feature[] {
@@ -177,5 +237,5 @@ export function treesNear(centre: PlanetPoint, reach: number): readonly Feature[
 }
 
 export function puddlesNear(centre: PlanetPoint, reach: number): readonly Feature[] {
-  return featuresNear(centre, reach, PUDDLES);
+  return cachedFeaturesNear(centre, reach, PUDDLES);
 }

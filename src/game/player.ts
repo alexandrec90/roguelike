@@ -422,7 +422,59 @@ function settle(
     return { anchor, offset };
   }
   return {
-    anchor: applyGait(anchor, { forward, strafe }, radius),
+    anchor: nextAnchor(anchor, forward, strafe, radius),
     offset: { x: offset.x - strafe, y: offset.y - forward },
   };
+}
+
+const WALKS = new WeakMap<PlanetPose, Map<string, PlanetPose>>();
+
+/**
+ * The anchor a whole-tile walk from `anchor` lands on - the same object every
+ * time it is asked for. Every layer keys its per-anchor work on the pose
+ * object, so this is what lets the work for the next anchor be done before
+ * the hero gets there (`upcomingAnchor`): the pose the scene prepared for is
+ * the very pose `settle` then hands over.
+ */
+export function nextAnchor(anchor: PlanetPose, forward: number, strafe: number, radius: number): PlanetPose {
+  let walks = WALKS.get(anchor);
+  if (walks === undefined) {
+    walks = new Map();
+    WALKS.set(anchor, walks);
+  }
+  const key = `${forward},${strafe},${radius}`;
+  let next = walks.get(key);
+  if (next === undefined) {
+    next = applyGait(anchor, { forward, strafe }, radius);
+    walks.set(key, next);
+  }
+  return next;
+}
+
+/** The anchor the hero is walking into, and how soon he gets there. */
+export interface UpcomingAnchor {
+  readonly pose: PlanetPose;
+  readonly inMs: number;
+}
+
+/**
+ * Where the anchor moves next if he keeps walking as he is, or undefined while
+ * he stands. Each axis he walks crosses a whole tile when its offset reaches
+ * ±1; the first to get there decides the next anchor, and an axis that gets
+ * there within a frame of it goes with it, as a diagonal does.
+ */
+export function upcomingAnchor(player: PlayerState, radius: number, frameMs = 17): UpcomingAnchor | undefined {
+  const { gait, offset } = player;
+  if (gait === undefined || player.motion !== "walk") {
+    return undefined;
+  }
+  const speed = WALK_TILES_PER_MS * (gait.forward !== 0 && gait.strafe !== 0 ? Math.SQRT1_2 : 1);
+  // From `from` to the tile edge at `sign` (±1) is 1 - from·sign tiles.
+  const msTo = (from: number, sign: number): number => (sign === 0 ? Number.POSITIVE_INFINITY : (1 - from * sign) / speed);
+  const forwardMs = msTo(offset.y, Math.sign(gait.forward));
+  const strafeMs = msTo(offset.x, Math.sign(gait.strafe));
+  const inMs = Math.min(forwardMs, strafeMs);
+  const forward = forwardMs <= inMs + frameMs ? Math.sign(gait.forward) : 0;
+  const strafe = strafeMs <= inMs + frameMs ? Math.sign(gait.strafe) : 0;
+  return { pose: nextAnchor(player.anchor, forward, strafe, radius), inMs };
 }

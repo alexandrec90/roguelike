@@ -28,7 +28,7 @@ Seven modules, and no eighth place where any of this is decided:
 
 `src/game/ground/` owns the terrain art itself: tiles generated procedurally (seamless grass, neighbour-aware path edges), baked once and composed per step, plus the baked tuft atlas the grass is drawn from.
 
-The horizon lip is that same ground carried past the seam, in two passes over one surface: `roll-ground.ts` (tiles, tufts and the air's tint, each scanline asking `rollRowAt` which row it shows) and `roll-water.ts` (the water layer's own puddles, grown by `growPuddles`, laid into world texels). Nothing stands in the ground: what stands is a landform or a body, drawn by its own layer through the same projection, so the lip never has to know about it. A far lip pixel spans many texels, so it shows its cell's *far colour* (`distantShare`) and never composes a tile; reading the lattice under the far lip is what made a step frame stall.
+The horizon lip is that same ground carried past the seam, in two passes over one surface: `roll-ground.ts` (tiles, tufts and the air's tint, each scanline asking `rollRowAt` which row it shows) and `roll-water.ts` (the water layer's own puddles, grown by `growPuddles`, laid into world texels). What the lip knows about one anchor is a `LipState` (`roll-ground-state.ts`); the layer keeps the one on screen and the one the hero is walking into, warmed ahead by `prefetcher.ts`. Nothing stands in the ground: what stands is a landform or a body, drawn by its own layer through the same projection, so the lip never has to know about it. A far lip pixel spans many texels, so it shows its cell's *far colour* (`distantShare`) and never composes a tile; reading the lattice under the far lip is what made a step frame stall.
 
 **The grid belongs to the screen, and the planet has no grid.** That is the load-bearing
 sentence, because it is what reconciles a camera that turns with a pixel contract that
@@ -93,10 +93,17 @@ over the sky when rock was grid-quantised cells.
 | `src/game/landform-colour.ts` | The look: posterised ramps per material, wrap light, a narrow dithered seam, and planet-fixed grain on standing faces (courses, ledges, strata, windows). Inks only. |
 | `src/game/landform-render.ts` | The frame-level passes: `viewsInSight`, near over far (`isFarView`, `mergeLandforms`), the outline. |
 | `src/game/landform-slices.ts` | Cutting the picture into one slice per row and 32-column chunk, shelf-packed into one atlas. |
-| `src/game/landform-layer.ts` | The Phaser wiring: re-render only when what it shows moved, far views kept between strides, each slice shown at `standingDepth(row)` so a tree behind a mesa is hidden and the hero walks round a flank. |
+| `src/game/landform-layer.ts` | The CPU wiring - the `?render=cpu` path and the fallback without WebGL2: re-render only when what it shows moved, far views kept between strides, each slice shown at `standingDepth(row)` so a tree behind a mesa is hidden and the hero walks round a flank. |
+| `src/game/landform-gpu-layer.ts` | The GPU wiring, the default: five render-to-texture passes (probe, blocks, march, outline, pack) and a pool of plain images, one per group of rows, at each group's depth. `arrange()` runs last each frame, once everything standing is placed. |
+| `src/game/landform-gpu-data.ts`, `landform-gpu-rows.ts` | What the passes are handed (fields in a float atlas, the schedule, per-column step ranges), and where the picture is cut into slices - row rectangles bounded from each landform's radial profile, rows merged where nothing standing sorts between them (`groupRows`), bands stacked in the atlas. Pure. |
+| `src/game/gpu/landform-glsl.ts`, `landform-shader.ts` | The march ported to GLSL ES 3.00, and the passes. `landform-shader.ts`'s header is why it is three march passes and not one. |
 
-Two things that are easy to break:
+Three things that are easy to break:
 
+- **The two landform paths are one description.** A change to the march or the look
+  lands in `landform-march.ts` / `landform-colour.ts` *and* its GLSL port, and is
+  diffed in the running page (`?render=cpu` against the default): coverage must agree
+  exactly, colour but for single pixels on dither seams.
 - **Every depth goes through `projectDepth`.** A landform drawn by its own projection
   would shear against the ground at the seam and pop at the horizon line.
 - **Slices sort; the picture does not.** A landform is one render but many depths. Draw

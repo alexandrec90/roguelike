@@ -224,19 +224,48 @@ function nodeReader(sample: GroundSample, previous?: GroundSample): (a: number, 
 }
 
 let lastSample: GroundSample | undefined;
+/** A sample taken ahead for the anchor the hero is walking into (`prefetchGroundSample`), and what it inherited from. */
+let aheadSample: GroundSample | undefined;
+let aheadBase: GroundSample | undefined;
 
 /**
  * `sampleGround`, remembered for the pose it was taken at.
  *
  * The ground and the grass both need the lattice for the same pose on the same
- * frame; whichever asks second gets the first one's answer for free.
+ * frame; whichever asks second gets the first one's answer for free. A sample
+ * already taken ahead for this pose is handed over as it is, and only now
+ * becomes the one the next inherits its hashes from.
  */
 export function sharedGroundSample(pose: PlanetPose, bounds: LocalBounds): GroundSample {
   if (lastSample?.pose === pose && sameBounds(lastSample.bounds, bounds)) {
     return lastSample;
   }
-  lastSample = sampleGround(pose, bounds, lastSample);
+  lastSample = isAhead(pose, bounds) && aheadSample !== undefined ? aheadSample : sampleGround(pose, bounds, lastSample);
+  aheadSample = undefined;
+  aheadBase = undefined;
   return lastSample;
+}
+
+/** Whether the sample taken ahead is for this pose, and was taken from the sample on screen now. */
+function isAhead(pose: PlanetPose, bounds: LocalBounds): boolean {
+  return aheadSample?.pose === pose && sameBounds(aheadSample.bounds, bounds) && aheadBase === lastSample;
+}
+
+/**
+ * Take the sample for a pose the ground is about to move to, a frame or more
+ * before it does, so the frame that crosses the tile does not pay for it.
+ *
+ * Taken from the sample now on screen - exactly what `sharedGroundSample` will
+ * inherit from when the pose arrives - and kept aside rather than made the one
+ * to inherit from, so a guess that does not come true changes nothing.
+ */
+export function prefetchGroundSample(pose: PlanetPose, bounds: LocalBounds): GroundSample {
+  if (isAhead(pose, bounds) && aheadSample !== undefined) {
+    return aheadSample;
+  }
+  aheadSample = sampleGround(pose, bounds, lastSample);
+  aheadBase = lastSample;
+  return aheadSample;
 }
 
 function sameBounds(a: LocalBounds, b: LocalBounds): boolean {

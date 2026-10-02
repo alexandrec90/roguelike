@@ -8,6 +8,7 @@ import {
   GRASS,
   lazyGroundSample,
   planetHash,
+  prefetchGroundSample,
   sampleGround,
   sharedGroundSample,
 } from "./ground-sample";
@@ -64,6 +65,28 @@ describe("the ground lattice", () => {
     const first = sharedGroundSample(POSE, BOUNDS);
     expect(sharedGroundSample(POSE, { ...BOUNDS })).toBe(first);
     expect(sharedGroundSample({ ...POSE }, BOUNDS)).not.toBe(first);
+  });
+
+  it("hands over a sample taken ahead as the very one, identical to taking it on arrival", () => {
+    const here = sharedGroundSample(POSE, BOUNDS);
+    const next = stepForward(POSE, 1);
+    const ahead = prefetchGroundSample(next, BOUNDS);
+    // Taking it ahead does not make it the one the next inherits from...
+    expect(sharedGroundSample(POSE, BOUNDS)).toBe(here);
+    // ...and arriving hands over exactly what was taken ahead.
+    expect(sharedGroundSample(next, BOUNDS)).toBe(ahead);
+    const fresh = sampleGround(next, BOUNDS, here);
+    expect([...ahead.hashes]).toEqual([...fresh.hashes]);
+    expect([...ahead.terrain]).toEqual([...fresh.terrain]);
+  });
+
+  it("drops a sample taken ahead for a pose that never came", () => {
+    const here = sharedGroundSample(POSE, BOUNDS);
+    const guessed = prefetchGroundSample(stepForward(POSE, 1), BOUNDS);
+    const other = stepForward(POSE, -1);
+    const arrived = sharedGroundSample(other, BOUNDS);
+    expect(arrived).not.toBe(guessed);
+    expect([...arrived.hashes]).toEqual([...sampleGround(other, BOUNDS, here).hashes]);
   });
 
   it("hashes a planet point stably, and neighbouring nodes differently", () => {

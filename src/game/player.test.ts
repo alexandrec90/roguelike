@@ -22,7 +22,9 @@ import {
   gaitOf,
   groundPose,
   livePose,
+  nextAnchor,
   passable,
+  upcomingAnchor,
   REACH_TILES,
   scrollPhase,
   STEP_MS,
@@ -376,6 +378,39 @@ describe("livePose", () => {
     const half = livePose(hold(east, 0.5), R);
     const whole = livePose(hold(east, 1.0001), R);
     expect(half.y).not.toBeCloseTo((START.y + whole.y) / 2, 9);
+  });
+});
+
+describe("nextAnchor and upcomingAnchor", () => {
+  it("hands back the very same pose for the same whole-tile walk, so work keyed on it can be done early", () => {
+    expect(nextAnchor(START, 1, 0, R)).toBe(nextAnchor(START, 1, 0, R));
+    expect(nextAnchor(START, 1, 0, R)).not.toBe(nextAnchor(START, 0, 1, R));
+    expect(nextAnchor(START, 1, 0, R).y).toBeCloseTo(START.y + 1, 9);
+  });
+
+  it("is nothing while he stands", () => {
+    expect(upcomingAnchor(createPlayer(START), R)).toBeUndefined();
+  });
+
+  it("names the anchor a walk is heading into and how soon, and it is the one he then reaches", () => {
+    let player = hold(north, 0.25);
+    const upcoming = upcomingAnchor(player, R);
+    expect(upcoming?.inMs).toBeCloseTo(0.75 * STEP_MS, 6);
+    while (groundPose(player) === START) {
+      player = advancePlayer(player, north, FRAME_MS, OPEN).player;
+    }
+    expect(groundPose(player)).toBe(upcoming?.pose);
+  });
+
+  it("knows backward from forward, and sideways", () => {
+    expect(upcomingAnchor(hold(south, 0.25), R)?.inMs).toBeCloseTo(0.75 * STEP_MS, 6);
+    expect(upcomingAnchor(hold(south, 0.25), R)?.pose).toBe(nextAnchor(START, -1, 0, R));
+    expect(upcomingAnchor(hold(west, 0.5), R)?.pose).toBe(nextAnchor(START, 0, -1, R));
+  });
+
+  it("takes both axes of a diagonal that reach their edges together", () => {
+    const player = hold(walk("northeast"), 0.3);
+    expect(upcomingAnchor(player, R)?.pose).toBe(nextAnchor(START, 1, 1, R));
   });
 });
 
