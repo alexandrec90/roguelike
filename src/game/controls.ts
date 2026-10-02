@@ -27,7 +27,6 @@ import {
   DIRECTION_AXES,
   HEADING_VECTOR,
   headingOf,
-  headingToward,
   type Command,
   type Direction,
   type GameAction,
@@ -35,6 +34,7 @@ import {
   type Keybindings,
   type MouseButton,
 } from "./keybindings";
+import type { Facing } from "./player";
 import { DEPTH_RATIO } from "./projection";
 
 export interface ControlState {
@@ -71,8 +71,9 @@ export interface ControlState {
    * `undefined` until the pointer first moves, so a keyboard-only player still
    * faces where he walks; from then on it holds the last direction pointed,
    * because a cursor that has stopped moving is still pointing somewhere.
+   * Any angle: the cursor is not snapped to the eight the keys are.
    */
-  aim: Heading | undefined;
+  aim: Facing | undefined;
 }
 
 export function createControls(bindings: Keybindings = DEFAULT_KEYBINDINGS): ControlState {
@@ -92,14 +93,22 @@ export function createControls(bindings: Keybindings = DEFAULT_KEYBINDINGS): Con
  *
  * The offset is un-foreshortened first: the screen squashes depth by
  * `DEPTH_RATIO`, so a cursor that *looks* diagonal on screen is further ahead
- * on the ground than it is across, and the sectors are drawn on the ground. An
+ * on the ground than it is across, and the angle is the one on the ground. An
  * offset of zero - the cursor on his chest - keeps the aim it had.
+ *
+ * Not snapped: the rig turns to any yaw for the same cost as one of eight, so
+ * the hero looks exactly where the cursor is and a blow or a spell leaves along
+ * the same line.
  */
 export function aimAt(state: ControlState, dx: number, dy: number): void {
-  state.aim = headingToward(dx, dy / DEPTH_RATIO) ?? state.aim;
+  if (dx === 0 && dy === 0) {
+    return;
+  }
+  // `facingYaw`'s convention: atan2 of across over toward-the-viewer.
+  state.aim = Math.atan2(dx, dy / DEPTH_RATIO);
 }
 
-export function currentAim(state: ControlState): Heading | undefined {
+export function currentAim(state: ControlState): Facing | undefined {
   return state.aim;
 }
 

@@ -9,8 +9,8 @@
  */
 
 import type { Element, Strike } from "../combat";
-import { HEADING_VECTOR, type Heading } from "../keybindings";
 import type { LocalPoint } from "../planet";
+import type { Facing } from "../player";
 
 /** How far in front of him the sword's blow is centred, tiles. */
 export const STRIKE_REACH = 0.8;
@@ -35,24 +35,21 @@ export interface CastEvent {
 }
 
 /**
- * A heading as a unit vector in the local frame.
+ * A facing as a unit vector in the local frame.
  *
- * `HEADING_VECTOR` is screen-space (north is up, a `dy` of -1) and the local
- * frame's `y` is *ahead*, which is up the screen — so `y` is `-dy`. Diagonals
- * are normalised, so a blow toward the corner reaches no further than one
- * straight ahead.
+ * A yaw of 0 faces the viewer, which is *down* the screen, and the local
+ * frame's `y` is *ahead*, which is up it — so `y` is `-cos`. Always unit length,
+ * so a blow at any angle reaches exactly as far as one straight ahead.
  */
-export function headingDirection(heading: Heading): { readonly x: number; readonly y: number } {
-  const { dx, dy } = HEADING_VECTOR[heading];
-  const length = Math.hypot(dx, dy) || 1;
+export function facingDirection(facing: Facing): { readonly x: number; readonly y: number } {
   // `+ 0` folds a negative zero away, which would otherwise ride into every
   // equality a receiver makes against it.
-  return { x: dx / length + 0, y: -dy / length + 0 };
+  return { x: Math.sin(facing) + 0, y: -Math.cos(facing) + 0 };
 }
 
 /** The blow a swing lands at its contact beat. */
-export function swingStrike(heading: Heading, at: LocalPoint, enchanted: boolean): Strike {
-  const direction = headingDirection(heading);
+export function swingStrike(facing: Facing, at: LocalPoint, enchanted: boolean): Strike {
+  const direction = facingDirection(facing);
   return {
     at: { x: at.x + direction.x * STRIKE_REACH, y: at.y + direction.y * STRIKE_REACH },
     radius: STRIKE_RADIUS,
@@ -63,8 +60,8 @@ export function swingStrike(heading: Heading, at: LocalPoint, enchanted: boolean
 }
 
 /** The spell a cast throws at its release beat: a fireball, or a frost nova. */
-export function castEvent(heading: Heading, at: LocalPoint, school: "fire" | "frost" = "fire"): CastEvent {
-  const direction = headingDirection(heading);
+export function castEvent(facing: Facing, at: LocalPoint, school: "fire" | "frost" = "fire"): CastEvent {
+  const direction = facingDirection(facing);
   return {
     from: { x: at.x + direction.x * CAST_REACH, y: at.y + direction.y * CAST_REACH },
     direction,
