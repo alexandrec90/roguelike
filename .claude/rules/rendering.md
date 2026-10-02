@@ -95,7 +95,7 @@ Measured on an Intel HD 530. A frame is 16.7 ms; the JS half of it should stay n
 | Scenery | ~1 ms + ≤ 3 ms of queued bakes | textures chosen per frame; bakes sliced |
 | Ground | ~0.5 ms | composed once per step into one surface |
 | Grass | ~1 ms | a baked tuft atlas; frames chosen from the wind |
-| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands. Water added ~1 ms a frame and ~2–3 ms a step, measured on a faster machine | one surface; the lattice read on demand, and never under a far pixel (`far` colours); tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped; puddle outlines and bodies cached by shape |
+| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands. Water added ~1 ms a frame and ~2–3 ms a step, measured on a faster machine | one surface; the lattice read on demand, and never under a far pixel (far looks, counted once at load - tens of ms - and one hash a far pixel); tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped; puddle outlines and bodies cached by shape |
 | Landforms | ~0.1 ms in open land; ~5 ms median beside a mountain, measured on a faster machine | a planet-fixed grid per landform, built once; the march visits only the columns each covers; far views kept between strides; one atlas upload of only the rows in use |
 | Each actor | ≤ 0.5 ms | small surfaces, caches keyed by quantised pose |
 | Lighting | ~0.5 ms | one render texture, a stamp per light |
