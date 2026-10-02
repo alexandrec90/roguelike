@@ -15,6 +15,7 @@ import Phaser from "phaser";
 import { ASSET_REGISTRY, assetFrame, findAsset, type AssetCategory } from "../game/asset-registry";
 import { integerScale, letterbox } from "../game/integer-scale";
 import { TILE_PREVIEW_COLUMNS, TILE_PREVIEW_ROWS } from "../game/textures";
+import { captureNow } from "./lab-capture";
 import { LAB_SIZE, LabScene } from "./lab-scene";
 import {
   BACKGROUND_MODES,
@@ -325,7 +326,7 @@ function exposeApi(): void {
         frames: entry.frames.length,
         variants: entry.variants.map((variant) => variant.id),
       })),
-    snapshot: (): string => game.canvas.toDataURL("image/png"),
+    snapshot: (): string => captureNow(game),
   };
 
   (window as unknown as { assetLab: typeof api }).assetLab = api;

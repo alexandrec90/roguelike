@@ -57,9 +57,39 @@ state they *settled on*, so a zoom that did not fit or a `tile` flag on a non-ti
 visible rather than silently assumed — read the return value, do not assume the patch.
 With `play=0`, `seek(ms)` is byte-identical on every run.
 
+`snapshot()` draws the frame before it reads the canvas (`src/lab/lab-capture.ts`), so
+`apply({frame: i})` followed by `snapshot()` captures frame `i` even in a hidden tab.
+It is synchronous, so there is nothing to await, and it needs no wait for
+`requestAnimationFrame`: a call that waits for one in a hidden tab never returns.
+
+### Keep each browser call short
+
+A claude-in-chrome `javascript_exec` that runs for several seconds on a hidden tab has
+had the page **reloaded under it**: `performance.getEntriesByType('navigation')[0].type`
+read `"reload"`, with no Vite reload logged. When work takes more than about a second,
+such as many captures or hundreds of game steps, split it up. One call starts the work
+in the page and returns at once. Separate short calls then read the result:
+
+```js
+// Call 1: start the work in the page, and return immediately.
+window.__job = { done: false, out: [] };
+const port = new MessageChannel();
+let i = 0;
+port.port1.onmessage = () => {
+  window.assetLab.apply({ frame: i });
+  window.__job.out.push(window.assetLab.snapshot());
+  if (++i < 16) port.port2.postMessage(0); else window.__job.done = true;
+};
+port.port2.postMessage(0);
+// Calls 2..n: `window.__job.done`, then read `window.__job.out`.
+```
+
+`MessageChannel` rather than `setTimeout` or rAF: a hidden tab throttles timers to
+about one a second and does not run rAF at all.
+
 ### Checking the game itself, where none of the above applies
 
-The lab **renders on demand**, which is why it works from an extension-driven tab. The
+The lab draws on demand, which is why it works from an extension-driven tab. The
 game runs on a loop, and that tab is usually hidden (`document.visibilityState` reads
 `hidden`): Chrome freezes `requestAnimationFrame` and Phaser pauses `game.loop`, so the
 scene stops between tool calls. A held synthetic keydown then moves the hero about one
@@ -81,8 +111,9 @@ g.step((t += dt), dt);
 await png; // a PNG data URL of frame 30
 ```
 
-For an input check, dispatch the keydown first, then step: the keyboard plugin reads
-its queue inside the step. A fixed `dt` makes the same steps give the same frames, so
+Thirty steps fit in one short call. Hundreds do not: run those in a `MessageChannel`
+loop, as shown above, a few dozen steps per message. For an input check, dispatch the
+keydown first, then step: the keyboard plugin reads its queue inside the step. A fixed `dt` makes the same steps give the same frames, so
 two runs can be compared the way `seek(t)` is compared in the lab. What a frame *looks
 like* is still the lab's question; this is for what the game *does* with it.
 
