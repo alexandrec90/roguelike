@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { CameraFrame } from "./camera";
 import { BEND_LEVELS, TUFT_FRAME, TUFT_SHAPES, tuftCloud } from "./ground/tufts";
+import { FAR_LEVELS, FAR_SEED, farLook, farSlot } from "./roll-far";
+import { pixelHash } from "./transforms";
 import {
   CellTable,
+  FAR_SLOT_SHIFT,
+  farLookTexels,
   lineTable,
   lipLines,
   MAX_LINES,
@@ -87,7 +91,7 @@ describe("visitLipCells", () => {
       },
       far: (cellX, cellY) => {
         read.push({ kind: NEEDS_FAR, cell: `${cellX},${cellY}` });
-        return 0x336633;
+        return farLook(new Map([[0x336633, 1]]));
       },
     };
     // A frame whose scroll is the one visited: phase -> scroll is scrollOffset's.
@@ -229,6 +233,32 @@ describe("the cell and tuft tables", () => {
     expect(table.takeDirty()).toBeUndefined();
     table.markAll();
     expect(table.takeDirty()).toEqual({ from: 0, to: 3 });
+  });
+});
+
+describe("the far looks", () => {
+  it("lays each terrain's slots in a row of opaque bytes, in code order", () => {
+    const grass = farLook(new Map([[0x102030, 3], [0x405060, 1]]));
+    const dirt = farLook(new Map([[0x708090, 1]]));
+    const data = farLookTexels([grass, dirt]);
+    expect(data).toHaveLength(FAR_LEVELS * 2 * 4);
+    for (const [code, look] of [grass, dirt].entries()) {
+      for (let slot = 0; slot < FAR_LEVELS; slot += 1) {
+        const colour = look.table[slot]!;
+        const at = (code * FAR_LEVELS + slot) * 4;
+        expect([...data.slice(at, at + 4)]).toEqual([(colour >> 16) & 0xff, (colour >> 8) & 0xff, colour & 0xff, 255]);
+      }
+    }
+  });
+
+  it("picks the slot the shader picks: the top bits of the pixel hash", () => {
+    expect(Number.isInteger(FAR_SLOT_SHIFT)).toBe(true);
+    for (let y = 0; y < 40; y += 1) {
+      for (let x = 0; x < 320; x += 3) {
+        const bits = Math.round(pixelHash(x, y, FAR_SEED) * 0xffffffff);
+        expect(farSlot(x, y), `${x},${y}`).toBe(bits >>> FAR_SLOT_SHIFT);
+      }
+    }
   });
 });
 

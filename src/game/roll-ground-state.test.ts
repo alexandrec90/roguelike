@@ -8,6 +8,7 @@ import { groundTile, unpackGroundKey } from "./ground/ground-tiles";
 import { TUFT_SHAPES, tuftCloud } from "./ground/tufts";
 import type { PlanetPose } from "./planet";
 import { TILE_DEPTH } from "./projection";
+import { farLook } from "./roll-far";
 import { gridTexels, lipBounds, rollGroundPixels, type WaterLook } from "./roll-ground";
 import { packCloud, tuftBounds } from "./roll-grass";
 import { LipState, type LipArt } from "./roll-ground-state";
@@ -19,6 +20,8 @@ const FIELD = { minX: -4, maxX: 4, minY: -6, maxY: 7 };
 const HAZE = { r: 180, g: 200, b: 220 };
 const DRY: WaterLook = { wetCell: () => false, blendInto: () => false };
 const LIVE_MAX_Y = Math.floor((FRAME.footY - FRAME.groundTop) / TILE_DEPTH) + 3;
+const GRASS_FAR = farLook(new Map([[0x2f6b2a, 3], [0x4a8a3a, 1]]));
+const DIRT_FAR = farLook(new Map([[0x7a5a3a, 1]]));
 
 const ART: LipArt = {
   tile: (sample, cellX, cellY) => gridTexels(groundTile(unpackGroundKey(groundKey(sample, cellX, cellY)))),
@@ -26,7 +29,7 @@ const ART: LipArt = {
     const tuft = TUFT_SHAPES[shape];
     return packCloud(tuft === undefined ? [] : tuftCloud(tuft, bend));
   },
-  far: (code) => (code === 0 ? 0x2f6b2a : 0x7a5a3a),
+  far: (code) => (code === 0 ? GRASS_FAR : DIRT_FAR),
 };
 
 /** Just what the swaying rows read of a frame: its clock and its wind. */

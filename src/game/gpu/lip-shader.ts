@@ -3,7 +3,7 @@
  *
  * Line for line it is `WorldTexels.write` in `roll-ground.ts`, from the tables
  * `lip-gpu-data.ts` builds: which world texel the pixel reads, its tile's
- * texel or its cell's far colour, the puddle over it, the grass over that, and
+ * texel or a slot of its cell's far look, the puddle over it, the grass over that, and
  * the haze. Every step rounds to a byte where the CPU stores into a
  * `Uint8ClampedArray` - half to even, as that does - so the two agree pixel for
  * pixel but for float rounding at the odd exact half.
@@ -18,7 +18,8 @@ import { TUFT_FRAME, BEND_LEVELS } from "../ground/tufts";
 import { HAZE_STEPS } from "../roll-ground";
 import { MAX_WATER_ALPHAS } from "../roll-water";
 import { TILE_DEPTH, TILE_WIDTH } from "../projection";
-import { TUFTS_PER_CELL } from "../lip-gpu-data";
+import { FAR_SLOT_SHIFT, TUFTS_PER_CELL } from "../lip-gpu-data";
+import { FAR_LEVELS, FAR_SEED } from "../roll-far";
 import { LANDFORM_COMMON } from "./landform-glsl";
 
 export const LIP_FRAGMENT_SHADER = `${LANDFORM_COMMON}
@@ -27,13 +28,13 @@ uniform highp sampler2D u_cells;      // per lip cell: (tile slot, far code + 1,
 uniform highp sampler2D u_pages;      // 16 x 12 pages, bytes
 uniform highp sampler2D u_tufts;      // per grass cell, ${TUFTS_PER_CELL} of (frame + 1, dx, dy, 0)
 uniform highp sampler2D u_tuftAtlas;  // shapes down, bends across, bytes
+uniform highp sampler2D u_farLooks;   // ${FAR_LEVELS} slots across, a terrain code a row, bytes
 
 uniform vec2 u_size;          // width, scanlines
 uniform vec2 u_frame;         // footX, scroll x
 uniform vec4 u_cellBounds;    // min x, min y, width, height
 uniform vec4 u_tuftBounds;    // min x, min y, max x, max y
 uniform float u_pageColumns;
-uniform vec3 u_far[2];        // grass, dirt; 0..255
 uniform vec3 u_haze;          // 0..255, already divided by the ambient
 uniform float u_alphas[${MAX_WATER_ALPHAS}];
 
@@ -50,6 +51,17 @@ const int PER_CELL = ${TUFTS_PER_CELL};
 const float HAZE_STEPS = ${HAZE_STEPS.toFixed(1)};
 
 int floorDiv(int a, int b) { return int(floor(float(a) / float(b))); }
+
+// farSlot in roll-far.ts: pixelHash(x, y, FAR_SEED) scaled to FAR_LEVELS
+// slots. In integers, floor(h / 0xffffffff * FAR_LEVELS) is the hash's top
+// bits, which a float could not hold exactly.
+int farSlot(int x, int y) {
+  uint h = (uint(x) ^ (uint(y) << 16u) ^ ${FAR_SEED}u) * 0x27d4eb2du;
+  h ^= h >> 15u;
+  h *= 0x85ebca6bu;
+  h ^= h >> 13u;
+  return int(h >> ${FAR_SLOT_SHIFT}u);
+}
 
 vec4 cellAt(int cx, int cy) {
   int x = cx - int(u_cellBounds.x);
@@ -110,7 +122,8 @@ void main() {
   bool blurred = a.w > 0.0 && a.w > bayer(x + 2, y + 1);
   vec3 rgb;
   if (blurred) {
-    rgb = u_far[int(cell.y + 0.5) == 2 ? 1 : 0];
+    int code = int(cell.y + 0.5) == 2 ? 1 : 0;
+    rgb = texelFetch(u_farLooks, ivec2(farSlot(x, y), code), 0).rgb * 255.0;
   } else {
     rgb = pageAt(cell.x, gx - cx * TW, (TD - 1) - (gy - cy * TD)).rgb;
   }

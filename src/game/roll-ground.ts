@@ -27,9 +27,10 @@
  * And a far scanline reads a texel in five across and a dozen rows down, so a
  * point sample there is noise that reshuffles on every step of scroll - a crack
  * in a rock cap appears, then is gone. Out there a pixel shows its cell's far
- * colour instead (`CellLook.far`, a tile's commonest colour - `tileMode`),
- * which is what the ground reads as at that distance, does not flicker as it
- * slides, and needs no tile composed - reading the lattice under the far lip
+ * look instead (`CellLook.far`, `roll-far.ts`): the colours the ground shows,
+ * grass included, one picked per screen pixel. That is what the ground reads as
+ * at that distance, in the near lip's own shade; it does not flicker as it
+ * slides; and it needs no tile composed - reading the lattice under the far lip
  * is what used to stall a step.
  *
  * Pure: a frame, a width, a cell lookup and the haze in, RGBA out. The Phaser
@@ -43,6 +44,7 @@ import type { InkGrid } from "./ground/ink-grid";
 import { HORIZON_SCALE, ROLL_ROWS, rollRowAt, rollScale } from "./horizon";
 import { INK_COLORS } from "./ink";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
+import { countColours, farLook, farSlot, type FarLook } from "./roll-far";
 import { TUFT_ROWS, tuftBounds, TuftOverlay, type TuftPiece } from "./roll-grass";
 import { BAYER_4X4 } from "./shading";
 
@@ -83,12 +85,12 @@ export interface CellLook {
   /** The puddles out on the lip; leave it out for a dry lip. */
   readonly water?: WaterLook;
   /**
-   * A cell seen from too far to point-sample, as one packed `0xRRGGBB`: what
-   * it is made of, without composing its tile - which needs the lattice round
-   * it, and the far lip crosses a hundred cells a scanline. Left out, a far
-   * pixel shows its own tile's commonest colour (`tileMode`).
+   * A cell seen from too far to point-sample: what it is made of, grass and
+   * all, without composing its tile - which needs the lattice round it, and the
+   * far lip crosses a hundred cells a scanline. Left out, a far pixel shows its
+   * own tile's colours (`tileLook`).
    */
-  far?(cellX: number, cellY: number): number;
+  far?(cellX: number, cellY: number): FarLook;
 }
 
 /** An ink grid - a ground or rock tile - as texels; a transparent pixel is black. */
@@ -152,39 +154,23 @@ export function hazeInto(rgba: Uint8ClampedArray, at: number, haze: Rgb, fog: nu
   rgba[at + 2] = (rgba[at + 2] ?? 0) + (haze.b - (rgba[at + 2] ?? 0)) * t;
 }
 
-const MODES = new WeakMap<TileTexels, number>();
+const LOOKS = new WeakMap<TileTexels, FarLook>();
 
 /**
- * A tile's commonest opaque colour, packed `0xRRGGBB` - an ink the tile is
- * made of, never an average, and what the eye makes of the tile once a pixel spans
- * several of its texels. Counted once per tile and kept.
+ * A tile's far look: its opaque colours in their shares - inks the tile is
+ * made of, never an average. Counted once per tile and kept.
  */
-export function tileMode(tile: TileTexels): number {
-  const known = MODES.get(tile);
-  if (known !== undefined) {
-    return known;
+export function tileLook(tile: TileTexels): FarLook {
+  let look = LOOKS.get(tile);
+  if (look === undefined) {
+    look = farLook(countColours(tile.rgba, new Map()));
+    LOOKS.set(tile, look);
   }
-  const counts = new Map<number, number>();
-  let best = 0;
-  let bestCount = 0;
-  for (let at = 0; at < tile.rgba.length; at += 4) {
-    if ((tile.rgba[at + 3] ?? 0) === 0) {
-      continue;
-    }
-    const colour = ((tile.rgba[at] ?? 0) << 16) | ((tile.rgba[at + 1] ?? 0) << 8) | (tile.rgba[at + 2] ?? 0);
-    const count = (counts.get(colour) ?? 0) + 1;
-    counts.set(colour, count);
-    if (count > bestCount) {
-      best = colour;
-      bestCount = count;
-    }
-  }
-  MODES.set(tile, best);
-  return best;
+  return look;
 }
 
 /**
- * Share of a scanline's pixels that show their cell's far colour rather than a
+ * Share of a scanline's pixels that show their cell's far look rather than a
  * point sample, by how many texels one pixel there spans. None until a pixel
  * spans a couple of texels; all of them once it spans half a tile, so the far
  * lip never composes a tile at all.
@@ -293,7 +279,7 @@ export function rollGroundPixels(
       rgba[at + 3] = 255;
       const localX = (x + 0.5 - frame.footX) / span - shift.x / TILE_WIDTH;
       const blurred = distant > 0 && distant > distantThreshold(x, line.y);
-      field.write(Math.floor((localX + 0.5) * TILE_WIDTH), gy, rgba, at, tufted, blurred);
+      field.write(Math.floor((localX + 0.5) * TILE_WIDTH), gy, rgba, at, tufted, blurred ? farSlot(x, line.y) : -1);
       hazeInto(rgba, at, haze, line.fog, x, line.y);
     }
   });
@@ -301,7 +287,7 @@ export function rollGroundPixels(
 }
 
 /**
- * The dither for "point sample or commonest colour", offset from the one the
+ * The dither for "point sample or far look", offset from the one the
  * haze uses so the two patterns do not lock together into a visible grid.
  */
 export function distantThreshold(x: number, y: number): number {
@@ -341,12 +327,12 @@ function cellKey(cellX: number, cellY: number): number {
 class WorldTexels {
   /**
    * The cell the last texel was in, and - once some pixel asked - its tile and
-   * its far colour: a run of texels shares all three, and a far run never
+   * its far look: a run of texels shares all three, and a far run never
    * composes the tile at all.
    */
   private lastCell = Number.NaN;
   private lastTile: TileTexels | undefined;
-  private lastFar = -1;
+  private lastFar: FarLook | undefined;
   /** Whether the last cell has water in it. */
   private lastWet = false;
   /** Whether the tufts round the last cell have been asked for yet. */
@@ -359,21 +345,23 @@ class WorldTexels {
 
   /**
    * Write the texel at (gx, gy) into `rgba` at byte `at`, then the water and
-   * the grass over it. `blurred` asks for the cell's far colour in place of
-   * the texel, for a pixel that spans too many texels to point-sample.
+   * the grass over it. A `farSlot` of 0 or more asks for that slot of the
+   * cell's far look in place of the texel, for a pixel that spans too many
+   * texels to point-sample.
    */
-  write(gx: number, gy: number, rgba: Uint8ClampedArray, at: number, tufted: boolean, blurred = false): void {
+  write(gx: number, gy: number, rgba: Uint8ClampedArray, at: number, tufted: boolean, farSlot = -1): void {
     const cellX = Math.floor(gx / TILE_WIDTH);
     const cellY = Math.floor(gy / TILE_DEPTH);
     this.enter(cellX, cellY);
-    // A blurred pixel shows no blade - the blur is the detail gone - so only a
-    // pixel that point-samples pays for the tufts around its cell.
+    // A blurred pixel shows no blade of its own - its far look has the grass
+    // in it already - so only a pixel that point-samples pays for the tufts.
+    const blurred = farSlot >= 0;
     const grassy = tufted && !blurred;
     if (grassy) {
       this.stampAround(cellX, cellY);
     }
     if (blurred) {
-      writePacked(rgba, at, this.farColour(cellX, cellY));
+      writePacked(rgba, at, this.farLook(cellX, cellY).table[farSlot] ?? 0);
     } else {
       const tile = this.tileHere(cellX, cellY);
       const from = ((TILE_DEPTH - 1 - (gy - cellY * TILE_DEPTH)) * tile.width + (gx - cellX * TILE_WIDTH)) * 4;
@@ -387,13 +375,13 @@ class WorldTexels {
     }
   }
 
-  /** Move to a cell, if the last texel was in another; its tile and far colour wait to be asked for. */
+  /** Move to a cell, if the last texel was in another; its tile and far look wait to be asked for. */
   private enter(cellX: number, cellY: number): void {
     const cell = cellKey(cellX, cellY);
     if (cell !== this.lastCell) {
       this.lastCell = cell;
       this.lastTile = undefined;
-      this.lastFar = -1;
+      this.lastFar = undefined;
       this.lastWet = this.look.water?.wetCell(cellX, cellY) ?? false;
       this.lastStamped = false;
     }
@@ -404,10 +392,8 @@ class WorldTexels {
     return this.lastTile;
   }
 
-  private farColour(cellX: number, cellY: number): number {
-    if (this.lastFar < 0) {
-      this.lastFar = this.look.far?.(cellX, cellY) ?? tileMode(this.tileHere(cellX, cellY));
-    }
+  private farLook(cellX: number, cellY: number): FarLook {
+    this.lastFar ??= this.look.far?.(cellX, cellY) ?? tileLook(this.tileHere(cellX, cellY));
     return this.lastFar;
   }
 

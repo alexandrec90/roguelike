@@ -26,8 +26,9 @@
  * field; only the haze it dissolves into is pre-divided (`unlitHaze`), so it
  * meets the sky in the sky's own colour.
  *
- * A far pixel shows its cell's far colour (`CellLook.far`), which is read off
- * the planet at the cell's own sample point - one terrain lookup, never the
+ * A far pixel shows its cell's far look (`CellLook.far`), chosen by what the
+ * cell is made of, read off the planet at its own sample point - one terrain
+ * lookup, never the
  * lattice round it, which is what the lazy sample exists to avoid reading. The
  * puddles out there are grown once a step (`roll-water.ts`). Anything standing
  * on the lip - a tree, a landform - is drawn over it by its own layer.
@@ -36,6 +37,7 @@
 import type Phaser from "phaser";
 
 import type { CameraFrame, LocalBounds } from "./camera";
+import { terrainFarLooks } from "./far-looks";
 import type { FrameContext } from "./frame-context";
 import { groundKey } from "./ground/ground-plan";
 import {
@@ -53,7 +55,8 @@ import { LipGpu } from "./roll-ground-gpu";
 import type { PlanetPose } from "./planet";
 import { HORIZON_DEPTH, TILE_DEPTH } from "./projection";
 import type { Puddle } from "./puddles";
-import { gridTexels, lipBounds, rollGroundPixels, tileMode, type TileTexels } from "./roll-ground";
+import type { FarLook } from "./roll-far";
+import { gridTexels, lipBounds, rollGroundPixels, type TileTexels } from "./roll-ground";
 import { packCloud, tuftBounds, type PackedCloud } from "./roll-grass";
 import { LipState, type LipArt } from "./roll-ground-state";
 import { LipWater, puddleOnLip } from "./roll-water";
@@ -77,16 +80,14 @@ const WARM_BANDS = 6;
 
 /**
  * What each kind of ground looks like from too far to see its tile: the
- * commonest colour of a plain tile of that kind. Worked out once.
+ * meadow counted as the field draws it, grass and all (`far-looks.ts`).
+ * Worked out once.
  */
-let farColours: Readonly<Record<TerrainCode, number>> | undefined;
+let farLooks: Readonly<Record<TerrainCode, FarLook>> | undefined;
 
-function farColour(code: TerrainCode): number {
-  farColours ??= {
-    [GRASS]: tileMode(gridTexels(groundTile({ dirt: 0, colours: 0, middle: 0, shade: 0 }))),
-    [DIRT]: tileMode(gridTexels(groundTile({ dirt: 0x1ff, colours: 0, middle: 0, shade: 0 }))),
-  };
-  return farColours[code];
+function farLookOf(code: TerrainCode): FarLook {
+  farLooks ??= terrainFarLooks();
+  return farLooks[code];
 }
 
 export class RollGroundLayer {
@@ -110,7 +111,7 @@ export class RollGroundLayer {
   private readonly art: LipArt = {
     tile: (sample, cellX, cellY) => this.tile(sample, cellX, cellY),
     tuft: (shape, bend) => this.tuftAt(shape, bend),
-    far: farColour,
+    far: farLookOf,
   };
   private water: LipWater | undefined;
   private waterKey = "";
@@ -128,6 +129,8 @@ export class RollGroundLayer {
     this.width = width;
     this.scene = scene;
     this.useGpu = gpu;
+    // Counting the far looks is tens of milliseconds: pay it at load, not on the first frame of lip.
+    farLookOf(GRASS);
     this.layout(frame, field);
     if (frame.rollHeight <= 0 || gpu) {
       return;
@@ -153,7 +156,7 @@ export class RollGroundLayer {
     this.gpu?.destroy();
     this.gpu =
       this.useGpu && this.scene !== undefined && flat.rollHeight > 0
-        ? new LipGpu(this.scene, this.width, flat, this.bounds, this.grassBounds, [farColour(GRASS), farColour(DIRT)])
+        ? new LipGpu(this.scene, this.width, flat, this.bounds, this.grassBounds, [farLookOf(GRASS), farLookOf(DIRT)])
         : undefined;
   }
 

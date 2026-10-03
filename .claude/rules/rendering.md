@@ -185,8 +185,8 @@ frame is 16.7 ms; the JS half of it should stay near 8.
 | Scenery | ~1 ms walking | textures chosen per frame; bakes on two workers, a ladder per body per light; only uploads (≤ 2 ms) on the frame |
 | Ground | ~0.5 ms; ~0.5 ms on a crossing | composed once per anchor into one surface; planned ahead (`prefetch`) |
 | Grass | ~0.6 ms; ~0.9 ms on a crossing | a baked tuft atlas; frames chosen from the wind; tufts placed ahead |
-| Horizon lip (GPU) | ~0.4 ms CPU | one shader pass over tables (`lip-gpu-data.ts`); the CPU walks the cells read, pages tiles and puddles into an atlas, bends the swaying tufts; the next anchor's cells filled ahead in tasks cut by cost |
-| Horizon lip (CPU, `?render=cpu`) | ~2.2 ms | one surface; the lattice read on demand, and never under a far pixel (`far` colours); tufts kept in an overlay an anchor, only the swaying rows re-stamped |
+| Horizon lip (GPU) | ~0.4 ms CPU | one shader pass over tables (`lip-gpu-data.ts`); the CPU walks the cells read, pages tiles and puddles into an atlas, bends the swaying tufts; the next anchor's cells filled ahead in tasks cut by cost; far looks counted once at load (tens of ms) into one small texture |
+| Horizon lip (CPU, `?render=cpu`) | ~2.2 ms | one surface; the lattice read on demand, and never under a far pixel (far looks, counted once at load - tens of ms - and one hash a far pixel); tufts kept in an overlay an anchor, only the swaying rows re-stamped |
 | Landforms (GPU) | ~1–2 ms CPU walking beside a mountain; nothing idle | the march in five shader passes (below); the CPU only schedules and places slices, measuring only what sorts between them |
 | Landforms (CPU, `?render=cpu`) | ~0.1 ms in open land; ~5 ms median beside a mountain | a planet-fixed grid per landform, built once; the march visits only the columns each covers; far views kept between strides; one atlas upload of only the rows in use |
 | Water | ~0.5 ms | the surface cleared, painted and uploaded only over the rows the puddles span |
@@ -214,7 +214,7 @@ Export-checked by `src/game/rendering-rule.test.ts`, so it cannot rot.
 | `landform-gpu-data.ts` | `packField` · `viewUniforms` · `scheduleTexels` · `columnBounds` |
 | `landform-gpu-rows.ts` | `rowRects` · `groupRows` · `stackBands` · `radialProfile` |
 | `landform-gpu-layer.ts` | `LandformGpuLayer` |
-| `lip-gpu-data.ts` | `lipLines` · `visitLipCells` · `warmChunks` · `PageAtlas` · `CellTable` · `TuftTable` · `tuftAtlas` |
+| `lip-gpu-data.ts` | `lipLines` · `visitLipCells` · `warmChunks` · `PageAtlas` · `CellTable` · `TuftTable` · `tuftAtlas` · `farLookTexels` |
 | `roll-ground-gpu.ts` | `LipGpu` |
 | `prefetcher.ts` | `Prefetcher` |
 | `player.ts` | `upcomingAnchor` · `nextAnchor` |

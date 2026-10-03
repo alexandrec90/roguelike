@@ -18,6 +18,7 @@ import { bendFrame } from "./ground/tufts";
 import { localFrame, type PlanetPoint, type PlanetPose } from "./planet";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import { tuftAtlasFrame, type TuftEntry } from "./lip-gpu-data";
+import type { FarLook } from "./roll-far";
 import type { CellLook, TileTexels, WaterLook } from "./roll-ground";
 import { TuftOverlay, type PackedCloud, type TuftPiece } from "./roll-grass";
 import { windAt } from "./wind";
@@ -26,7 +27,7 @@ import { windAt } from "./wind";
 export interface LipArt {
   tile(sample: GroundSample, cellX: number, cellY: number): TileTexels;
   tuft(shape: number, bend: number): PackedCloud;
-  far(code: TerrainCode): number;
+  far(code: TerrainCode): FarLook;
 }
 
 interface LipCell {

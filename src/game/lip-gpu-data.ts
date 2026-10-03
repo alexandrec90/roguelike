@@ -11,8 +11,10 @@
  *   pixel is there, the haze and the share of far pixels (`lineTable`);
  * - **the pages** - 16 x 12 pictures in one atlas, each a ground tile or a
  *   cell's worth of puddle, allocated least recently used first (`PageAtlas`);
- * - **the cells** - per lip cell, which tile page, which far colour, which
- *   puddle page (`CellTable`);
+ * - **the cells** - per lip cell, which tile page, which terrain's far look,
+ *   which puddle page (`CellTable`);
+ * - **the far looks** - per terrain code, its `FAR_LEVELS` colours in their
+ *   shares (`farLookTexels`);
  * - **the tufts** - up to three per cell near the seam, as a frame of the tuft
  *   atlas and a root (`TuftTable`, `tuftAtlas`).
  *
@@ -23,6 +25,7 @@
 import { scrollOffset, type CameraFrame, type LocalBounds } from "./camera";
 import { BEND_LEVELS, TUFT_FRAME, TUFT_SHAPES, tuftCloud } from "./ground/tufts";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
+import { FAR_LEVELS, type FarLook } from "./roll-far";
 import { distantShare, rollScanlines, type RollScanline, type TileTexels } from "./roll-ground";
 import { packCloud, TUFT_ROWS } from "./roll-grass";
 
@@ -52,7 +55,7 @@ export interface LipLine {
   /** Texels per screen pixel across: `1 / scale`. */
   readonly invScale: number;
   readonly fog: number;
-  /** Share of pixels that show their cell's far colour; 0 is none, 1 is all. */
+  /** Share of pixels that show their cell's far look; 0 is none, 1 is all. */
   readonly distant: number;
   readonly tufted: boolean;
   /** Screen y, for the dither. */
@@ -301,6 +304,32 @@ export function tilePage(tile: TileTexels, data: Uint8Array, at: number, stride:
   for (let row = 0; row < TILE_DEPTH; row += 1) {
     data.set(tile.rgba.subarray(row * tile.width * 4, row * tile.width * 4 + TILE_WIDTH * 4), at + row * stride);
   }
+}
+
+/**
+ * `farSlot` in integers, as the shader takes it: the slot is the top bits of
+ * the 32-bit pixel hash, `FAR_LEVELS` being a power of two.
+ */
+export const FAR_SLOT_SHIFT = 32 - Math.log2(FAR_LEVELS);
+
+/**
+ * The far looks as the shader reads them: one row of `FAR_LEVELS` RGBA bytes
+ * per terrain code, in code order, so slot `farSlot(x, y)` of a cell's code is
+ * the texel at (slot, code).
+ */
+export function farLookTexels(looks: readonly FarLook[]): Uint8Array<ArrayBuffer> {
+  const data = new Uint8Array(FAR_LEVELS * looks.length * 4);
+  looks.forEach((look, code) => {
+    for (let slot = 0; slot < FAR_LEVELS; slot += 1) {
+      const colour = look.table[slot] ?? 0;
+      const at = (code * FAR_LEVELS + slot) * 4;
+      data[at] = (colour >> 16) & 0xff;
+      data[at + 1] = (colour >> 8) & 0xff;
+      data[at + 2] = colour & 0xff;
+      data[at + 3] = 255;
+    }
+  });
+  return data;
 }
 
 /**

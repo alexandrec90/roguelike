@@ -16,11 +16,12 @@ import {
   rollFog,
   rollGroundPixels,
   rollScanlines,
-  tileMode,
+  tileLook,
   type CellLook,
   type TileTexels,
   type WaterLook,
 } from "./roll-ground";
+import { FAR_LEVELS, farLook } from "./roll-far";
 import { packCloud, TUFT_ROWS, type TuftPiece } from "./roll-grass";
 
 const WIDTH = 64;
@@ -156,23 +157,33 @@ describe("hazeInto", () => {
   });
 });
 
-describe("tileMode", () => {
-  it("is the tile's commonest opaque colour - an ink it is made of, not an average", () => {
-    const grid = createGrid(3, 2, "grass-3");
+describe("tileLook", () => {
+  it("is the tile's own inks in their shares - never an average", () => {
+    const grid = createGrid(4, 2, "grass-3");
     setGrid(grid, 2, 1, "stone-2");
-    const grass = hexToRgb(INK_COLORS["grass-3"]);
-    expect(tileMode(gridTexels(grid))).toBe((grass.r << 16) | (grass.g << 8) | grass.b);
+    setGrid(grid, 3, 1, "stone-2");
+    const pack = (ink: "grass-3" | "stone-2"): number => {
+      const { r, g, b } = hexToRgb(INK_COLORS[ink]);
+      return (r << 16) | (g << 8) | b;
+    };
+    const { table } = tileLook(gridTexels(grid));
+    expect(table.filter((colour) => colour === pack("grass-3"))).toHaveLength(FAR_LEVELS * 0.75);
+    expect(table.filter((colour) => colour === pack("stone-2"))).toHaveLength(FAR_LEVELS * 0.25);
   });
 
   it("does not count a hole as a colour", () => {
     const rgba = new Uint8ClampedArray(4 * 4);
     rgba.set([10, 20, 30, 255], 0);
-    expect(tileMode({ width: 4, rgba })).toBe((10 << 16) | (20 << 8) | 30);
+    expect(new Set(tileLook({ width: 4, rgba }).table)).toEqual(new Set([(10 << 16) | (20 << 8) | 30]));
+  });
+
+  it("is counted once per tile", () => {
+    expect(tileLook(MEADOW)).toBe(tileLook(MEADOW));
   });
 });
 
 describe("distantShare", () => {
-  it("point-samples while a pixel spans a texel or two, and settles wholly to the far colour by half a tile", () => {
+  it("point-samples while a pixel spans a texel or two, and settles wholly to the far look by half a tile", () => {
     expect(distantShare(1)).toBe(0);
     expect(distantShare(2)).toBe(0);
     expect(distantShare(4)).toBeGreaterThan(0);
@@ -352,20 +363,23 @@ describe("rollGroundPixels", () => {
     // The regression: the far lip used to be dithered *to* the haze, and since
     // the lip folds forty rows into its top scanlines the horizon read as a
     // grey band that turned green only as it rolled onto the field.
-    const rgba = rollGroundPixels(FRAME, WIDTH, ALL_MEADOW, HAZE);
-    const mode = tileMode(MEADOW);
-    const modeRgb = [(mode >> 16) & 0xff, (mode >> 8) & 0xff, mode & 0xff];
+    const ground = [30, 90, 40];
+    const rgba = new Uint8ClampedArray(TILE_WIDTH * TILE_DEPTH * 4).map((_unused, at) =>
+      at % 4 === 3 ? 255 : (ground[at % 4] ?? 0),
+    );
+    const flat: CellLook = { tile: () => ({ width: TILE_WIDTH, rgba }), tuft: () => null };
+    const lip = rollGroundPixels(FRAME, WIDTH, flat, HAZE);
     const distance = (a: readonly number[], b: readonly number[]): number =>
       Math.hypot((a[0] ?? 0) - (b[0] ?? 0), (a[1] ?? 0) - (b[1] ?? 0), (a[2] ?? 0) - (b[2] ?? 0));
     const haze = [HAZE.r, HAZE.g, HAZE.b];
     for (let x = 0; x < WIDTH; x += 1) {
-      const top = pixelAt(rgba, x, 0).slice(0, 3);
+      const top = pixelAt(lip, x, 0).slice(0, 3);
       expect(top).not.toEqual(haze);
-      expect(distance(top, haze)).toBeLessThan(distance(modeRgb, haze));
+      expect(distance(top, haze)).toBeLessThan(distance(ground, haze));
     }
   });
 
-  it("settles a far scanline onto its tiles' commonest colour, so a step of scroll cannot reshuffle it", () => {
+  it("settles a far scanline onto a screen-locked pick of its cell's colours, so a step of scroll cannot reshuffle it", () => {
     const top = rollScanlines(FRAME)[0];
     expect(distantShare(top?.stride ?? 0)).toBeGreaterThan(0.5);
     const unhazed = rollGroundPixels(FRAME, WIDTH, ALL_MEADOW, { r: 0, g: 0, b: 0 });
@@ -379,10 +393,9 @@ describe("rollGroundPixels", () => {
     expect(same / WIDTH).toBeGreaterThan(0.5);
   });
 
-  it("shows a far cell's far colour without composing its tile", () => {
+  it("shows a far cell's far look without composing its tile", () => {
     // Composing a far cell's tile reads the lattice round it, and the far lip
     // crosses a hundred cells a scanline: that was a step frame's worst stall.
-    const far = 0x123456;
     const composed = new Set<number>();
     const look: CellLook = {
       tile: (cellX, cellY) => {
@@ -390,9 +403,9 @@ describe("rollGroundPixels", () => {
         return MEADOW;
       },
       tuft: () => null,
-      far: () => far,
+      far: () => farLook(new Map([[0x123456, 1]])),
     };
-    // Haze the far colour itself, so the air's tint leaves it as it is.
+    // Haze the far look's one colour itself, so the air's tint leaves it as it is.
     const rgba = rollGroundPixels(FRAME, WIDTH, look, { r: 0x12, g: 0x34, b: 0x56 });
     const top = rollScanlines(FRAME)[0];
     expect(distantShare(top?.stride ?? 0)).toBe(1);
@@ -400,6 +413,21 @@ describe("rollGroundPixels", () => {
     const seam = (FRAME.footY - FRAME.groundTop) / TILE_DEPTH;
     const farthestComposed = Math.max(...composed);
     expect(farthestComposed).toBeLessThan(seam + ROLL_ROWS / 4);
+  });
+
+  it("shows a far look in its shares rather than its commonest colour alone, so the lip keeps the field's shade", () => {
+    // Half dark, half light, under a mid-grey haze: at most half-way to the
+    // haze, a dark pixel stays dark and a light one light.
+    const look: CellLook = {
+      tile: () => MEADOW,
+      tuft: () => null,
+      far: () => farLook(new Map([[0x000000, 1], [0xffffff, 1]])),
+    };
+    const width = 320;
+    const rgba = rollGroundPixels({ ...FRAME, footX: 160 }, width, look, { r: 128, g: 128, b: 128 });
+    const reds = Array.from({ length: width }, (_unused, x) => pixelAt(rgba, x, 0, width)[0] ?? 0);
+    expect(reds.filter((red) => red < 100).length).toBeGreaterThan(width * 0.35);
+    expect(reds.filter((red) => red > 160).length).toBeGreaterThan(width * 0.35);
   });
 
   it("lays water over the tile where the lip's water says, and keeps the grass off it", () => {

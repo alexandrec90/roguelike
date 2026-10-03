@@ -144,7 +144,7 @@ describe("free movement", () => {
     const blocked = advancePlayer(createPlayer(START), north, FRAME_MS, WALLED);
     expect(blocked.player.motion).toBe("idle");
     expect(livePose(blocked.player, R)).toEqual(START);
-    expect(blocked.player.facing).toBe("north");
+    expect(blocked.player.facing).toBe(facingYaw("north"));
     expect(blocked.usedHeading).toBe(true);
   });
 
@@ -187,10 +187,10 @@ describe("the four directions", () => {
   });
 
   it("face the way they were pressed when nothing is aiming", () => {
-    expect(hold(north, 1).facing).toBe("north");
-    expect(hold(south, 1).facing).toBe("south");
-    expect(hold(east, 1).facing).toBe("east");
-    expect(hold(west, 1).facing).toBe("west");
+    expect(hold(north, 1).facing).toBe(facingYaw("north"));
+    expect(hold(south, 1).facing).toBe(facingYaw("south"));
+    expect(hold(east, 1).facing).toBe(facingYaw("east"));
+    expect(hold(west, 1).facing).toBe(facingYaw("west"));
   });
 });
 
@@ -249,7 +249,7 @@ describe("walking diagonally", () => {
 
   it("faces the diagonal it walks", () => {
     for (const heading of ["northeast", "northwest", "southeast", "southwest"] as const) {
-      expect(advancePlayer(createPlayer(START), walk(heading), FRAME_MS, OPEN).player.facing).toBe(heading);
+      expect(advancePlayer(createPlayer(START), walk(heading), FRAME_MS, OPEN).player.facing).toBe(facingYaw(heading));
     }
   });
 });
@@ -272,8 +272,13 @@ describe("facingYaw", () => {
 
 describe("aiming", () => {
   it("faces the aim instead of the heading, so he can walk one way and look another", () => {
-    const tick = advancePlayer(createPlayer(START), { heading: "north", aim: "south", attack: false }, FRAME_MS, OPEN);
-    expect(tick.player.facing).toBe("south");
+    const tick = advancePlayer(
+      createPlayer(START),
+      { heading: "north", aim: facingYaw("south"), attack: false },
+      FRAME_MS,
+      OPEN,
+    );
+    expect(tick.player.facing).toBe(facingYaw("south"));
     // The legs do not care: he still walks north.
     expect(tick.player.motion).toBe("walk");
     expect(scrollPhase(tick.player).y).toBeGreaterThan(0);
@@ -281,24 +286,36 @@ describe("aiming", () => {
   });
 
   it("turns to the aim while standing still", () => {
-    const tick = advancePlayer(createPlayer(START), { aim: "northwest", attack: false }, FRAME_MS, OPEN);
-    expect(tick.player.facing).toBe("northwest");
+    const tick = advancePlayer(createPlayer(START), { aim: facingYaw("northwest"), attack: false }, FRAME_MS, OPEN);
+    expect(tick.player.facing).toBe(facingYaw("northwest"));
     expect(tick.player.motion).toBe("idle");
     expect(tick.usedHeading).toBe(false);
   });
 
+  it("faces any angle the aim names, not the nearest of eight", () => {
+    const between = (facingYaw("south") + facingYaw("southeast")) / 2;
+    const tick = advancePlayer(createPlayer(START), { heading: "north", aim: between, attack: false }, 16, OPEN);
+    expect(tick.player.facing).toBe(between);
+  });
+
   it("keeps facing the aim for the whole of a held walk", () => {
-    expect(hold({ heading: "south", aim: "north", attack: false }, 3).facing).toBe("north");
+    const backpedal: Intent = { heading: "south", aim: facingYaw("north"), attack: false };
+    expect(hold(backpedal, 3).facing).toBe(facingYaw("north"));
   });
 
   it("keeps the last facing when neither aim nor heading says anything", () => {
-    const aimed = advancePlayer(createPlayer(START), { aim: "east", attack: false }, 0, OPEN);
-    expect(advancePlayer(aimed.player, NOTHING, FRAME_MS, OPEN).player.facing).toBe("east");
+    const aimed = advancePlayer(createPlayer(START), { aim: facingYaw("east"), attack: false }, 0, OPEN);
+    expect(advancePlayer(aimed.player, NOTHING, FRAME_MS, OPEN).player.facing).toBe(facingYaw("east"));
   });
 
   it("faces the aim when walking into rock, not the rock", () => {
-    const blocked = advancePlayer(createPlayer(START), { heading: "north", aim: "west", attack: false }, 0, WALLED);
-    expect(blocked.player.facing).toBe("west");
+    const blocked = advancePlayer(
+      createPlayer(START),
+      { heading: "north", aim: facingYaw("west"), attack: false },
+      0,
+      WALLED,
+    );
+    expect(blocked.player.facing).toBe(facingYaw("west"));
     expect(blocked.usedHeading).toBe(true);
   });
 });
@@ -306,7 +323,7 @@ describe("aiming", () => {
 describe("facing", () => {
   it("turns the instant the input arrives", () => {
     const walking = run(createPlayer(START), east, 3);
-    expect(advancePlayer(walking, north, FRAME_MS, OPEN).player.facing).toBe("north");
+    expect(advancePlayer(walking, north, FRAME_MS, OPEN).player.facing).toBe(facingYaw("north"));
   });
 });
 
@@ -469,7 +486,7 @@ describe("attacking while moving", () => {
     expect(tick.attacked).toBe(true);
     expect(tick.player.attackMs).toBe(0);
     expect(tick.player.motion).toBe("walk");
-    expect(tick.player.facing).toBe("north");
+    expect(tick.player.facing).toBe(facingYaw("north"));
     expect(tick.usedHeading).toBe(true);
   });
 

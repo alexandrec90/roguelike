@@ -24,6 +24,7 @@ import { LANDFORM_VERTEX_SHADER } from "./gpu/landform-glsl";
 import { LIP_FRAGMENT_SHADER } from "./gpu/lip-shader";
 import {
   CellTable,
+  farLookTexels,
   lineTable,
   lipLines,
   MAX_LINES,
@@ -40,6 +41,7 @@ import {
 } from "./lip-gpu-data";
 import { uniqueKey } from "./pixel-surface";
 import { HORIZON_DEPTH } from "./projection";
+import { FAR_LEVELS, type FarLook } from "./roll-far";
 import type { LipState } from "./roll-ground-state";
 import { MAX_WATER_ALPHAS, WATER_ALPHAS, type LipWater } from "./roll-water";
 
@@ -80,8 +82,8 @@ export class LipGpu {
   private values: Record<string, unknown> = {};
 
   /**
-   * `far` is the packed colour of each terrain code seen from too far to point
-   * sample: grass, then dirt.
+   * `far` is what each terrain code looks like from too far to point sample:
+   * grass, then dirt.
    */
   constructor(
     scene: Phaser.Scene,
@@ -89,7 +91,7 @@ export class LipGpu {
     frame: CameraFrame,
     private readonly lipBounds: LocalBounds,
     private readonly grassBounds: LocalBounds,
-    private readonly far: readonly [number, number],
+    far: readonly [FarLook, FarLook],
   ) {
     const blankCells = new CellTable(lipBounds);
     const blankTufts = new TuftTable(grassBounds);
@@ -100,12 +102,15 @@ export class LipGpu {
     const grass = tuftAtlas();
     const atlas = new FloatTexture(scene, uniqueKey("lip-tuft-atlas"), grass.width, grass.height, "byte");
     atlas.write(0, 0, grass.width, grass.height, grass.data);
+    const farLooks = new FloatTexture(scene, uniqueKey("lip-far-looks"), FAR_LEVELS, far.length, "byte");
+    farLooks.write(0, 0, FAR_LEVELS, far.length, farLookTexels(far));
     const samplers: Readonly<Record<string, string>> = {
       u_lines: this.lines.key,
       u_cells: this.cells.key,
       u_pages: this.pages.key,
       u_tufts: this.tufts.key,
       u_tuftAtlas: atlas.key,
+      u_farLooks: farLooks.key,
     };
     const names = Object.keys(samplers);
     this.pass = scene.add.shader(
@@ -153,14 +158,12 @@ export class LipGpu {
     this.upload(tables);
     this.lines.write(0, 0, MAX_LINES, 2, lineTable(lipLines(ctx.frame, shift)));
     this.alphas.set(WATER_ALPHAS.slice(0, MAX_WATER_ALPHAS));
-    const colour = (packed: number): number[] => [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff];
     this.values = {
       u_size: [this.width, ctx.frame.rollHeight],
       u_frame: [ctx.frame.footX, shift.x],
       u_cellBounds: [this.lipBounds.minX, this.lipBounds.minY, tables.cells.width, tables.cells.height],
       u_tuftBounds: [this.grassBounds.minX, this.grassBounds.minY, this.grassBounds.maxX, this.grassBounds.maxY],
       u_pageColumns: PAGE_COLUMNS,
-      "u_far[0]": new Float32Array([...colour(this.far[0]), ...colour(this.far[1])]),
       u_haze: [haze.r, haze.g, haze.b],
       "u_alphas[0]": this.alphas,
     };

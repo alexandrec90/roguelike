@@ -6,7 +6,8 @@
  * Phaser-free and deterministic, so it is testable and the lab could drive it;
  * `hero-layer.ts` only paints what this returns. It owns the few pieces of
  * presentation state that have memory — the particle pool, the scarf chain,
- * where the blade was last frame — and none of them can reach back into the
+ * where the blade was last frame, how far round the drawn turn has swept — and
+ * none of them can reach back into the
  * simulation: a flame never decides whether a blow landed.
  */
 
@@ -15,7 +16,7 @@ import type { PixelCloud } from "../ink";
 import type { LightSource } from "../lights";
 import { BLADE_SPAN, CAST, HERO_EQUIPPED, WALK } from "../models";
 import { solveModel, type SolvedPose } from "../rig";
-import { facingYaw, walkClipMs, type PlayerState } from "../player";
+import { walkClipMs, type PlayerState } from "../player";
 import { TILE_DEPTH, TILE_WIDTH } from "../projection";
 import { windAt, type WindOptions } from "../wind";
 import {
@@ -31,6 +32,7 @@ import { heroShadow, type ShadowLight } from "./hero-shadow";
 import { boneSpan } from "./rig-volume";
 import { createScarf, scarfPrims, settleScarf, stepScarf, type Scarf } from "./scarf";
 import { trailCloud, trailSegments } from "./swing-trail";
+import { easeYaw } from "./turn";
 
 export interface LookInput {
   readonly player: PlayerState;
@@ -64,6 +66,8 @@ export class HeroLook {
   private readonly scarf: Scarf;
   private settled = false;
   private lastBlade: BladeSegment | undefined;
+  /** The rig's drawn yaw, chasing `player.facing`; unset until the first frame. */
+  private yaw: number | undefined;
 
   constructor(seed = 0x4e50) {
     this.pool = createPool(180, seed);
@@ -89,8 +93,9 @@ export class HeroLook {
     const { player } = input;
     const pose = layeredPose(tracksOf(player, input.elapsedMs));
     // Turned, not mirrored: the eyes slide round the head with the turn itself,
-    // so there is no separate gaze to add.
-    const orient = { yaw: facingYaw(player.facing) };
+    // so there is no separate gaze to add. Swept rather than cut (`turn.ts`).
+    this.yaw = easeYaw(this.yaw ?? player.facing, player.facing, input.deltaMs);
+    const orient = { yaw: this.yaw };
     const skeleton = solveModel(HERO_EQUIPPED, pose, orient);
     this.stepScarf(skeleton, input);
 
