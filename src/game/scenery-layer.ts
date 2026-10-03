@@ -217,8 +217,8 @@ function show(
     image.setVisible(false);
     return;
   }
-  if (image.texture.key !== baked.key) {
-    image.setTexture(baked.key);
+  if (image.texture.key !== baked.key || (baked.frame !== undefined && image.frame.name !== baked.frame)) {
+    image.setTexture(baked.key, baked.frame);
   }
   image
     .setPosition(footX - baked.originX, footY - baked.originY)

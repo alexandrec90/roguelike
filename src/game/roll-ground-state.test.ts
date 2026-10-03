@@ -61,6 +61,31 @@ describe("LipState", () => {
     expect([...draw(lip)]).toEqual([...first]);
   });
 
+  it("hands the GPU each cell's tufts at the bends the CPU stamps them at", () => {
+    const lip = state();
+    const seam = Math.floor((FRAME.footY - FRAME.groundTop) / TILE_DEPTH);
+    let checked = 0;
+    for (let cellY = seam; cellY <= LIVE_MAX_Y + 2; cellY += 1) {
+      for (let cellX = -3; cellX <= 3; cellX += 1) {
+        const pieces = lip.look(DRY, LIVE_MAX_Y, CTX).tuft(cellX, cellY) ?? [];
+        const entries = lip.tuftEntries(cellX, cellY, LIVE_MAX_Y, CTX);
+        expect(entries).toHaveLength(pieces.length);
+        entries.forEach((entry, index) => {
+          const shape = Math.floor(entry.frame / 7);
+          const bend = entry.frame % 7;
+          expect(ART.tuft(shape, bend)).toEqual(pieces[index]?.cloud);
+          expect(entry.dx - 8).toBe(pieces[index]?.x);
+          expect(entry.dy - 12).toBe(pieces[index]?.y);
+          checked += 1;
+        });
+      }
+    }
+    expect(checked).toBeGreaterThan(10);
+    // Without a frame, every row stands upright.
+    const upright = lip.tuftEntries(0, seam, LIVE_MAX_Y).map((entry) => entry.frame % 7);
+    expect(upright.every((bend) => bend === 3)).toBe(true);
+  });
+
   it("holds the far rows upright whatever the wind: only the near rows are given the frame", () => {
     const calm = state();
     const blown = state();

@@ -6,7 +6,7 @@ import { InlineBaker, routeIndex, WorkerBaker, workerCount } from "./scenery-bak
 
 const LIGHT = quantizeLight({ x: -0.6, y: -0.8 }, 0.7);
 const OAK_LEAN: BakeJob = { kind: "lean", species: "oak-recursive", seed: 11, light: LIGHT, lean: 3 };
-const OAK_FAR: BakeJob = { kind: "scale", species: "oak-recursive", seed: 11, light: LIGHT, scale: 0.3 };
+const OAK_FAR: BakeJob = { kind: "ladder", species: "oak-recursive", seed: 11, light: LIGHT, scales: [0.3] };
 
 /** A stand-in worker: records what it was sent and answers when told to. */
 class FakeWorker {
@@ -34,7 +34,8 @@ describe("the inline baker", () => {
     expect(baker.outstanding()).toBe(2);
     const done = baker.collect(0);
     expect(done.map((entry) => entry.ticket)).toEqual([first]);
-    expect(done[0]?.result?.body.buffer.width).toBeGreaterThan(0);
+    const result = done[0]?.result;
+    expect(result?.kind === "lean" && result.body.buffer.width).toBeGreaterThan(0);
     expect(baker.outstanding()).toBe(1);
   });
 
@@ -84,9 +85,11 @@ describe("routeIndex", () => {
 });
 
 describe("workerCount", () => {
-  it("leaves the frame a core, starts at least one and at most four", () => {
-    expect(workerCount(8)).toBe(4);
-    expect(workerCount(4)).toBe(3);
+  it("leaves the frame a physical core and its twin, starts at least one and at most two", () => {
+    expect(workerCount(16)).toBe(2);
+    expect(workerCount(8)).toBe(2);
+    expect(workerCount(6)).toBe(2);
+    expect(workerCount(4)).toBe(1);
     expect(workerCount(1)).toBe(1);
     expect(workerCount(undefined)).toBe(1);
   });

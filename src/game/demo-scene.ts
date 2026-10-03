@@ -46,8 +46,13 @@ const CAMPFIRE_AT: PlanetPoint = { x: 131, y: 129 };
 
 const STORM_SEED = 0x51a7;
 
-/** Milliseconds of the next anchor's work a frame may do ahead, beyond the first task. */
-const PREFETCH_BUDGET_MS = 1.5;
+/**
+ * Milliseconds of the next anchor's work a frame may do ahead, beyond the first
+ * task. A diagonal crosses an anchor every seven or eight frames and the work
+ * for one is ~8 ms; with a walking frame at ~5 ms there is room to finish it in
+ * three or four, many small tasks rather than a few big ones.
+ */
+const PREFETCH_BUDGET_MS = 2.5;
 
 /** Longest the first frame is held for scenery, ms, and how long it then fades in. */
 const REVEAL_CAP_MS = 4000;
@@ -116,14 +121,15 @@ export class DemoScene extends Phaser.Scene {
     this.layout = horizonLayout(HEIGHT, this.skyFraction);
     this.relayout();
 
+    // Per-pixel layers run on the GPU where WebGL2 is there, on the CPU otherwise.
+    const gpu = this.renderPath === "gpu" && hasWebGL2(this);
     this.sky.create(this, this.layout, WIDTH);
-    this.rollGround.create(this, this.frame(), WIDTH, this.bounds);
+    this.rollGround.create(this, this.frame(), WIDTH, this.bounds, gpu);
     this.hero.create(this, this.layout.groundTop, this.anchor);
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
     this.scenery.create(this, this.bounds, WIDTH);
-    // The march per pixel on the GPU where WebGL2 is there, per column on the CPU otherwise.
-    this.landforms = this.renderPath === "gpu" && hasWebGL2(this) ? new LandformGpuLayer() : new LandformLayer();
+    this.landforms = gpu ? new LandformGpuLayer() : new LandformLayer();
     this.landforms.create(this, WIDTH, HEIGHT, heroHeight());
     this.encounter.create(this, WIDTH, HEIGHT, openGround(CAMPFIRE_AT));
     // Burnt ground has no grass on it until it greens over again.

@@ -105,9 +105,19 @@ export function routeIndex(route: string, count: number): number {
   return (hash >>> 0) % Math.max(1, count);
 }
 
-/** Bake workers to start: one fewer than the cores, so the frame keeps one, and at most four. */
+/**
+ * Bake workers to start: half the logical cores less one, at least one and at
+ * most two.
+ *
+ * Logical cores are mostly hyperthreads, two to a physical core, and a worker
+ * on the frame's twin slows the frame as surely as one on its own core. Four
+ * workers on a four-core HD 530 machine ran flat out for the first minute of
+ * every walk and took a share of every frame with them; with each body's
+ * horizon scales baked as one ladder there is a tenth of the work, and two
+ * workers clear it.
+ */
 export function workerCount(cores: number | undefined): number {
-  return Math.min(4, Math.max(1, (cores ?? 2) - 1));
+  return Math.min(2, Math.max(1, Math.floor((cores ?? 2) / 2) - 1));
 }
 
 /** Workers when the platform has them, inline otherwise. */

@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { CameraFrame } from "./camera";
 import { toLocal, type PlanetPose } from "./planet";
 import { puddlesNear } from "./terrain";
-import { growPuddles } from "./water-layer";
+import { createMask, fillMask, maskRows } from "./water/mask";
+import { growPuddles, joinRows } from "./water-layer";
 
 const FRAME: CameraFrame = { groundTop: 40, rollHeight: 24, footX: 160, footY: 113, phaseX: 0, phaseY: 0 };
 const POSE: PlanetPose = { x: 124, y: 80, turn: 0.4 };
@@ -37,11 +38,33 @@ describe("growPuddles", () => {
     expect(far.every((puddle) => FRAME.footY - puddle.centerY > 19 * 12)).toBe(true);
   });
 
+  it("fills a mask whose wet rows bound every puddle's water", () => {
+    const puddles = growPuddles(FRAME, POSE, 20, 1);
+    const mask = createMask(320, 180, 20);
+    fillMask(mask, puddles);
+    const rows = maskRows(mask)!;
+    const ys = puddles
+      .flatMap((puddle) => puddle.water.map((pixel) => pixel.y + mask.margin))
+      .filter((y) => y >= 0 && y < mask.height);
+    expect(rows.from).toBe(Math.min(...ys));
+    expect(rows.to).toBe(Math.max(...ys) + 1);
+    expect(maskRows(createMask(10, 10, 0))).toBeUndefined();
+  });
+
   it("swells every puddle with the wet weather's scale", () => {
     const dry = growPuddles(FRAME, POSE, 20, 1);
     const wet = growPuddles(FRAME, POSE, 20, 1.5);
     expect(wet.reduce((sum, puddle) => sum + puddle.water.length, 0)).toBeGreaterThan(
       dry.reduce((sum, puddle) => sum + puddle.water.length, 0),
     );
+  });
+});
+
+describe("joinRows", () => {
+  it("spans both bands, keeps one when the other is missing, and is empty with neither", () => {
+    expect(joinRows({ from: 10, to: 20 }, { from: 15, to: 40 })).toEqual({ from: 10, to: 40 });
+    expect(joinRows(undefined, { from: 3, to: 4 })).toEqual({ from: 3, to: 4 });
+    expect(joinRows({ from: 3, to: 4 }, undefined)).toEqual({ from: 3, to: 4 });
+    expect(joinRows(undefined, undefined)).toEqual({ from: 0, to: 0 });
   });
 });

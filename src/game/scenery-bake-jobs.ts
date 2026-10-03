@@ -12,10 +12,14 @@
 
 import type { BakedCloud } from "./pixel-buffer";
 import type { SceneryInstance } from "./scenery";
-import { bakePose, bakeScaled, settleAt, WIND_LEVELS, type BakeLight } from "./scenery-bake";
+import { bakeLadder, bakePose, settleAt, WIND_LEVELS, type BakeLight } from "./scenery-bake";
 import { findSpecies } from "./trees";
 
-/** One body at one lean, or re-sampled at one horizon scale, in one light. */
+/**
+ * One body at one lean, or re-sampled at every horizon scale it is drawn at,
+ * in one light. The scales go as one job because posing the body is most of
+ * the cost and each scale after it is only a re-sample.
+ */
 export type BakeJob =
   | {
       readonly kind: "lean";
@@ -25,18 +29,20 @@ export type BakeJob =
       readonly lean: number;
     }
   | {
-      readonly kind: "scale";
+      readonly kind: "ladder";
       readonly species: string;
       readonly seed: number;
       readonly light: BakeLight;
-      readonly scale: number;
+      readonly scales: readonly number[];
     };
 
-/** The pixels a job made: a body, and the shadow it casts (none on the roll). */
-export interface BakeResult {
-  readonly body: BakedCloud;
-  readonly shadow: BakedCloud | null;
-}
+/**
+ * The pixels a job made: a body and the shadow it casts, or a ladder of the
+ * body at each scale asked for, in order (none casts a shadow on the roll).
+ */
+export type BakeResult =
+  | { readonly kind: "lean"; readonly body: BakedCloud; readonly shadow: BakedCloud | null }
+  | { readonly kind: "ladder"; readonly frames: readonly BakedCloud[] };
 
 /** Whether a species sways at all, and so is baked at every lean or at one. */
 export function speciesSways(species: string, seed: number): boolean {
@@ -59,12 +65,12 @@ export class BakeBench {
     if (instance === undefined) {
       return null;
     }
-    if (job.kind === "scale") {
-      return { body: bakeScaled(instance, job.light, job.scale), shadow: null };
+    if (job.kind === "ladder") {
+      return { kind: "ladder", frames: bakeLadder(instance, job.light, job.scales) };
     }
     const wind = instance.step === undefined ? 0 : (WIND_LEVELS[job.lean] ?? 0);
     settleAt(instance, wind, job.light);
-    return bakePose(instance, job.light, wind);
+    return { kind: "lean", ...bakePose(instance, job.light, wind) };
   }
 
   private instance(species: string, seed: number): SceneryInstance | undefined {
@@ -85,6 +91,9 @@ export class BakeBench {
 export function transferables(result: BakeResult | null): ArrayBuffer[] {
   if (result === null) {
     return [];
+  }
+  if (result.kind === "ladder") {
+    return result.frames.map((frame) => frame.buffer.data.buffer);
   }
   const owned = [result.body.buffer.data.buffer];
   if (result.shadow !== null) {

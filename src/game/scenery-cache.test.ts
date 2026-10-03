@@ -13,18 +13,9 @@ function fakeTextures(): { manager: Phaser.Textures.TextureManager; keys: Set<st
   const manager = {
     exists: (key: string) => keys.has(key),
     remove: (key: string) => keys.delete(key),
-    createCanvas: (key: string) => {
+    addUint8Array: (key: string) => {
       keys.add(key);
-      return {
-        getContext: () => ({
-          createImageData: (width: number, height: number) => ({
-            data: new Uint8ClampedArray(width * height * 4),
-          }),
-          putImageData: () => undefined,
-        }),
-        add: () => undefined,
-        refresh: () => undefined,
-      };
+      return { add: () => undefined };
     },
   };
   return { manager: manager as unknown as Phaser.Textures.TextureManager, keys };
@@ -106,15 +97,21 @@ describe("the scenery cache", () => {
     expect(cache.scaled(STONE, 0.3)).toBeDefined();
   });
 
-  it("shows a horizon body at the nearest scale it has while the exact one bakes", () => {
-    const { cache } = cacheWith();
-    cache.warm([OAK]);
+  it("bakes every horizon scale of a body as one ladder: one job, one texture, a frame per rung", () => {
+    const { cache, keys } = cacheWith();
+    expect(cache.scaled(OAK, 0.3)).toBeUndefined();
+    expect(cache.pending()).toBe(1);
+    const before = keys.size;
     drain(cache);
-    const near = cache.scaled(OAK, 0.3);
-    // 0.325 is a step `warm` did not ask for: the 0.3 bake stands in until it lands.
-    expect(cache.scaled(OAK, 0.325)).toEqual(near);
-    drain(cache);
-    expect(cache.scaled(OAK, 0.325)).not.toEqual(near);
+    expect(keys.size).toBe(before + 1);
+    const near = cache.scaled(OAK, 0.3)!;
+    const nearer = cache.scaled(OAK, 0.325)!;
+    expect(nearer.key).toBe(near.key);
+    expect(nearer.frame).not.toBe(near.frame);
+    // Every scale from a speck to full size is a rung; none asks for another bake.
+    expect(cache.scaled(OAK, 0.001)!.frame).toBe("0");
+    expect(cache.scaled(OAK, 0.999)!.key).toBe(near.key);
+    expect(cache.pending()).toBe(0);
   });
 
   it("keeps a horizon body on screen across a change of light", () => {

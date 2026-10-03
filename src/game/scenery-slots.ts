@@ -83,8 +83,20 @@ export function bodiesInView<T extends PlanetPoint>(
   return kept.sort((a, b) => a.distance - b.distance).map((entry) => entry.feature);
 }
 
+/**
+ * Keys already built, by feature object: the features come out of a chunk
+ * cache, so the same object is keyed every frame it is in view, and a string
+ * built per candidate per frame was a measurable share of the lend.
+ */
+const KEYS = new WeakMap<SlotKeyed, string>();
+
 export function keyOf(feature: SlotKeyed): string {
-  return `${feature.x},${feature.y}`;
+  let key = KEYS.get(feature);
+  if (key === undefined) {
+    key = `${feature.x},${feature.y}`;
+    KEYS.set(feature, key);
+  }
+  return key;
 }
 
 /** What a slot is asked to do this frame. */

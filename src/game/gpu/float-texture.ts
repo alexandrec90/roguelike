@@ -1,5 +1,7 @@
 /**
- * A float texture Phaser can hand to a `Shader`: data, not a picture.
+ * A float texture Phaser can hand to a `Shader`: data, not a picture. Or a
+ * byte texture on the same terms (`format: "byte"`), for data that fits in
+ * bytes - tile texels, codes - at a quarter of the upload.
  *
  * Phaser's texture wrapper only ever uploads bytes, so the texture is made
  * through it (keeping Phaser's own bookkeeping of what is bound where) and then
@@ -14,17 +16,22 @@
 
 import Phaser from "phaser";
 
+/** What a data texture holds per channel: a 32-bit float, or a byte read back as `value / 255`. */
+export type TexelFormat = "float" | "byte";
+
 export class FloatTexture {
   readonly key: string;
   readonly width: number;
   readonly height: number;
+  readonly format: TexelFormat;
   private readonly renderer: Phaser.Renderer.WebGL.WebGLRenderer;
   private readonly wrapper: Phaser.Renderer.WebGL.Wrappers.WebGLTextureWrapper;
 
-  constructor(scene: Phaser.Scene, key: string, width: number, height: number) {
+  constructor(scene: Phaser.Scene, key: string, width: number, height: number, format: TexelFormat = "float") {
     this.key = key;
     this.width = width;
     this.height = height;
+    this.format = format;
     this.renderer = scene.sys.renderer as Phaser.Renderer.WebGL.WebGLRenderer;
     const gl = this.renderer.gl as WebGL2RenderingContext;
     this.wrapper = this.renderer.createTexture2D(
@@ -69,15 +76,20 @@ export class FloatTexture {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, this.width, this.height);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, this.format === "float" ? gl.RGBA32F : gl.RGBA8, this.width, this.height);
     gl.deleteTexture(placeholder);
   }
 
-  /** Write a block of texels, four floats each, with its top-left at (x, y). */
-  write(x: number, y: number, width: number, height: number, data: Float32Array): void {
+  /**
+   * Write a block of texels, four channels each, with its top-left at (x, y):
+   * floats for a float texture, bytes for a byte one. `offset` is where in
+   * `data` the block starts, in elements.
+   */
+  write(x: number, y: number, width: number, height: number, data: Float32Array | Uint8Array, offset = 0): void {
     const gl = this.renderer.gl as WebGL2RenderingContext;
     this.bind();
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, gl.FLOAT, data, 0);
+    const type = this.format === "float" ? gl.FLOAT : gl.UNSIGNED_BYTE;
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, type, data, offset);
   }
 
   /**

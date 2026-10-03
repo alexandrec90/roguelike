@@ -24,7 +24,7 @@
 import type { InkId, PixelCloud } from "../ink";
 import { ditherThreshold } from "../shading";
 import type { Puddle } from "../puddles";
-import { pairInk, REFLECTION_BANDS, type SkyReflection } from "./sky-inks";
+import { pairInk, reflectionKey, REFLECTION_BANDS, type SkyReflection } from "./sky-inks";
 
 /** Damp ground around the water. Sheer, so it darkens the grass rather than hiding it. */
 export const WET_INK: InkId = "shadow-soft";
@@ -78,8 +78,46 @@ function wetRing(puddle: Puddle, holds: (x: number, y: number) => boolean): Pixe
  * dither cells (twelve pixels forward, sixteen across), so the field and the
  * horizon lip re-grow the same bodies step after step.
  */
-const BODIES = new WeakMap<SkyReflection, Map<string, PixelCloud>>();
-const BODY_LIMIT = 256;
+const BODIES = new Map<string, Map<string, PixelCloud>>();
+
+/**
+ * Keyed by what the sky *paints* (`reflectionKey`), not by the sky object: a
+ * new object is made every twentieth of an hour as the light moves on, and
+ * keying by it threw every body away that often - the lip's few dozen at once,
+ * a 14 ms frame - while the water looked no different.
+ */
+const SKY_KEYS = new WeakMap<SkyReflection, string>();
+const SKY_LIMIT = 4;
+
+function bodiesFor(sky: SkyReflection): Map<string, PixelCloud> {
+  let key = SKY_KEYS.get(sky);
+  if (key === undefined) {
+    key = reflectionKey(sky);
+    SKY_KEYS.set(sky, key);
+  }
+  let bodies = BODIES.get(key);
+  if (bodies === undefined) {
+    if (BODIES.size >= SKY_LIMIT) {
+      const oldest = BODIES.keys().next();
+      if (oldest.done !== true) {
+        BODIES.delete(oldest.value);
+      }
+    }
+    bodies = new Map();
+    BODIES.set(key, bodies);
+  }
+  return bodies;
+}
+
+/**
+ * Bodies kept per sky, and how many go when it is full - the oldest. A puddle
+ * has up to sixteen bodies, one per dither phase of its centre, and a walk that
+ * turns the world visits most of them: the lip's few dozen puddles overran a
+ * cache of 256 that was emptied whole when full, so every crossing re-painted
+ * them all.
+ */
+const BODY_LIMIT = 1024;
+const BODY_EVICT = 256;
 
 /**
  * The whole still surface, absolute screen pixels, wet ring first so the water
@@ -100,17 +138,16 @@ export function puddleBody(puddle: Puddle, sky: SkyReflection): PixelCloud {
  */
 export function relativeBody(puddle: Puddle, sky: SkyReflection): PixelCloud {
   const { centerX, centerY } = puddle;
-  let bodies = BODIES.get(sky);
-  if (bodies === undefined) {
-    bodies = new Map();
-    BODIES.set(sky, bodies);
-  }
+  const bodies = bodiesFor(sky);
   const key = `${puddle.radiusX}:${puddle.seed}:${centerX & 3}:${centerY & 3}:${puddle.water.length}`;
   let relative = bodies.get(key);
   if (relative === undefined) {
     relative = paintBody(puddle, sky).map((pixel) => ({ ...pixel, x: pixel.x - centerX, y: pixel.y - centerY }));
     if (bodies.size >= BODY_LIMIT) {
-      bodies.clear();
+      const oldest = [...bodies.keys()].slice(0, BODY_EVICT);
+      for (const stale of oldest) {
+        bodies.delete(stale);
+      }
     }
     bodies.set(key, relative);
   }

@@ -6,13 +6,20 @@
  * of the full-colour scene spent a third of every frame there. This is the
  * replacement for anything big or baked:
  *
- * - `PixelSurface` is a per-frame canvas: clear it, paint clouds into its
+ * - `PixelSurface` is a per-frame texture: clear it, paint clouds into its
  *   buffer, `commit()` once, and the whole thing reaches the GPU as one texture
  *   upload and one quad. The hero, the slimes and the effects draw this way.
- * - `installStrip` bakes a run of poses of one thing into one texture with a
- *   frame per pose, once. Scenery, grass and ground tiles draw this way — the
- *   work happens at load (or the first time a body is seen) and each frame
- *   afterwards is just choosing a frame.
+ * - `installStrip` / `installFrames` bake a run of pictures of one thing into
+ *   one texture with a frame per picture, once. Scenery, grass and ground tiles
+ *   draw this way — the work happens at load (or the first time a body is
+ *   seen) and each frame afterwards is just choosing a frame.
+ *
+ * **Bytes go straight to the GPU.** These used to be canvas textures: a commit
+ * copied the buffer into a 2D canvas with `putImageData` and Phaser then
+ * uploaded the canvas - two copies, and the first through the 2D canvas's own
+ * pixel conversion. Measured on the HD 530 that was ~0.7 ms a frame across the
+ * dozen surfaces a scene keeps. A buffer is now a `Uint8Array` texture, uploaded
+ * from the buffer itself, premultiplied on the way up exactly as a canvas was.
  */
 
 import type Phaser from "phaser";
@@ -28,22 +35,38 @@ export function uniqueKey(prefix: string): string {
   return `${prefix}-${surfaceCount}`;
 }
 
+/** A buffer's bytes as the `Uint8Array` Phaser uploads directly - the same memory, not a copy. */
+function bytesOf(data: Uint8ClampedArray<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(data.buffer, data.byteOffset, data.length);
+}
+
+/** Make a byte texture with no frames but its base, or throw. */
+function addBytes(
+  textures: Phaser.Textures.TextureManager,
+  key: string,
+  bytes: Uint8Array<ArrayBuffer>,
+  width: number,
+  height: number,
+): Phaser.Textures.Texture {
+  const texture = textures.addUint8Array(key, bytes, width, height);
+  if (texture === null) {
+    throw new Error(`Could not create texture '${key}'`);
+  }
+  return texture;
+}
+
 export class PixelSurface {
   readonly image: Phaser.GameObjects.Image;
   readonly buffer: PixelBuffer;
-  private readonly texture: Phaser.Textures.CanvasTexture;
-  private readonly imageData: ImageData;
+  private readonly texture: Phaser.Textures.Texture;
+  private readonly bytes: Uint8Array<ArrayBuffer>;
   private dirty = false;
 
   constructor(scene: Phaser.Scene, width: number, height: number, prefix = "surface") {
     const key = uniqueKey(prefix);
-    const texture = scene.textures.createCanvas(key, width, height);
-    if (texture === null) {
-      throw new Error(`Could not create surface texture '${key}'`);
-    }
-    this.texture = texture;
     this.buffer = createBuffer(width, height);
-    this.imageData = texture.getContext().createImageData(width, height);
+    this.bytes = bytesOf(this.buffer.data);
+    this.texture = addBytes(scene.textures, key, this.bytes, width, height);
     this.image = scene.add.image(0, 0, key).setOrigin(0, 0);
   }
 
@@ -74,22 +97,119 @@ export class PixelSurface {
     return this;
   }
 
-  /** Upload what was painted. One texture upload, however many clouds went in. */
-  commit(): this {
+  /** Clear only buffer rows `from..to` (exclusive), for a surface whose drawing keeps to a band. */
+  clearRows(from: number, to: number): this {
+    const first = Math.max(0, from);
+    const last = Math.min(this.height, to);
+    if (last > first) {
+      this.buffer.data.fill(0, first * this.width * 4, last * this.width * 4);
+      this.dirty = true;
+    }
+    return this;
+  }
+
+  /**
+   * Upload what was painted. One texture upload, however many clouds went in;
+   * with `rows`, only that band of rows (`to` exclusive) - the water surface
+   * covers the screen and changes only where the puddles are.
+   */
+  commit(rows?: { readonly from: number; readonly to: number }): this {
     if (!this.dirty) {
       return this;
     }
-    this.imageData.data.set(this.buffer.data);
-    this.texture.getContext().putImageData(this.imageData, 0, 0);
-    this.texture.refresh();
+    const wrapper = this.texture.source[0]?.glTexture;
+    if (wrapper !== null && wrapper !== undefined) {
+      if (rows === undefined) {
+        wrapper.update(this.bytes, this.width, this.height, wrapper.flipY, wrapper.wrapS, wrapper.wrapT, wrapper.minFilter, wrapper.magFilter, wrapper.format);
+      } else {
+        this.uploadRows(wrapper, Math.max(0, rows.from), Math.min(this.height, rows.to));
+      }
+    }
     this.dirty = false;
     return this;
+  }
+
+  /**
+   * Re-upload buffer rows `from..to` in place. The texture was made flipped
+   * (`flipY`, as Phaser makes every texture), so the band lands at GL row
+   * `height - to` and the driver flips it on the way up, exactly as a whole
+   * upload would have placed those rows.
+   */
+  private uploadRows(wrapper: Phaser.Renderer.WebGL.Wrappers.WebGLTextureWrapper, from: number, to: number): void {
+    if (to <= from) {
+      return;
+    }
+    const renderer = wrapper.renderer;
+    const gl = renderer.gl as WebGL2RenderingContext;
+    renderer.glTextureUnits.bind(wrapper, 0, true, true);
+    renderer.glWrapper.updateTexturing({ texturing: { flipY: wrapper.flipY, premultiplyAlpha: wrapper.pma } });
+    const y = wrapper.flipY ? this.height - to : from;
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y, this.width, to - from, gl.RGBA, gl.UNSIGNED_BYTE, this.bytes, from * this.width * 4);
   }
 
   destroy(): void {
     this.image.destroy();
     this.texture.destroy();
   }
+}
+
+/** Where each picture landed in a packed set. */
+export interface PackedFrame {
+  readonly x: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Pictures laid side by side in one RGBA block, top-aligned; an empty one keeps a transparent pixel. */
+export interface PackedFrames {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array<ArrayBuffer>;
+  readonly frames: readonly PackedFrame[];
+}
+
+/** Lay `buffers` out in a row, each at the right of the last. Pure. */
+export function packFrames(buffers: readonly PixelBuffer[]): PackedFrames {
+  const frames: PackedFrame[] = [];
+  let width = 0;
+  let height = 1;
+  for (const buffer of buffers) {
+    const frame = { x: width, width: Math.max(buffer.width, 1), height: Math.max(buffer.height, 1) };
+    frames.push(frame);
+    width += frame.width;
+    height = Math.max(height, frame.height);
+  }
+  const data = new Uint8Array(new ArrayBuffer(Math.max(width, 1) * height * 4));
+  buffers.forEach((buffer, index) => {
+    const left = frames[index]?.x ?? 0;
+    for (let row = 0; row < buffer.height; row += 1) {
+      const from = row * buffer.width * 4;
+      data.set(buffer.data.subarray(from, from + buffer.width * 4), (row * width + left) * 4);
+    }
+  });
+  return { width: Math.max(width, 1), height, data, frames };
+}
+
+/**
+ * Install buffers of any sizes as one texture, side by side, one frame each,
+ * named "0".."n-1". One upload and one texture for a whole set - a body's
+ * horizon ladder is forty pictures, and forty textures each was two thousand
+ * across a wood. Returns false when the key already exists.
+ */
+export function installFrames(
+  textures: Phaser.Textures.TextureManager,
+  key: string,
+  buffers: readonly PixelBuffer[],
+): boolean {
+  if (textures.exists(key) || buffers.length === 0) {
+    return false;
+  }
+  const packed = packFrames(buffers);
+  const texture = addBytes(textures, key, packed.data, packed.width, packed.height);
+  packed.frames.forEach((frame, index) => {
+    texture.add(String(index), 0, frame.x, 0, frame.width, frame.height);
+  });
+  return true;
 }
 
 /**
@@ -104,27 +224,12 @@ export function installStrip(
   frames: readonly PixelBuffer[],
 ): boolean {
   const first = frames[0];
-  if (textures.exists(key) || first === undefined) {
-    return false;
-  }
-  const width = first.width;
-  const height = first.height;
-  const canvas = textures.createCanvas(key, width * frames.length, height);
-  if (canvas === null) {
-    throw new Error(`Could not create strip texture '${key}'`);
-  }
-  const context = canvas.getContext();
   frames.forEach((frame, index) => {
-    if (frame.width !== width || frame.height !== height) {
-      throw new Error(`Strip '${key}' frame ${index} is ${frame.width}x${frame.height}; expected ${width}x${height}`);
+    if (first !== undefined && (frame.width !== first.width || frame.height !== first.height)) {
+      throw new Error(`Strip '${key}' frame ${index} is ${frame.width}x${frame.height}; expected ${first.width}x${first.height}`);
     }
-    const image = context.createImageData(width, height);
-    image.data.set(frame.data);
-    context.putImageData(image, index * width, 0);
-    canvas.add(String(index), 0, index * width, 0, width, height);
   });
-  canvas.refresh();
-  return true;
+  return installFrames(textures, key, frames);
 }
 
 /** Install a single buffer as a texture. */

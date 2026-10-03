@@ -17,6 +17,7 @@ import { swayBend, tuftsInCell, type TuftPlacement } from "./ground/tuft-placeme
 import { bendFrame } from "./ground/tufts";
 import { localFrame, type PlanetPoint, type PlanetPose } from "./planet";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
+import { tuftAtlasFrame, type TuftEntry } from "./lip-gpu-data";
 import type { CellLook, TileTexels, WaterLook } from "./roll-ground";
 import { TuftOverlay, type PackedCloud, type TuftPiece } from "./roll-grass";
 import { windAt } from "./wind";
@@ -78,12 +79,40 @@ export class LipState {
     };
   }
 
+  /** A cell's tile, for the GPU lip's page atlas (`lip-gpu-data.ts`). */
+  tileAt(cellX: number, cellY: number): TileTexels {
+    return this.cell(cellX, cellY).tile;
+  }
+
+  /**
+   * A cell's tufts as the GPU lip's tuft table holds them: each a frame of the
+   * tuft atlas and its root in the cell. Rows up to `liveMaxY` bend in `ctx`'s
+   * wind exactly as `swaying` bends them; without a `ctx`, and past it, upright.
+   */
+  tuftEntries(cellX: number, cellY: number, liveMaxY: number, ctx?: FrameContext): TuftEntry[] {
+    const cell = this.cell(cellX, cellY);
+    const first = cell.tufts[0]?.placement;
+    if (first === undefined) {
+      return [];
+    }
+    const live = ctx !== undefined && cellY <= liveMaxY ? ctx : undefined;
+    const gust = live === undefined ? 0 : windAt(live.elapsedMs, first.planetX * TILE_WIDTH, first.planetY * TILE_WIDTH, live.wind);
+    return cell.tufts.map(({ placement, dx, dy }) => ({
+      frame: tuftAtlasFrame(
+        placement.shape,
+        live === undefined ? bendFrame(0) : bendFrame(swayBend(placement, gust, live.elapsedMs)),
+      ),
+      dx,
+      dy,
+    }));
+  }
+
   /**
    * What a lip cell is made of, read off the planet at the cell's own sample
    * point - exactly `cellTerrain`'s answer, without the lattice round it. Out
    * of the lip's bounds is open grass.
    */
-  private terrainAt(cellX: number, cellY: number): TerrainCode {
+  terrainAt(cellX: number, cellY: number): TerrainCode {
     const { minX, maxX, minY, maxY } = this.bounds;
     if (cellX < minX || cellX > maxX || cellY < minY || cellY > maxY) {
       return GRASS;

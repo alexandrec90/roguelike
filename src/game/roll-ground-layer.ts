@@ -49,8 +49,10 @@ import {
 import { groundTile, unpackGroundKey } from "./ground/ground-tiles";
 import { TUFT_SHAPES, tuftCloud, tuftFrame } from "./ground/tufts";
 import { PixelSurface } from "./pixel-surface";
+import { LipGpu } from "./roll-ground-gpu";
 import type { PlanetPose } from "./planet";
 import { HORIZON_DEPTH, TILE_DEPTH } from "./projection";
+import type { Puddle } from "./puddles";
 import { gridTexels, lipBounds, rollGroundPixels, tileMode, type TileTexels } from "./roll-ground";
 import { packCloud, tuftBounds, type PackedCloud } from "./roll-grass";
 import { LipState, type LipArt } from "./roll-ground-state";
@@ -89,6 +91,11 @@ function farColour(code: TerrainCode): number {
 
 export class RollGroundLayer {
   private surface: PixelSurface | undefined;
+  /** The GPU lip, when the scene draws on the GPU; the CPU surface otherwise. */
+  private gpu: LipGpu | undefined;
+  private scene: Phaser.Scene | undefined;
+  private useGpu = false;
+  private frame: CameraFrame | undefined;
   private width = 0;
   private field: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
@@ -108,17 +115,21 @@ export class RollGroundLayer {
   private water: LipWater | undefined;
   private waterKey = "";
   private waterPose: PlanetPose | undefined;
-  /** The puddles grown ahead for the anchor the hero is walking into. */
+  /** The puddles grown ahead for the anchor the hero is walking into, and the water made of them. */
+  private aheadPuddles: { readonly pose: PlanetPose; readonly scale: number; readonly puddles: Puddle[] } | undefined;
   private aheadWater: { readonly pose: PlanetPose; readonly key: string; readonly water: LipWater } | undefined;
   private sky: SkyReflection | undefined;
   private atmosphereKey = "";
   /** The last frame's cost, ms - read it from the console when profiling. */
   lastFrameMs = 0;
 
-  create(scene: Phaser.Scene, frame: CameraFrame, width: number, field: LocalBounds): void {
+  /** `gpu` draws the lip in a shader (`roll-ground-gpu.ts`); the CPU paints it otherwise. */
+  create(scene: Phaser.Scene, frame: CameraFrame, width: number, field: LocalBounds, gpu = false): void {
     this.width = width;
+    this.scene = scene;
+    this.useGpu = gpu;
     this.layout(frame, field);
-    if (frame.rollHeight <= 0) {
+    if (frame.rollHeight <= 0 || gpu) {
       return;
     }
     this.surface = new PixelSurface(scene, width, frame.rollHeight, "roll-ground");
@@ -128,6 +139,7 @@ export class RollGroundLayer {
   /** Re-cut after a resize moved the anchor, and with it where the seam falls. */
   layout(frame: CameraFrame, field: LocalBounds): void {
     const flat = { ...frame, phaseX: 0, phaseY: 0 };
+    this.frame = flat;
     this.field = field;
     this.bounds = lipBounds(flat, this.width);
     this.grassBounds = tuftBounds(flat, this.width);
@@ -136,6 +148,13 @@ export class RollGroundLayer {
     this.ahead = undefined;
     this.water = undefined;
     this.aheadWater = undefined;
+    this.aheadPuddles = undefined;
+    // The GPU lip's tables are cut to these bounds: a new cut is a new lip.
+    this.gpu?.destroy();
+    this.gpu =
+      this.useGpu && this.scene !== undefined && flat.rollHeight > 0
+        ? new LipGpu(this.scene, this.width, flat, this.bounds, this.grassBounds, [farColour(GRASS), farColour(DIRT)])
+        : undefined;
   }
 
   /**
@@ -144,11 +163,17 @@ export class RollGroundLayer {
    * seam.
    */
   update(ctx: FrameContext, puddleScale = 1): void {
+    const started = performance.now();
+    if (this.gpu !== undefined) {
+      const state = this.stateFor(ctx.pose);
+      this.gpu.render(ctx, state, this.waterFor(ctx, puddleScale), this.liveMaxY, unlitHaze(ctx.atmosphere));
+      this.lastFrameMs = performance.now() - started;
+      return;
+    }
     const surface = this.surface;
     if (surface === undefined) {
       return;
     }
-    const started = performance.now();
     const state = this.stateFor(ctx.pose);
     // The swaying rows are stamped afresh; everything past them is still in.
     state.grass.forget(state.grass.bounds.minY, this.liveMaxY);
@@ -166,8 +191,21 @@ export class RollGroundLayer {
    * otherwise do from nothing.
    */
   prefetchTasks(ctx: FrameContext, pose: PlanetPose, scale: number): (() => void)[] {
-    if (this.surface === undefined || this.state?.pose === pose) {
+    if ((this.surface === undefined && this.gpu === undefined) || this.state?.pose === pose) {
       return [];
+    }
+    const gpu = this.gpu;
+    if (gpu !== undefined && this.frame !== undefined) {
+      return [
+        () => this.prefetchPuddles(ctx, pose, scale),
+        () => this.prefetchWater(ctx, pose, scale),
+        ...gpu.warmTasks(
+          this.aheadState(pose),
+          () => (this.aheadWater?.pose === pose ? this.aheadWater.water : undefined),
+          this.frame,
+          this.liveMaxY,
+        ),
+      ];
     }
     const height = Math.max(ctx.frame.rollHeight, 0);
     const band = Math.ceil(height / WARM_BANDS);
@@ -175,6 +213,14 @@ export class RollGroundLayer {
       () => this.prefetchWater(ctx, pose, scale),
       ...Array.from({ length: WARM_BANDS }, (_unused, index) => () => this.warm(ctx, pose, scale, index * band, (index + 1) * band)),
     ];
+  }
+
+  /** The state for the anchor the hero is walking into, begun on the field's sample taken ahead. */
+  private aheadState(pose: PlanetPose): LipState {
+    if (this.ahead?.pose !== pose) {
+      this.ahead = new LipState(pose, this.bounds, prefetchGroundSample(pose, this.field), this.grassBounds, this.art);
+    }
+    return this.ahead;
   }
 
   private prefetchWater(ctx: FrameContext, pose: PlanetPose, scale: number): void {
@@ -187,16 +233,14 @@ export class RollGroundLayer {
 
   /** Draw scanlines `from..to` of the lip ahead, as it will stand the moment he arrives, and throw the pixels away. */
   private warm(ctx: FrameContext, pose: PlanetPose, scale: number, from: number, to: number): void {
-    if (this.ahead?.pose !== pose) {
-      this.ahead = new LipState(pose, this.bounds, prefetchGroundSample(pose, this.field), this.grassBounds, this.art);
-    }
+    const ahead = this.aheadState(pose);
     this.prefetchWater(ctx, pose, scale);
     const water = this.aheadWater?.pose === pose ? this.aheadWater.water : undefined;
     if (water === undefined) {
       return;
     }
     const arrival = { ...ctx.frame, phaseX: 0, phaseY: 0 };
-    rollGroundPixels(arrival, this.width, this.ahead.look(water, this.liveMaxY), unlitHaze(ctx.atmosphere), { from, to });
+    rollGroundPixels(arrival, this.width, ahead.look(water, this.liveMaxY), unlitHaze(ctx.atmosphere), { from, to });
   }
 
   /**
@@ -245,15 +289,33 @@ export class RollGroundLayer {
   }
 
   private growWater(frame: CameraFrame, pose: PlanetPose, scale: number, sky: SkyReflection): LipWater {
+    return new LipWater({ ...frame, phaseX: 0, phaseY: 0 }, this.lipPuddles(frame, pose, scale), sky);
+  }
+
+  /**
+   * The puddles out on the lip for a pose - grown ahead in a task of their own
+   * (`prefetchPuddles`), the sweep being half the cost of the lip's water.
+   */
+  private lipPuddles(frame: CameraFrame, pose: PlanetPose, scale: number): Puddle[] {
+    const ahead = this.aheadPuddles;
+    if (ahead?.pose === pose && ahead.scale === scale) {
+      return ahead.puddles;
+    }
     const flat = { ...frame, phaseX: 0, phaseY: 0 };
     const { minX, maxX, minY, maxY } = this.bounds;
     const around = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
     const reach = Math.ceil(Math.hypot((maxX - minX) / 2, (maxY - minY) / 2)) + 1;
-    const puddles = growPuddles(flat, pose, reach, scale, {
+    return growPuddles(flat, pose, reach, scale, {
       keep: (local) => puddleOnLip(flat, this.width, local),
       around,
     });
-    return new LipWater(flat, puddles, sky);
+  }
+
+  private prefetchPuddles(ctx: FrameContext, pose: PlanetPose, scale: number): void {
+    if (this.waterPose === pose || this.aheadWater?.pose === pose) {
+      return;
+    }
+    this.aheadPuddles = { pose, scale, puddles: this.lipPuddles(ctx.frame, pose, scale) };
   }
 
   /** The tile the ground layer composes in a cell. */

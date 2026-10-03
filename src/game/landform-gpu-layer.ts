@@ -116,6 +116,7 @@ export class LandformGpuLayer {
   private readonly bandData = new Float32Array(ATLAS_ROWS * 4);
   private marchUniforms: MarchUniforms = { values: {} };
   private readonly slices: Phaser.GameObjects.Image[] = [];
+  private readonly sliceSet = new Set<Phaser.GameObjects.GameObject>();
   private rendered = "";
   /** The rows the last march drew, and the farthest that kept its own code. */
   private rects: readonly RowRect[] = [];
@@ -186,11 +187,23 @@ export class LandformGpuLayer {
    * stepped onto a new row moves where the cuts must be.
    */
   arrange(): void {
-    const ours = new Set<Phaser.GameObjects.GameObject>(this.slices);
+    // Only something sorted between two of the rows can split them, so nothing
+    // outside their depths is measured - most of a display list of ~700.
+    let low = Number.POSITIVE_INFINITY;
+    let high = Number.NEGATIVE_INFINITY;
+    for (const rect of this.rects) {
+      const depth = standingDepth(rect.row, RANK.body);
+      low = Math.min(low, depth);
+      high = Math.max(high, depth);
+    }
     const obstacles: Obstacle[] = [];
     for (const object of this.scene.children.list) {
+      const depth = (object as Partial<Phaser.GameObjects.Image>).depth;
+      if (depth === undefined || depth < low || depth > high || this.sliceSet.has(object)) {
+        continue;
+      }
       const bounds = standingBounds(object);
-      if (bounds !== undefined && !ours.has(object)) {
+      if (bounds !== undefined) {
         obstacles.push(bounds);
       }
     }
@@ -214,10 +227,15 @@ export class LandformGpuLayer {
   private fillBands(groups: readonly Band[]): number {
     const used = groups.reduce((most, band) => Math.max(most, band.atlasY + band.group.rect.bottom - band.group.rect.top), 0);
     const rows = Math.min(ATLAS_ROWS, Math.ceil(Math.max(used, 1) / BAND_WIDTH) * BAND_WIDTH);
-    this.bandData.fill(0, 0, rows * 4);
+    const data = this.bandData;
+    data.fill(0, 0, rows * 4);
     for (const { group, atlasY } of groups) {
       for (let y = group.rect.top; y < group.rect.bottom; y += 1) {
-        this.bandData.set([y, group.lowCode, group.highCode, 1], (atlasY + y - group.rect.top) * 4);
+        const at = (atlasY + y - group.rect.top) * 4;
+        data[at] = y;
+        data[at + 1] = group.lowCode;
+        data[at + 2] = group.highCode;
+        data[at + 3] = 1;
       }
     }
     this.bands.write(0, 0, BAND_WIDTH, rows / BAND_WIDTH, this.bandData.subarray(0, rows * 4));
@@ -344,7 +362,9 @@ export class LandformGpuLayer {
   }
 
   private addSlice(): void {
-    this.slices.push(this.scene.add.image(0, 0, this.pack.key).setOrigin(0, 0).setVisible(false));
+    const slice = this.scene.add.image(0, 0, this.pack.key).setOrigin(0, 0).setVisible(false);
+    this.slices.push(slice);
+    this.sliceSet.add(slice);
   }
 }
 

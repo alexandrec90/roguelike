@@ -8,7 +8,7 @@ import { INK_ALPHA, INK_COLORS } from "./ink";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import { createPuddle, puddleHolds } from "./puddles";
 import { rollGroundPixels, type TileTexels } from "./roll-ground";
-import { LipWater, puddleOnLip, screenToTexel } from "./roll-water";
+import { LipWater, puddleOnLip, screenToTexel, WATER_ALPHAS, waterCode } from "./roll-water";
 import { puddleBody, WET_INK } from "./water/body";
 import { skyReflection } from "./water/sky-inks";
 
@@ -65,6 +65,40 @@ describe("LipWater", () => {
     const ring = screenToTexel(FRAME, damp?.x ?? 0, damp?.y ?? 0);
     expect(water.blendInto(ring.gx, ring.gy, new Uint8ClampedArray(4), 0)).toBe(false);
     expect(water.blendInto(-500, -500, new Uint8ClampedArray(4), 0)).toBe(false);
+  });
+
+  it("pages a wet cell for the GPU: each texel's colour, and a code naming its alpha and whether it is water", () => {
+    const centre = screenToTexel(FRAME, STRADDLING.centerX, STRADDLING.centerY);
+    const cellX = Math.floor(centre.gx / TILE_WIDTH);
+    const cellY = Math.floor(centre.gy / TILE_DEPTH);
+    const stride = TILE_WIDTH * 4;
+    const page = new Uint8Array(stride * TILE_DEPTH);
+    water.page(cellX, cellY, page, 0, stride);
+    let compared = 0;
+    for (let row = 0; row < TILE_DEPTH; row += 1) {
+      for (let column = 0; column < TILE_WIDTH; column += 1) {
+        const at = row * stride + column * 4;
+        const under = new Uint8ClampedArray([90, 90, 90, 255]);
+        const drowned = water.blendInto(cellX * TILE_WIDTH + column, cellY * TILE_DEPTH + row, under, 0);
+        const code = page[at + 3] ?? 0;
+        if (code === 0) {
+          expect([...under]).toEqual([90, 90, 90, 255]);
+          continue;
+        }
+        expect(code >= 128).toBe(drowned);
+        const alpha = WATER_ALPHAS[(code & 127) - 1] ?? -1;
+        for (let channel = 0; channel < 3; channel += 1) {
+          expect(Math.round((page[at + channel] ?? 0) * alpha + 90 * (1 - alpha))).toBe(under[channel]);
+        }
+        compared += 1;
+      }
+    }
+    expect(compared).toBeGreaterThan(0);
+  });
+
+  it("names each alpha once, the water bit above it", () => {
+    expect(waterCode(0.123, false)).toBe(waterCode(0.123, false));
+    expect(waterCode(0.123, true)).toBe(waterCode(0.123, false) + 128);
   });
 
   it("puts the field's own water pixels on the lip's first scanline, so a puddle crosses the seam whole", () => {

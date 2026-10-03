@@ -45,6 +45,24 @@ export function fillMask(mask: WaterMask, puddles: readonly Puddle[]): void {
 }
 
 /** Which puddle (1-based) holds a screen pixel; 0 for dry ground or off the mask. */
+/**
+ * The band of mask rows holding any water, `to` exclusive, or undefined for a
+ * dry mask. Everything drawn on the water is clipped to it, so this bounds
+ * what a frame of surface has to clear and upload.
+ */
+export function maskRows(mask: WaterMask): { readonly from: number; readonly to: number } | undefined {
+  let from = -1;
+  let to = -1;
+  for (let y = 0; y < mask.height; y += 1) {
+    const row = mask.cells.subarray(y * mask.width, (y + 1) * mask.width);
+    if (row.some((cell) => cell !== 0)) {
+      from = from < 0 ? y : from;
+      to = y + 1;
+    }
+  }
+  return from < 0 ? undefined : { from, to };
+}
+
 export function maskAt(mask: WaterMask, x: number, y: number): number {
   const mx = Math.round(x) + mask.margin;
   const my = Math.round(y) + mask.margin;
