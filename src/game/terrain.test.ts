@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { blockedByLand } from "./landforms";
 import { PLANET_TILES, wrapTile } from "./planet";
-import { puddlesNear, terrainAt, treesNear, type Terrain } from "./terrain";
+import {
+  cachedFeaturesNear,
+  featuresNear,
+  puddlesNear,
+  terrainAt,
+  treesNear,
+  type FeatureSpec,
+  type Terrain,
+} from "./terrain";
 
 /** Every terrain in a wide sweep of the planet, with how often it turned up. */
 function census(step: number): Record<Terrain, number> {
@@ -83,6 +91,20 @@ describe("features", () => {
       expect(blockedByLand(puddle)).toBe(false);
       expect(puddle.size).toBeGreaterThan(0);
     }
+  });
+
+  it("come out of the chunk cache exactly as the direct sweep finds them, in the same order", () => {
+    const spec: FeatureSpec = { seed: 0x3a1c, density: 0.05, minSize: 2, maxSize: 6, grows: () => true };
+    for (const [centre, reach] of [
+      [{ x: 128, y: 128 }, 20],
+      [{ x: 1.5, y: 250.2 }, 33],
+      [{ x: 77.3, y: 3 }, 65],
+      [{ x: 200, y: 100 }, 0.4],
+    ] as const) {
+      expect(cachedFeaturesNear(centre, reach, spec)).toEqual(featuresNear(centre, reach, spec));
+    }
+    // Asked again, the answer comes from the cache and is unchanged.
+    expect(cachedFeaturesNear({ x: 128, y: 128 }, 20, spec)).toEqual(featuresNear({ x: 128, y: 128 }, 20, spec));
   });
 
   it("survive the seam", () => {

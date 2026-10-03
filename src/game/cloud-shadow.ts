@@ -138,6 +138,12 @@ export interface CloudShade {
   at(x: number, y: number): number;
   /** The same, as a tint colour for an image. */
   tint(x: number, y: number): number;
+  /**
+   * What `at` is computed from, for a shader that samples the tile itself:
+   * the tile's whole-pixel offset, the strength, and the pass's margin.
+   * Absent under a clear sky.
+   */
+  readonly params?: { readonly x: number; readonly y: number; readonly strength: number; readonly margin: number };
 }
 
 /** No cloud: everything in full light. */
@@ -166,6 +172,7 @@ export function cloudShade(
   };
   return {
     key: `${offsetX},${offsetY},${strength.toFixed(2)}`,
+    params: { x: offsetX, y: offsetY, strength, margin },
     at,
     tint: (x, y) => {
       const level = Math.round(at(x, y) * 255);

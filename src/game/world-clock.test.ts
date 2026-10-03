@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SCENE_OPTIONS, parseWeather, readSceneOptions } from "./scene-options";
+import { DEFAULT_SCENE_OPTIONS, parseRenderPath, parseWeather, readSceneOptions } from "./scene-options";
 import { MAX_FRAME_MS, WorldClock } from "./world-clock";
 
 describe("the world clock", () => {
@@ -49,5 +49,13 @@ describe("scene options", () => {
     expect(readSceneOptions(new URLSearchParams(""))).toEqual(DEFAULT_SCENE_OPTIONS);
     expect(parseWeather("sleet")).toBeUndefined();
     expect(parseWeather(null)).toBeUndefined();
+  });
+
+  it("draws on the GPU unless asked for the CPU passes by name", () => {
+    expect(readSceneOptions(new URLSearchParams("render=CPU")).render).toBe("cpu");
+    expect(parseRenderPath(" cpu ")).toBe("cpu");
+    expect(parseRenderPath("gpu")).toBe("gpu");
+    expect(parseRenderPath("software")).toBe("gpu");
+    expect(parseRenderPath(null)).toBe("gpu");
   });
 });

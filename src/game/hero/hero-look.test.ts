@@ -18,11 +18,11 @@ function run(player: (ms: number) => PlayerState, frames: number, seed = 7) {
 }
 
 describe("tracksOf", () => {
-  it("walks only while stepping, and casts only during the clip, not its cooldown", () => {
+  it("walks only while walking, and casts only during the clip, not its cooldown", () => {
     expect(tracksOf(STAND, 100)).toMatchObject({ walkMs: undefined, castMs: undefined, swingMs: undefined });
     expect(tracksOf({ ...STAND, castMs: 100 }, 0).castMs).toBe(100);
     expect(tracksOf({ ...STAND, castMs: CAST.durationMs + 50 }, 0).castMs).toBeUndefined();
-    expect(tracksOf({ ...STAND, motion: "step", gait: { forward: 1, strafe: 0 } }, 0).walkMs).toBeDefined();
+    expect(tracksOf({ ...STAND, motion: "walk", gait: { forward: 1, strafe: 0 } }, 0).walkMs).toBeDefined();
   });
 });
 

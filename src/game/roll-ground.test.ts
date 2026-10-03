@@ -271,6 +271,16 @@ describe("rollGroundPixels", () => {
     }
   });
 
+  it("draws a band of scanlines exactly as the whole lip draws them, and nothing else", () => {
+    const look: CellLook = { tile: (cellX) => (Math.abs(cellX) % 2 === 1 ? PATH : MEADOW), tuft: () => null };
+    const whole = rollGroundPixels(FRAME, WIDTH, look, HAZE);
+    const band = rollGroundPixels(FRAME, WIDTH, look, HAZE, { from: 2, to: 5 });
+    const rowBytes = WIDTH * 4;
+    expect([...band.subarray(2 * rowBytes, 5 * rowBytes)]).toEqual([...whole.subarray(2 * rowBytes, 5 * rowBytes)]);
+    expect(band.subarray(0, 2 * rowBytes).every((value) => value === 0)).toBe(true);
+    expect(band.subarray(5 * rowBytes).every((value) => value === 0)).toBe(true);
+  });
+
   it("reads each cell's own tile", () => {
     // Odd columns are path: the seam scanline alternates tiles cell by cell.
     const look: CellLook = { tile: (cellX) => (Math.abs(cellX) % 2 === 1 ? PATH : MEADOW), tuft: () => null };

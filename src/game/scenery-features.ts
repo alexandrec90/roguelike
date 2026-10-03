@@ -108,6 +108,36 @@ export const PLACED_SPECIES: readonly string[] = SCENERY_LATTICES.flatMap((latti
   lattice.mix.map(([species]) => species),
 );
 
+/**
+ * How many distinct shapes each species comes in.
+ *
+ * Every body on the planet is drawn from one of these, so the whole world's
+ * scenery is `PLACED_SPECIES × SCENERY_VARIANTS` bakes rather than one per tree.
+ * A unique seed per tree put ~900 different bodies within sight of the horizon
+ * against a cache that held 320, so bakes never caught up: trees arrived one per
+ * frame and the horizon kept filling in while the hero stood still. Bounded,
+ * every shape is baked before the first frame is shown (`scenery-baker.ts`).
+ * Raise it for variety; each step costs about half a second of worker time at
+ * load.
+ */
+export const SCENERY_VARIANTS = 6;
+
+/** The seed each variant is built from, shared by every species. */
+const VARIANT_SEEDS: readonly number[] = Array.from({ length: SCENERY_VARIANTS }, (_unused, variant) =>
+  Math.floor(pixelHash(variant, 3, 0x5eed) * 0xffff),
+);
+
+/** The variant seed a feature's own seed draws: same feature, same shape, always. */
+export function variantSeed(seed: number): number {
+  const variant = Math.min(SCENERY_VARIANTS - 1, Math.floor(pixelHash(seed, 5, 0x7a21) * SCENERY_VARIANTS));
+  return VARIANT_SEEDS[variant] ?? 0;
+}
+
+/** Every body the planet can show, as species and seed: what a warm-up bakes. */
+export function sceneryArchetypes(): { readonly species: string; readonly seed: number }[] {
+  return PLACED_SPECIES.flatMap((species) => VARIANT_SEEDS.map((seed) => ({ species, seed })));
+}
+
 /** A weighted, seeded pick. */
 export function pickSpecies(mix: Lattice["mix"], seed: number): string {
   const total = mix.reduce((sum, [, weight]) => sum + weight, 0);
@@ -149,7 +179,11 @@ function chunkFeatures(cx: number, cy: number): readonly SceneryFeature[] {
         continue;
       }
       taken.add(cell);
-      found.push({ ...feature, species: pickSpecies(lattice.mix, feature.seed) });
+      found.push({
+        ...feature,
+        species: pickSpecies(lattice.mix, feature.seed),
+        seed: variantSeed(feature.seed),
+      });
     }
   }
   chunks.set(key, found);

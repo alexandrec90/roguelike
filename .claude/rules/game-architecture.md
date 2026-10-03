@@ -28,7 +28,7 @@ Seven modules, and no eighth place where any of this is decided:
 
 `src/game/ground/` owns the terrain art itself: tiles generated procedurally (seamless grass, neighbour-aware path edges), baked once and composed per step, plus the baked tuft atlas the grass is drawn from.
 
-The horizon lip is that same ground carried past the seam, in two passes over one surface: `roll-ground.ts` (tiles, tufts and the air's tint, each scanline asking `rollRowAt` which row it shows) and `roll-water.ts` (the water layer's own puddles, grown by `growPuddles`, laid into world texels). Nothing stands in the ground: what stands is a landform or a body, drawn by its own layer through the same projection, so the lip never has to know about it. A far lip pixel spans many texels, so it shows its cell's *far look* (`distantShare`, `roll-far.ts`) and never composes a tile; reading the lattice under the far lip is what made a step frame stall. A far look is the colours the field shows, grass included, in their shares, picked per screen pixel - counted off real ground by `far-looks.ts`. It was once a plain tile's commonest ink, which dropped the grass and drew a line of another shade across the lip where the blur began.
+The horizon lip is that same ground carried past the seam, in two passes over one surface: `roll-ground.ts` (tiles, tufts and the air's tint, each scanline asking `rollRowAt` which row it shows) and `roll-water.ts` (the water layer's own puddles, grown by `growPuddles`, laid into world texels). What the lip knows about one anchor is a `LipState` (`roll-ground-state.ts`); the layer keeps the one on screen and the one the hero is walking into, warmed ahead by `prefetcher.ts`. Those two are the reference; by default the lip is drawn on the GPU (`roll-ground-gpu.ts`, `gpu/lip-shader.ts`) from tables built in `lip-gpu-data.ts` - so a change to how the lip looks lands in `roll-ground.ts` *and* the shader, and is diffed between them in the running page as the landform march is. Nothing stands in the ground: what stands is a landform or a body, drawn by its own layer through the same projection, so the lip never has to know about it. A far lip pixel spans many texels, so it shows its cell's *far look* (`distantShare`, `roll-far.ts`) and never composes a tile; reading the lattice under the far lip is what made a step frame stall. A far look is the colours the field shows, grass included, in their shares, picked per screen pixel - counted off real ground by `far-looks.ts`, and handed to the shader as a texture of slots (`farLookTexels`) with the pick ported to integers. It was once a plain tile's commonest ink, which dropped the grass and drew a line of another shade across the lip where the blur began.
 
 **The grid belongs to the screen, and the planet has no grid.** That is the load-bearing
 sentence, because it is what reconciles a camera that turns with a pixel contract that
@@ -93,10 +93,17 @@ over the sky when rock was grid-quantised cells.
 | `src/game/landform-colour.ts` | The look: posterised ramps per material, wrap light, a narrow dithered seam, and planet-fixed grain on standing faces (courses, ledges, strata, windows). Inks only. |
 | `src/game/landform-render.ts` | The frame-level passes: `viewsInSight`, near over far (`isFarView`, `mergeLandforms`), the outline. |
 | `src/game/landform-slices.ts` | Cutting the picture into one slice per row and 32-column chunk, shelf-packed into one atlas. |
-| `src/game/landform-layer.ts` | The Phaser wiring: re-render only when what it shows moved, far views kept between strides, each slice shown at `standingDepth(row)` so a tree behind a mesa is hidden and the hero walks round a flank. |
+| `src/game/landform-layer.ts` | The CPU wiring - the `?render=cpu` path and the fallback without WebGL2: re-render only when what it shows moved, far views kept between strides, each slice shown at `standingDepth(row)` so a tree behind a mesa is hidden and the hero walks round a flank. |
+| `src/game/landform-gpu-layer.ts` | The GPU wiring, the default: five render-to-texture passes (probe, blocks, march, outline, pack) and a pool of plain images, one per group of rows, at each group's depth. `arrange()` runs last each frame, once everything standing is placed. |
+| `src/game/landform-gpu-data.ts`, `landform-gpu-rows.ts` | What the passes are handed (fields in a float atlas, the schedule, per-column step ranges), and where the picture is cut into slices - row rectangles bounded from each landform's radial profile, rows merged where nothing standing sorts between them (`groupRows`), bands stacked in the atlas. Pure. |
+| `src/game/gpu/landform-glsl.ts`, `landform-shader.ts` | The march ported to GLSL ES 3.00, and the passes. `landform-shader.ts`'s header is why it is three march passes and not one. |
 
-Two things that are easy to break:
+Three things that are easy to break:
 
+- **The two landform paths are one description.** A change to the march or the look
+  lands in `landform-march.ts` / `landform-colour.ts` *and* its GLSL port, and is
+  diffed in the running page (`?render=cpu` against the default): coverage must agree
+  exactly, colour but for single pixels on dither seams.
 - **Every depth goes through `projectDepth`.** A landform drawn by its own projection
   would shear against the ground at the seam and pop at the horizon line.
 - **Slices sort; the picture does not.** A landform is one render but many depths. Draw
@@ -185,7 +192,8 @@ species nobody has written yet.
 | `src/game/props/` | A boulder, a bush and a mushroom, built from the same three calls as a crown. |
 | `src/game/gpu/` | The volume shader (`volume-shader.ts`), its uniforms (`volume-uniforms.ts`), and `volume-gl.ts`, the tree lab's host for its readback and parity diff. The game no longer draws with it. |
 | `src/game/lod.ts` | The detail budget. A distant body evaluates the **same field** more cheaply — never a different, simpler model — so it gains detail as you walk toward it instead of popping. |
-| `src/game/scenery-bake.ts`, `scenery-cache.ts` | Bodies baked once per lean, per light, per horizon scale — posed by stepping the species under a fixed wind — into textures, on a sliced queue. |
+| `src/game/scenery-bake.ts`, `scenery-cache.ts` | Bodies baked once per lean, per light, per horizon scale — posed by stepping the species under a fixed wind — into textures. |
+| `src/game/scenery-bake-jobs.ts`, `scenery-baker.ts`, `scenery-bake-worker.ts` | A bake as plain data, and where it runs: Web Workers, routed so one body's leans settle in order on one bench, or inline where there are none (the tests). |
 | `src/game/scenery-features.ts`, `scenery-layer.ts` | Which species stands where on the planet; the Phaser wiring that picks a baked lean from the wind. |
 | `src/game/scenery-slots.ts` | Which body gets which slot, pure and tested — the pool is smaller than the planet, so a slot is *lent* to whichever tree is in reach and an incumbent keeps it. |
 

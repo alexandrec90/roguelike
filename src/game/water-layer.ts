@@ -36,7 +36,7 @@ import { createPuddle, puddleHolds, rainImpact, type Puddle } from "./puddles";
 import { createRippleField, spawnRipple, stepRipples, type RippleField } from "./ripples";
 import { MAX_STEP_MS, type EmitterState } from "./spark-emitter";
 import { puddlesNear } from "./terrain";
-import { createMask, fillMask, maskAt, type WaterMask } from "./water/mask";
+import { createMask, fillMask, maskAt, maskRows, type WaterMask } from "./water/mask";
 import { paintBodies, paintSurface, type WaterScene } from "./water/paint";
 import type { Landing } from "./water/rain";
 import { puddleScale } from "./water/schedule";
@@ -44,6 +44,9 @@ import type { Reflectable } from "./water/reflect";
 import { reflectionKey, skyKey, skyReflection, type SkyReflection } from "./water/sky-inks";
 
 export type { Reflectable } from "./water/reflect";
+
+/** A band of buffer rows, `to` exclusive. */
+type Rows = NonNullable<ReturnType<typeof maskRows>>;
 
 /**
  * Under everything that stands on the ground: water is *in* the ground, and a
@@ -102,6 +105,12 @@ export interface WaterActors {
   readonly reflectables?: readonly Reflectable[];
 }
 
+/** How far round the hero the puddles are grown: every tile the target can show. */
+function reachOf(ctx: FrameContext): number {
+  const flat: CameraFrame = { ...ctx.frame, phaseX: 0, phaseY: 0 };
+  return localReach(visibleLocal(flat, ctx.width, ctx.height));
+}
+
 export class WaterLayer {
   private puddles: Puddle[] = [];
   private ripples: RippleField = createRippleField();
@@ -110,12 +119,18 @@ export class WaterLayer {
   private surface!: PixelSurface;
   private sky: SkyReflection = skyReflection(atmosphereAt(13));
   private sampled: PlanetPose | undefined;
+  /** The puddles grown ahead for the anchor the hero is walking into. */
+  private ahead:
+    | { readonly pose: PlanetPose; readonly scale: number; readonly reach: number; readonly puddles: Puddle[] }
+    | undefined;
   private bakedKey = "";
   private atmosphereKey = "";
   private scale = 1;
   private rain = 0;
   private strike = 0;
-  private surfaceDirty = false;
+  /** The mask rows holding water, and the rows the surface last painted. */
+  private band: Rows | undefined;
+  private painted: Rows | undefined;
 
   /** The two surfaces. What is on them arrives with the first `update`. */
   create(scene: Phaser.Scene, width = 320, height = 180): void {
@@ -132,9 +147,13 @@ export class WaterLayer {
    * `actors` are in screen pixels, feet where they are drawn.
    */
   update(ctx: FrameContext, actors: WaterActors = {}): void {
-    const flat: CameraFrame = { ...ctx.frame, phaseX: 0, phaseY: 0 };
-    this.relocate(ctx.frame, ctx.pose, localReach(visibleLocal(flat, ctx.width, ctx.height)));
+    this.relocate(ctx.frame, ctx.pose, reachOf(ctx));
     this.draw(ctx.frame, ctx.atmosphere, ctx.elapsedMs, ctx.deltaMs, actors);
+  }
+
+  /** `prefetch` for the anchor the hero is walking into, at the reach `update` sweeps. */
+  prefetchFor(ctx: FrameContext, pose: PlanetPose): void {
+    this.prefetch(ctx.frame, pose, reachOf(ctx));
   }
 
   /**
@@ -151,8 +170,22 @@ export class WaterLayer {
     }
     this.sampled = pose;
     this.bakedKey = "";
-    this.puddles = growPuddles(frame, pose, reach, this.scale);
+    const ahead = this.ahead;
+    this.puddles =
+      ahead?.pose === pose && ahead.scale === this.scale && ahead.reach === reach
+        ? ahead.puddles
+        : growPuddles(frame, pose, reach, this.scale);
+    this.ahead = undefined;
     fillMask(this.mask, this.puddles);
+    this.band = maskRows(this.mask);
+  }
+
+  /** Grow the puddles for the anchor the hero is walking into, ahead of the frame that crosses into it. */
+  prefetch(frame: CameraFrame, pose: PlanetPose, reach: number): void {
+    if (this.sampled === pose || (this.ahead?.pose === pose && this.ahead.scale === this.scale)) {
+      return;
+    }
+    this.ahead = { pose, scale: this.scale, reach, puddles: growPuddles(frame, pose, reach, this.scale) };
   }
 
   /** How much the wet weather has swollen every puddle: the radius multiplier. */
@@ -284,14 +317,18 @@ export class WaterLayer {
       ...thing,
       foot: { x: thing.foot.x - offset.x, y: thing.foot.y - offset.y },
     }));
-    this.surface.clear();
+    // Everything on the surface is clipped to the water, so only the rows the
+    // puddles span - and those painted last frame, if the puddles moved - are
+    // cleared and uploaded, not the whole screen.
+    const rows = joinRows(this.band, this.painted);
+    this.surface.clearRows(rows.from, rows.to);
     paintSurface(this.surface.buffer, { ...scene, sky: this.sky }, this.ripples, reflect, {
       elapsedMs,
       rain: this.rain,
       strike: this.strike,
     });
-    this.surface.commit();
-    this.surfaceDirty = true;
+    this.surface.touch().commit(rows);
+    this.painted = this.band;
   }
 
   /** Re-paint the still bodies when the puddles, their size or the sky they mirror changed. */
@@ -311,9 +348,18 @@ export class WaterLayer {
   }
 
   private blankSurface(): void {
-    if (this.surfaceDirty) {
-      this.surface.clear().commit();
-      this.surfaceDirty = false;
+    const painted = this.painted;
+    if (painted !== undefined) {
+      this.surface.clearRows(painted.from, painted.to).commit(painted);
+      this.painted = undefined;
     }
   }
+}
+
+/** The smallest band holding both, or both one empty band when neither is there. */
+export function joinRows(a: Rows | undefined, b: Rows | undefined): Rows {
+  if (a === undefined || b === undefined) {
+    return a ?? b ?? { from: 0, to: 0 };
+  }
+  return { from: Math.min(a.from, b.from), to: Math.max(a.to, b.to) };
 }

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { PLACED_SPECIES, pickSpecies, SCENERY_LATTICES, sceneryNear, speciesHeight } from "./scenery-features";
+import {
+  PLACED_SPECIES,
+  pickSpecies,
+  SCENERY_LATTICES,
+  SCENERY_VARIANTS,
+  sceneryArchetypes,
+  sceneryNear,
+  speciesHeight,
+  variantSeed,
+} from "./scenery-features";
 import { TALLEST_BODY } from "./scenery-slots";
 import { featuresNear, terrainAt } from "./terrain";
 import { findSpecies } from "./trees";
@@ -59,6 +68,29 @@ describe("the scenery on the planet", () => {
     expect(bs).toBeGreaterThan(250);
     expect(bs).toBeLessThan(350);
     expect(pickSpecies(mix, 17)).toBe(pickSpecies(mix, 17));
+  });
+});
+
+describe("scenery variants", () => {
+  it("shapes every body from one of a few seeds, so the wood is a bounded set of bakes", () => {
+    const seeds = new Set(sceneryNear(HOME, 60).map((feature) => feature.seed));
+    expect(seeds.size).toBeLessThanOrEqual(SCENERY_VARIANTS);
+    expect(seeds.size).toBeGreaterThan(1);
+  });
+
+  it("gives a feature the same variant every time, and spreads features over all of them", () => {
+    expect(variantSeed(1234)).toBe(variantSeed(1234));
+    const drawn = new Set(Array.from({ length: 500 }, (_unused, seed) => variantSeed(seed)));
+    expect(drawn.size).toBe(SCENERY_VARIANTS);
+  });
+
+  it("lists every species in every variant for the warm-up, each once", () => {
+    const archetypes = sceneryArchetypes();
+    expect(archetypes).toHaveLength(PLACED_SPECIES.length * SCENERY_VARIANTS);
+    expect(new Set(archetypes.map((body) => `${body.species}:${body.seed}`)).size).toBe(archetypes.length);
+    for (const feature of sceneryNear(HOME, 30)) {
+      expect(archetypes).toContainEqual({ species: feature.species, seed: feature.seed });
+    }
   });
 });
 

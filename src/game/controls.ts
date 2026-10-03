@@ -57,8 +57,8 @@ export interface ControlState {
    *
    * Without it a tap shorter than a frame is silently lost: press and release
    * both land between two `update` calls, so nothing is held by the time the
-   * game looks. A press owes exactly one step whether or not the key is still
-   * down when it is read.
+   * game looks. A press owes at least one frame of walking - and a turn to face
+   * it - whether or not the key is still down when it is read.
    *
    * Two taps in the same frame join into the diagonal they mean, rather than
    * the second overwriting the first — a flick of up-and-right is a flick

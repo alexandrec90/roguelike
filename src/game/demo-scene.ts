@@ -9,14 +9,17 @@ import { GroundLayer } from "./ground-layer";
 import { HeroLayer, heroHeight } from "./hero-layer";
 import { horizonLayout, type HorizonLayout } from "./horizon";
 import { MAX_SHAKE } from "./impulse";
+import { hasWebGL2 } from "./gpu/float-texture";
+import { LandformGpuLayer } from "./landform-gpu-layer";
 import { LandformLayer } from "./landform-layer";
 import { LightingLayer } from "./lighting-layer";
 import type { MapOverlay } from "./map-overlay";
 import { createOdometer, trackScroll } from "./odometer";
+import { Prefetcher } from "./prefetcher";
 import type { PlanetPoint, PlanetPose } from "./planet";
 import type { ScreenPoint } from "./projection";
 import { RollGroundLayer } from "./roll-ground-layer";
-import { DEFAULT_SCENE_OPTIONS, type SceneOptions } from "./scene-options";
+import { DEFAULT_SCENE_OPTIONS, type RenderPath, type SceneOptions } from "./scene-options";
 import { SceneryLayer } from "./scenery-layer";
 import { SkyLayer } from "./sky-layer";
 import { openGround } from "./landforms";
@@ -44,6 +47,18 @@ const CAMPFIRE_AT: PlanetPoint = { x: 131, y: 129 };
 const STORM_SEED = 0x51a7;
 
 /**
+ * Milliseconds of the next anchor's work a frame may do ahead, beyond the first
+ * task. A diagonal crosses an anchor every seven or eight frames and the work
+ * for one is ~8 ms; with a walking frame at ~5 ms there is room to finish it in
+ * three or four, many small tasks rather than a few big ones.
+ */
+const PREFETCH_BUDGET_MS = 2.5;
+
+/** Longest the first frame is held for scenery, ms, and how long it then fades in. */
+const REVEAL_CAP_MS = 4000;
+const REVEAL_FADE_MS = 250;
+
+/**
  * The sample outdoor scene, on a round planet.
  *
  * Nothing here decides the projection, the horizon split, what a key means,
@@ -69,7 +84,8 @@ export class DemoScene extends Phaser.Scene {
   private readonly ground = new GroundLayer();
   private readonly vegetation = new VegetationLayer();
   private readonly scenery = new SceneryLayer();
-  private readonly landforms = new LandformLayer();
+  private landforms!: LandformLayer | LandformGpuLayer;
+  private readonly renderPath: RenderPath;
   private readonly encounter = new Encounter();
   private readonly water = new WaterLayer();
   private readonly weather: WeatherLayer;
@@ -80,12 +96,19 @@ export class DemoScene extends Phaser.Scene {
   /** Scanlines of the render target the window is showing; the rest is clipped. */
   private visible = HEIGHT;
   private built = false;
+  /** Whether the first frame has been faded in, and when holding it began. */
+  private shown = false;
+  private holdSince: number | undefined;
+  /** The next anchor's work, done a share at a time between crossings. */
+  private readonly prefetcher = new Prefetcher<PlanetPose>();
+  private lastPose: PlanetPose | undefined;
   /** The `?map=1` instrument, or null on an ordinary load. */
   private map: MapOverlay | null = null;
 
   constructor(options: SceneOptions = DEFAULT_SCENE_OPTIONS) {
     super("overworld-field");
     this.skyFraction = options.skyFraction;
+    this.renderPath = options.render;
     this.hero = new HeroLayer({ ...openGround(START), turn: 0 }, options.radius);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
     this.weather = new WeatherLayer(
@@ -98,12 +121,15 @@ export class DemoScene extends Phaser.Scene {
     this.layout = horizonLayout(HEIGHT, this.skyFraction);
     this.relayout();
 
+    // Per-pixel layers run on the GPU where WebGL2 is there, on the CPU otherwise.
+    const gpu = this.renderPath === "gpu" && hasWebGL2(this);
     this.sky.create(this, this.layout, WIDTH);
-    this.rollGround.create(this, this.frame(), WIDTH, this.bounds);
+    this.rollGround.create(this, this.frame(), WIDTH, this.bounds, gpu);
     this.hero.create(this, this.layout.groundTop, this.anchor);
     this.ground.create(this, this.frame(), this.bounds);
     this.vegetation.create(this, this.frame(), this.bounds);
     this.scenery.create(this, this.bounds, WIDTH);
+    this.landforms = gpu ? new LandformGpuLayer() : new LandformLayer();
     this.landforms.create(this, WIDTH, HEIGHT, heroHeight());
     this.encounter.create(this, WIDTH, HEIGHT, openGround(CAMPFIRE_AT));
     // Burnt ground has no grass on it until it greens over again.
@@ -113,6 +139,7 @@ export class DemoScene extends Phaser.Scene {
     this.weather.create(this, WIDTH, HEIGHT, this.layout.horizonY);
     this.ambient.create(this);
     this.lighting.create(this, WIDTH, HEIGHT);
+    this.cameras.main.fadeOut(0);
     this.built = true;
   }
 
@@ -137,14 +164,18 @@ export class DemoScene extends Phaser.Scene {
     this.relayout();
   }
 
-  update(_time: number, delta: number): void {
+  update(time: number, delta: number): void {
+    if (!this.revealed(time)) {
+      return;
+    }
     const worldDelta = this.clock.tick(delta);
     this.hero.animate(worldDelta, this.clock.elapsedMs);
 
-    const frame = this.frame();
-    const pose = this.hero.groundPose();
+    const where = this.hero.whereabouts();
+    const frame = this.frame(where.phase);
+    const pose = where.ground;
     const ctx = this.context(frame, pose);
-    trackScroll(this.odometer, this.hero.phase(), pose);
+    trackScroll(this.odometer, where.phase, pose);
 
     this.ground.update(ctx);
     this.rollGround.update(ctx, this.water.sizeScale());
@@ -154,10 +185,56 @@ export class DemoScene extends Phaser.Scene {
     this.hero.update(ctx);
     this.encounter.update(ctx, this.hero);
     this.drawWater(ctx);
-    this.sky.update(this.hero.turn(), ctx.atmosphere, ctx.elapsedMs);
+    // After everything standing has been placed: the slices are cut round it.
+    this.landforms.arrange();
+    this.prefetch(ctx, where.upcoming?.pose);
+    this.sky.update(where.turn, ctx.atmosphere, ctx.elapsedMs);
     this.ambient.update(ctx, this.odometer);
     this.light(ctx);
     this.drawMap(frame, pose, delta);
+  }
+
+  /**
+   * Whether the world is on screen yet.
+   *
+   * The first frames are held behind a black fade until every scenery body has
+   * a picture (`SceneryLayer.ready`), then faded in — a load shows the wood
+   * whole rather than filling in. `REVEAL_CAP_MS` stops a baker that never
+   * answers from leaving the screen black.
+   */
+  private revealed(time: number): boolean {
+    if (this.shown) {
+      return true;
+    }
+    this.holdSince ??= time;
+    if (!this.scenery.ready() && time - this.holdSince < REVEAL_CAP_MS) {
+      return false;
+    }
+    this.shown = true;
+    this.cameras.main.fadeIn(REVEAL_FADE_MS);
+    return true;
+  }
+
+  /**
+   * Do a share of the next anchor's work now (`prefetcher.ts`). Never on the
+   * frame the anchor just moved: that frame has paid for this one already.
+   */
+  private prefetch(ctx: FrameContext, pose: PlanetPose | undefined): void {
+    const crossed = ctx.pose !== this.lastPose;
+    this.lastPose = ctx.pose;
+    this.prefetcher.aim(pose, () =>
+      pose === undefined
+        ? []
+        : [
+            () => this.ground.prefetch(pose),
+            () => this.vegetation.prefetch(pose),
+            () => this.water.prefetchFor(ctx, pose),
+            ...this.rollGround.prefetchTasks(ctx, pose, this.water.sizeScale()),
+          ],
+    );
+    if (!crossed) {
+      this.prefetcher.run(PREFETCH_BUDGET_MS);
+    }
   }
 
   /** Whatever walks through the grass and bends it aside: the hero, and the slimes. */
@@ -246,8 +323,7 @@ export class DemoScene extends Phaser.Scene {
   }
 
   /** The one description of where the world has got to, this instant. */
-  private frame(): CameraFrame {
-    const phase = this.hero.phase();
+  private frame(phase = this.hero.whereabouts().phase): CameraFrame {
     return {
       groundTop: this.layout.groundTop,
       rollHeight: this.layout.rollHeight,

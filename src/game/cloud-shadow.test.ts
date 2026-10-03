@@ -35,6 +35,26 @@ describe("cloudShade", () => {
     }
   });
 
+  it("hands a shader what `at` is computed from, so the two read the same pixel", () => {
+    const shade = cloudShade({ x: 37.4, y: -12.6, strength: 0.8 }, 4, tile);
+    const params = shade.params;
+    expect(params).toEqual({ x: 37, y: -13, strength: 0.8, margin: 4 });
+    expect(CLEAR_SKY.params).toBeUndefined();
+    // The shader's formula, written out: tile ((x + margin - offset) mod size).
+    const at = (x: number, y: number): number => {
+      const u = ((((x + (params?.margin ?? 0) - (params?.x ?? 0)) % tile.width) + tile.width) % tile.width) | 0;
+      const v = ((((y + (params?.margin ?? 0) - (params?.y ?? 0)) % tile.height) + tile.height) % tile.height) | 0;
+      return 1 - (1 - (tile.data[(v * tile.width + u) * 4] ?? 255) / 255) * (params?.strength ?? 0);
+    };
+    for (const [x, y] of [
+      [0, 0],
+      [160, 90],
+      [319, 179],
+    ] as const) {
+      expect(at(x, y)).toBeCloseTo(shade.at(x, y), 9);
+    }
+  });
+
   it("scales its darkness by the clouds' strength", () => {
     const full = cloudShade({ x: 0, y: 0, strength: 1 }, 0, tile);
     const half = cloudShade({ x: 0, y: 0, strength: 0.5 }, 0, tile);

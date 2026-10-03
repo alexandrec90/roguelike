@@ -71,6 +71,12 @@ export class LandformLayer {
   }
 
   /** One frame; `shade` is the cloud shadow on the ground at a screen point. */
+  /**
+   * Nothing to do: these slices are one image per row, cheap batched quads,
+   * placed as they are cut. The GPU layer merges rows here instead.
+   */
+  arrange(): void {}
+
   update(ctx: FrameContext, shade?: { readonly key: string; readonly at: (x: number, y: number) => number }): void {
     const frame = wholePixelFrame(ctx.frame);
     const signature = `${poseId(ctx.pose)}|${frame.phaseX}|${frame.phaseY}|${ctx.atmosphere.hours.toFixed(2)}|${ctx.atmosphere.overcast.toFixed(2)}|${shade?.key ?? ""}`;

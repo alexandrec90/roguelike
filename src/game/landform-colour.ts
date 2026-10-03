@@ -26,8 +26,8 @@ export const RAMPS: Readonly<Record<number, readonly Rgb[]>> = {
 };
 
 /** The second strata of a cliff, banded between the first: a darker, redder rock. */
-const STRATA = rgbs(rampSlice("autumn", 0, 4));
-const WINDOW = hexToRgb(INK_COLORS["stone-0"]);
+export const STRATA = rgbs(rampSlice("autumn", 0, 4));
+export const WINDOW = hexToRgb(INK_COLORS["stone-0"]);
 
 function rgbs(inks: readonly InkId[]): Rgb[] {
   return inks.map((ink) => hexToRgb(INK_COLORS[ink]));

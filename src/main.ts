@@ -45,6 +45,8 @@ function webgl2Canvas(): { canvas: HTMLCanvasElement; context: WebGL2RenderingCo
   const context = canvas.getContext("webgl2", {
     alpha: false,
     antialias: false,
+    // The integrated GPU where a laptop has two: the target the frame budget is
+    // held to (`.claude/rules/rendering.md`), so what is measured is what ships.
     powerPreference: "low-power",
   });
   return context === null ? null : { canvas, context };

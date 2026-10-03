@@ -19,29 +19,33 @@
  * testable without a canvas, and the presentation layer can exaggerate a step
  * without being able to change where it lands.
  *
- * The unit is still a whole step: a press does not nudge the hero some number
- * of pixels, it commits one tile of walking that runs to completion. What
- * changed when the world became round is what a step *is*. There is no grid to
- * step across any more and no map edge to be fenced by - there is a pose, and
- * two walks over it (`planet.ts`):
+ * **Movement is free.** A held direction walks at `WALK_TILES_PER_MS` for
+ * exactly as long as it is held: release and he stops on that frame, press the
+ * other way and he turns round on that frame. There used to be a committed
+ * tile per press, and that commitment - up to 180 ms, 255 on a diagonal, before
+ * a new direction or a release was heard - was the lag a player felt.
  *
- * | Push  | Stride            | Heading                          |
- * | ----- | ----------------- | -------------------------------- |
- * | north | forward  +1 tile  | unchanged                        |
- * | south | forward  -1 tile  | unchanged                        |
- * | east  | strafe   +1 tile  | turns right by `1 / radius` rad  |
- * | west  | strafe   -1 tile  | turns left  by `1 / radius` rad  |
+ * What a walk *does* is the planet's (`planet.ts`): two walks over a pose,
  *
- * So walking sideways is the only thing that turns the world, and it turns it
- * whether the hero wanted to or not - that is the shape of the planet, not a
- * control decision. A diagonal is both walks at once (`Gait`) rather than a
- * fifth row in that table: the planet has no diagonal for it to be.
+ * | Push  | Walk     | Heading                                |
+ * | ----- | -------- | -------------------------------------- |
+ * | north | forward+ | unchanged                              |
+ * | south | forward- | unchanged                              |
+ * | east  | strafe+  | turns right by `1 / radius` rad a tile |
+ * | west  | strafe-  | turns left  by `1 / radius` rad a tile |
  *
- * Three views of the pose come out of here, and the renderer needs all three
- * for the reason `camera.ts` explains: `groundPose` is the pose the world is
- * *sampled* from (frozen for the length of a step), `scrollPhase` is the
- * sub-tile offset the picture is *drawn* at, and `livePose` is the continuous
- * truth, which only the horizon is far enough away to show.
+ * So walking sideways is the only thing that turns the world. A diagonal is
+ * both walks at once (`Gait`), each at `1/√2` of the speed, so eight-way
+ * movement has one speed.
+ *
+ * **The renderer still sees whole tiles plus a remainder.** The hero's place is
+ * an `anchor` pose and an `offset` from it of less than a tile on each axis.
+ * The world is *sampled* from the anchor and *drawn* shifted by the offset, and
+ * when the offset passes a whole tile the anchor walks that tile and the offset
+ * gives it back - the two cancel, exactly as a finished step's did. That is
+ * what lets free movement reuse every layer unchanged. Three views come out:
+ * `groundPose` (the anchor), `scrollPhase` (the offset) and `livePose` (the
+ * anchor walked by the offset: the continuous truth the horizon shows).
  */
 
 import { advanceTrack } from "./hero/action-track";
@@ -55,17 +59,18 @@ import {
   type PlanetPose,
 } from "./planet";
 
-/** One cell step, in ms. Short enough to feel like input, long enough to read. */
+/** Milliseconds to walk one tile: the walking speed, and one stride of the walk cycle. */
 export const STEP_MS = 180;
 
+/** Walking speed, tiles per millisecond, along any of the eight headings. */
+export const WALK_TILES_PER_MS = 1 / STEP_MS;
+
 /**
- * A diagonal crosses sqrt(2) tiles, so it is given sqrt(2) as long.
- *
- * Without this the shortest route anywhere is a zigzag: the same `STEP_MS`
- * spent covering a longer distance is 41% more speed for holding one extra key,
- * which is the oldest bug in eight-way movement.
+ * How far ahead of his feet the ground must be open, in tiles, along each axis
+ * he is walking. Rock is refused at this distance rather than at his feet, so
+ * he stops against a cliff instead of standing half inside it.
  */
-export const DIAGONAL_STEP_MS = Math.round(STEP_MS * Math.SQRT2);
+export const REACH_TILES = 0.4;
 
 /** An attack owns the sword arm until the swing it plays is over. */
 export const ATTACK_MS = SWING.durationMs;
@@ -87,7 +92,15 @@ export const CAST_CYCLE_MS = CAST.durationMs + CAST_COOLDOWN_MS;
 export const CAST_RELEASE_MS = Math.round(CAST.durationMs * 0.55);
 
 /** What the *legs* are doing. The sword arm has its own clock, `attackMs`. */
-export type Motion = "idle" | "step";
+export type Motion = "idle" | "walk";
+
+/** Tiles on each axis: +x is a strafe right, +y is forward. */
+export interface TileOffset {
+  readonly x: number;
+  readonly y: number;
+}
+
+const STILL: TileOffset = { x: 0, y: 0 };
 
 /**
  * A heading as the two walks the planet actually has.
@@ -137,19 +150,19 @@ export function facingYaw(facing: Heading): number {
 export type Facing = number;
 
 export interface PlayerState {
-  /** Where the current step lands; equal to `from` whenever one is not running. */
-  readonly pose: PlanetPose;
-  /** Where the current step began - and the pose the world is drawn from. */
-  readonly from: PlanetPose;
-  /** What the running step is walking; absent whenever one is not running. */
+  /** The whole-tile pose the world is sampled from; it moves a tile at a time. */
+  readonly anchor: PlanetPose;
+  /** How far he stands from the anchor, under a tile on each axis. */
+  readonly offset: TileOffset;
+  /** What he is walking this frame; absent while he stands. */
   readonly gait?: Gait;
+  /** How far he walked this frame, in tiles - what a thing left on the ground slides by. */
+  readonly stepped: TileOffset;
   /** Which way the sprite looks on screen - the aim, or failing one the heading. */
   readonly facing: Facing;
   readonly motion: Motion;
-  /** Elapsed ms in the current step; 0 whenever none is running. */
-  readonly motionMs: number;
-  /** Completed steps, so consecutive strides can lead with alternate legs. */
-  readonly steps: number;
+  /** Tiles walked in all, which is where in the walk cycle his legs are. */
+  readonly walked: number;
   /**
    * Elapsed ms in the swing, or `undefined` when the sword arm is free.
    *
@@ -206,8 +219,8 @@ export interface PlayerTick {
   /** True on the frame an attack actually started. */
   readonly attacked: boolean;
   /**
-   * True on the frame the heading was acted on - by stepping, or by turning to
-   * face the rock that refused the step. Both spend the press: walking into a
+   * True on the frame the heading was acted on - by walking, or by turning to
+   * face the rock that refused him. Both spend a queued tap: walking into a
    * wall is an answer, not a request still waiting to be granted.
    */
   readonly usedHeading: boolean;
@@ -223,12 +236,12 @@ export interface PlayerTick {
 
 export function createPlayer(pose: PlanetPose): PlayerState {
   return {
-    pose,
-    from: pose,
+    anchor: pose,
+    offset: STILL,
+    stepped: STILL,
     facing: facingYaw("south"),
     motion: "idle",
-    motionMs: 0,
-    steps: 0,
+    walked: 0,
     attackMs: undefined,
     castMs: undefined,
     heading: "south",
@@ -242,61 +255,30 @@ export function castProgress(player: PlayerState): number | undefined {
   return player.castMs === undefined ? undefined : Math.min(player.castMs / CAST.durationMs, 1);
 }
 
-/**
- * How long the step in flight lasts, read off the gait it is walking rather
- * than stored - a diagonal is exactly the one that moved on both axes.
- */
-export function stepDurationMs(player: PlayerState): number {
-  const gait = player.gait;
-  const diagonal = gait !== undefined && gait.forward !== 0 && gait.strafe !== 0;
-  return diagonal ? DIAGONAL_STEP_MS : STEP_MS;
-}
-
-/** How far through a step the player is, 0 to 1; 1 whenever none is running. */
-export function stepProgress(player: PlayerState): number {
-  if (player.motion !== "step") {
-    return 1;
-  }
-  return Math.min(player.motionMs / stepDurationMs(player), 1);
-}
-
 /** How far through the swing he is, 0 to 1, or `undefined` when not swinging. */
 export function attackProgress(player: PlayerState): number | undefined {
   return player.attackMs === undefined ? undefined : Math.min(player.attackMs / ATTACK_MS, 1);
 }
 
 /**
- * The pose the ground is sampled from: frozen for the length of a step.
+ * The pose the ground is sampled from: whole tiles only.
  *
- * Frozen on purpose. Sampling from the live pose would flip a tile's terrain
- * the instant the hero crossed the half-tile that rounds to the next sample,
- * which is a pop in the middle of a stride; freezing it and carrying the motion
- * in `scrollPhase` instead means the sample advances by exactly one cell at the
- * same instant the drawn offset resets by exactly one cell, and the two cancel.
+ * Sampling from the live pose would flip a tile's terrain the instant the hero
+ * crossed the half-tile that rounds to the next sample, which is a pop in the
+ * middle of a stride. The anchor moves a whole tile at the instant the offset
+ * gives that tile back, so the two cancel and nothing on the ground jumps.
  */
 export function groundPose(player: PlayerState): PlanetPose {
-  return player.from;
+  return player.anchor;
+}
+
+/** How far the world has slid out from under the hero, in tiles: under one on each axis. */
+export function scrollPhase(player: PlayerState): TileOffset {
+  return player.offset;
 }
 
 /**
- * How far the world has slid out from under the hero, in tiles.
- *
- * Zero between steps, and exactly one tile on each axis the step is walking by
- * the moment it completes - which is the instant `groundPose` advances by those
- * cells and takes the offset back to zero. A diagonal moves both at once, which
- * is why this was always a vector.
- */
-export function scrollPhase(player: PlayerState): { readonly x: number; readonly y: number } {
-  const gait = player.gait;
-  if (gait === undefined || player.motion !== "step") {
-    return { x: 0, y: 0 };
-  }
-  const walked = stepProgress(player);
-  return { x: gait.strafe * walked, y: gait.forward * walked };
-}
-
-/**
- * Where the hero actually is, mid-stride and all.
+ * Where the hero actually is: the anchor walked by the offset.
  *
  * Only the horizon reads this. Everything standing on the ground is drawn from
  * `groundPose` plus `scrollPhase` so that it all moves as one rigid picture; the
@@ -304,23 +286,23 @@ export function scrollPhase(player: PlayerState): { readonly x: number; readonly
  * to show the turn continuously.
  */
 export function livePose(player: PlayerState, radius: number = DEFAULT_STRAFE_RADIUS): PlanetPose {
-  const gait = player.gait;
-  if (gait === undefined || player.motion !== "step") {
-    return player.pose;
-  }
-  const walked = stepProgress(player);
-  const part = { forward: gait.forward * walked, strafe: gait.strafe * walked };
-  return applyGait(player.from, part, radius);
+  return walkFrom(player.anchor, player.offset, radius);
 }
 
 /**
- * Where in the walk cycle to sample, so the second stride leads with the other
- * leg instead of replaying the first - a whole clip's worth of variety for one
- * counter, rather than a second clip.
+ * Where in the walk cycle to sample: one stride per tile, the second leading
+ * with the other leg, so the feet keep pace with the ground at any speed.
  */
 export function walkClipMs(player: PlayerState, cycleMs: number): number {
-  const half = cycleMs / 2;
-  return (player.steps % 2) * half + stepProgress(player) * half;
+  const strides = ((player.walked % 2) + 2) % 2;
+  return (strides / 2) * cycleMs;
+}
+
+function walkFrom(anchor: PlanetPose, offset: TileOffset, radius: number): PlanetPose {
+  if (offset.x === 0 && offset.y === 0) {
+    return anchor;
+  }
+  return applyGait(anchor, { forward: offset.y, strafe: offset.x }, radius);
 }
 
 export function passable(world: World, point: PlanetPoint): boolean {
@@ -328,13 +310,13 @@ export function passable(world: World, point: PlanetPoint): boolean {
 }
 
 /**
- * One frame: turn to face the input, age both tracks, and start whatever each
- * of them is free to start.
+ * One frame: turn to face the input, walk, age the action tracks, and start
+ * whatever each of them is free to start.
  *
- * The two tracks never wait for each other - that is the point. Within a track
- * a committed action still runs to completion, and the overshoot past its end
- * carries into the next one, so a held direction produces an even stride and a
- * held button an even rhythm rather than a stutter at every frame boundary.
+ * Nothing waits for anything. The legs answer the input on the frame it
+ * arrives; within the sword's and the hands' tracks a committed action runs to
+ * completion, and the overshoot past its end carries into the next one, so a
+ * held button gives an even rhythm rather than a stutter.
  */
 export function advancePlayer(
   player: PlayerState,
@@ -379,90 +361,132 @@ export function advancePlayer(
   };
 }
 
-/** The legs' clock, which knows nothing about the sword. */
+/**
+ * The legs, which know nothing about the sword: walk this frame's share of the
+ * heading, or stand.
+ *
+ * A diagonal asks for two walks at once, so one rock in the corner must not
+ * stop him dead: try the pair, then each walk on its own, and only refuse when
+ * every one of them is rock. Sliding along a wall rather than sticking to it is
+ * what a player pushing a stick into it expects.
+ */
 function advanceMotion(
   player: PlayerState,
   intent: Intent,
   delta: number,
   world: World,
 ): { readonly player: PlayerState; readonly usedHeading: boolean } {
-  if (player.motion !== "step") {
-    return beginStep(player, intent, 0, world);
+  const standing: PlayerState = { ...player, motion: "idle", gait: undefined, stepped: STILL };
+  if (intent.heading === undefined) {
+    return { player: standing, usedHeading: false };
   }
-
-  const motionMs = player.motionMs + delta;
-  const duration = stepDurationMs(player);
-  if (motionMs < duration) {
-    return { player: { ...player, motionMs }, usedHeading: false };
-  }
-
-  const landed: PlayerState = {
-    ...player,
-    from: player.pose,
-    gait: undefined,
-    motion: "idle",
-    motionMs: 0,
-    steps: player.steps + 1,
-  };
-  return beginStep(landed, intent, Math.min(motionMs - duration, duration), world);
-}
-
-/**
- * The gait a heading actually walks, sliding along anything it clips.
- *
- * A diagonal asks for two walks at once, so one rock in the corner must not
- * cancel the whole step: try the pair, then each walk on its own, and only
- * refuse when every one of them is rock. Sliding along a wall rather than
- * sticking to it is what a player pushing a stick into it expects.
- *
- * `undefined` means nothing was open. There is no second case any more - a
- * round planet has no edge to walk off.
- */
-function openGait(
-  pose: PlanetPose,
-  heading: Heading,
-  world: World,
-): { readonly gait: Gait; readonly target: PlanetPose } | undefined {
-  const full = gaitOf(heading);
+  const full = gaitOf(intent.heading);
+  // Each axis of a diagonal at 1/√2, so every heading walks at one speed.
+  const share = delta * WALK_TILES_PER_MS * (isDiagonal(intent.heading) ? Math.SQRT1_2 : 1);
   const candidates: Gait[] = [full];
-  if (isDiagonal(heading)) {
+  if (isDiagonal(intent.heading)) {
     candidates.push({ forward: full.forward, strafe: 0 }, { forward: 0, strafe: full.strafe });
   }
   for (const gait of candidates) {
-    const target = applyGait(pose, gait, world.radius);
-    if (passable(world, target)) {
-      return { gait, target };
+    const stepped = { x: gait.strafe * share, y: gait.forward * share };
+    const offset = { x: player.offset.x + stepped.x, y: player.offset.y + stepped.y };
+    if (passable(world, ahead(player.anchor, offset, gait, world.radius))) {
+      const settled = settle(player.anchor, offset, world.radius);
+      return {
+        player: {
+          ...player,
+          ...settled,
+          gait,
+          stepped,
+          motion: "walk",
+          walked: player.walked + Math.hypot(stepped.x, stepped.y),
+        },
+        usedHeading: true,
+      };
     }
   }
-  return undefined;
+  // Walked into rock: he has already turned to face it, so stand rather than
+  // march on the spot against something that will never give.
+  return { player: standing, usedHeading: true };
 }
 
-/** What a player with both feet on the ground does with the heading he is given. */
-function beginStep(
-  player: PlayerState,
-  intent: Intent,
-  carry: number,
-  world: World,
-): { readonly player: PlayerState; readonly usedHeading: boolean } {
-  if (intent.heading === undefined) {
-    return { player, usedHeading: false };
-  }
+/** The ground `REACH_TILES` ahead of where he would stand, along each axis he walks. */
+function ahead(anchor: PlanetPose, offset: TileOffset, gait: Gait, radius: number): PlanetPose {
+  return walkFrom(
+    anchor,
+    { x: offset.x + Math.sign(gait.strafe) * REACH_TILES, y: offset.y + Math.sign(gait.forward) * REACH_TILES },
+    radius,
+  );
+}
 
-  const open = openGait(player.pose, intent.heading, world);
-  if (open === undefined) {
-    // Walked into rock: he has already turned to face it, so stay put rather
-    // than marching on the spot against something that will never give.
-    return { player, usedHeading: true };
+/**
+ * Hand whole tiles of offset to the anchor until under a tile is left on each
+ * axis. Forward first, then strafe: the same order `applyGait` walks them in.
+ */
+function settle(
+  anchor: PlanetPose,
+  offset: TileOffset,
+  radius: number,
+): { readonly anchor: PlanetPose; readonly offset: TileOffset } {
+  const forward = Math.trunc(offset.y);
+  const strafe = Math.trunc(offset.x);
+  if (forward === 0 && strafe === 0) {
+    return { anchor, offset };
   }
   return {
-    player: {
-      ...player,
-      from: player.pose,
-      pose: open.target,
-      gait: open.gait,
-      motion: "step",
-      motionMs: carry,
-    },
-    usedHeading: true,
+    anchor: nextAnchor(anchor, forward, strafe, radius),
+    offset: { x: offset.x - strafe, y: offset.y - forward },
   };
+}
+
+const WALKS = new WeakMap<PlanetPose, Map<string, PlanetPose>>();
+
+/**
+ * The anchor a whole-tile walk from `anchor` lands on - the same object every
+ * time it is asked for. Every layer keys its per-anchor work on the pose
+ * object, so this is what lets the work for the next anchor be done before
+ * the hero gets there (`upcomingAnchor`): the pose the scene prepared for is
+ * the very pose `settle` then hands over.
+ */
+export function nextAnchor(anchor: PlanetPose, forward: number, strafe: number, radius: number): PlanetPose {
+  let walks = WALKS.get(anchor);
+  if (walks === undefined) {
+    walks = new Map();
+    WALKS.set(anchor, walks);
+  }
+  const key = `${forward},${strafe},${radius}`;
+  let next = walks.get(key);
+  if (next === undefined) {
+    next = applyGait(anchor, { forward, strafe }, radius);
+    walks.set(key, next);
+  }
+  return next;
+}
+
+/** The anchor the hero is walking into, and how soon he gets there. */
+export interface UpcomingAnchor {
+  readonly pose: PlanetPose;
+  readonly inMs: number;
+}
+
+/**
+ * Where the anchor moves next if he keeps walking as he is, or undefined while
+ * he stands. Each axis he walks crosses a whole tile when its offset reaches
+ * ±1; the first to get there decides the next anchor, and an axis that gets
+ * there within a frame of it goes with it, as a diagonal does.
+ */
+export function upcomingAnchor(player: PlayerState, radius: number, frameMs = 17): UpcomingAnchor | undefined {
+  const { gait, offset } = player;
+  if (gait === undefined || player.motion !== "walk") {
+    return undefined;
+  }
+  const speed = WALK_TILES_PER_MS * (gait.forward !== 0 && gait.strafe !== 0 ? Math.SQRT1_2 : 1);
+  // From `from` to the tile edge at `sign` (±1) is 1 - from·sign tiles.
+  const msTo = (from: number, sign: number): number => (sign === 0 ? Number.POSITIVE_INFINITY : (1 - from * sign) / speed);
+  const forwardMs = msTo(offset.y, Math.sign(gait.forward));
+  const strafeMs = msTo(offset.x, Math.sign(gait.strafe));
+  const inMs = Math.min(forwardMs, strafeMs);
+  const forward = forwardMs <= inMs + frameMs ? Math.sign(gait.forward) : 0;
+  const strafe = strafeMs <= inMs + frameMs ? Math.sign(gait.strafe) : 0;
+  return { pose: nextAnchor(player.anchor, forward, strafe, radius), inMs };
 }

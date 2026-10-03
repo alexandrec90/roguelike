@@ -27,8 +27,8 @@ import { pixelHash } from "./transforms";
 /** Slots in a far look: a colour on fewer than one far pixel in this many is dropped. */
 export const FAR_LEVELS = 64;
 
-/** Seeds the per-pixel pick; any constant, so a capture repeats. */
-const FAR_SEED = 0xfa7;
+/** Seeds the per-pixel pick; any constant, so a capture repeats. The lip shader ports the pick. */
+export const FAR_SEED = 0xfa7;
 
 /** Colours packed `0xRRGGBB`, each repeated in proportion to its share. */
 export interface FarLook {

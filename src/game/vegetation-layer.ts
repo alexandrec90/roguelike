@@ -40,7 +40,7 @@ import {
 } from "./camera";
 import type { CloudShade } from "./cloud-shadow";
 import type { FrameContext } from "./frame-context";
-import { sharedGroundSample } from "./ground/ground-sample";
+import { prefetchGroundSample, sharedGroundSample, type GroundSample } from "./ground/ground-sample";
 import {
   inWater,
   placeTufts,
@@ -74,6 +74,13 @@ export interface GrassPusher extends ScreenPoint {
   readonly weight?: number;
 }
 
+/** Where a pose's tufts stand, worked out before or as it arrives. */
+interface Placements {
+  readonly pose: PlanetPose;
+  readonly wind: WindGrid;
+  readonly tufts: readonly TuftPlacement[];
+}
+
 interface LiveTuft {
   readonly bob: Phaser.GameObjects.Bob;
   readonly placement: TuftPlacement;
@@ -92,6 +99,8 @@ export class VegetationLayer {
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private origin = { x: 0, y: 0 };
   private sampled: PlanetPose | undefined;
+  /** The tufts placed ahead for the anchor the hero is walking into. */
+  private ahead: Placements | undefined;
   private flat: CameraFrame | undefined;
   private bareGround: BareGround | undefined;
   /** What the tufts were last tinted for: the cloud pattern, the scroll and the tufts in place. */
@@ -124,6 +133,7 @@ export class VegetationLayer {
     this.pools = this.rows.map(() => []);
     this.tufts = [];
     this.sampled = undefined;
+    this.ahead = undefined;
   }
 
   /**
@@ -284,17 +294,36 @@ export class VegetationLayer {
     return tuftFrame(tuft.shape, bendFrame(bend));
   }
 
+  /**
+   * Place the tufts for the anchor the hero is walking into, ahead of the frame
+   * that crosses into it - which then only re-seats bobs.
+   */
+  prefetch(pose: PlanetPose): void {
+    if (this.ahead?.pose === pose || this.sampled === pose) {
+      return;
+    }
+    this.ahead = this.placementsFor(pose, prefetchGroundSample(pose, this.bounds));
+  }
+
+  private placementsFor(pose: PlanetPose, sample: GroundSample): Placements {
+    const water = this.waterPatches(pose);
+    return {
+      pose,
+      wind: windGrid(sample),
+      tufts: placeTufts(sample).filter((placement) => !inWater(placement, water)),
+    };
+  }
+
   /** Where the tufts are for this pose: re-seat the pooled bobs, row by row. */
   private resample(pose: PlanetPose): void {
+    // Called first so the sample taken ahead becomes the one on screen either way.
     const sample = sharedGroundSample(pose, this.bounds);
-    this.wind = windGrid(sample);
+    const placed = this.ahead?.pose === pose ? this.ahead : this.placementsFor(pose, sample);
+    this.ahead = undefined;
+    this.wind = placed.wind;
     const used = this.pools.map(() => 0);
     this.tufts = [];
-    const water = this.waterPatches(pose);
-    for (const placement of placeTufts(sample)) {
-      if (inWater(placement, water)) {
-        continue;
-      }
+    for (const placement of placed.tufts) {
       const index = placement.localY - this.bounds.minY;
       const blitter = this.rows[index];
       const pool = this.pools[index];

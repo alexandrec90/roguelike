@@ -21,8 +21,8 @@
  * past the field's far edge, and `localPlacement` says where on the roll it
  * stands and how small it is; there it draws a bake re-sampled at that scale. A
  * tree first seen as a speck on the horizon line is the tree the hero later
- * walks past — and being seen there first is what warms its full-size bakes
- * before it arrives.
+ * walks past. Every body's bakes are asked for at `create`, off the main thread
+ * (`scenery-baker.ts`), so neither end of that walk waits on one.
  *
  * **The wind is sampled at the planet point**, never the screen position, so a
  * body's sway does not re-phase every time the hero takes a step, and a gust
@@ -38,18 +38,18 @@ import { toLocal, type PlanetPose } from "./planet";
 import { RANK, standingDepth, TILE_WIDTH } from "./projection";
 import { quantizeLight, windLevelIndex } from "./scenery-bake";
 import { SceneryCache, type BakedTexture } from "./scenery-cache";
-import { sceneryNear, speciesHeight, type SceneryFeature } from "./scenery-features";
+import { sceneryArchetypes, sceneryNear, speciesHeight, type SceneryFeature } from "./scenery-features";
 import { bodiesInView, keyOf, lendSlots, TALLEST_BODY } from "./scenery-slots";
 import { windAt } from "./wind";
 
 /** Bodies on screen at once, field, roll and the sinking far side of the horizon together. */
 const SCENERY_POOL = 256;
 
+/** Milliseconds of texture uploads a held (not yet shown) frame may spend. */
+const HOLD_UPLOAD_MS = 50;
+
 /** The widest body a slot may hold — a full chestnut crown. */
 const WIDEST_BODY = 80;
-
-/** Milliseconds of bakes allowed per frame, beyond the first. */
-const BAKE_BUDGET_MS = 3;
 
 /** Shadows sit over the grass of their own row, under anything standing. */
 const SHADOW_RANK = RANK.grass + 0.5;
@@ -74,6 +74,7 @@ export class SceneryLayer {
   create(scene: Phaser.Scene, bounds: LocalBounds, width: number): void {
     this.layout(bounds, width);
     this.cache = new SceneryCache(scene.textures);
+    this.cache.warm(sceneryArchetypes());
     this.slots = Array.from({ length: SCENERY_POOL }, () => ({
       key: null,
       feature: null,
@@ -99,7 +100,17 @@ export class SceneryLayer {
         this.draw(slot, slot.feature, ctx);
       }
     }
-    this.cache.pump(BAKE_BUDGET_MS);
+    this.cache.pump();
+  }
+
+  /**
+   * Whether every body has a picture to show yet. The scene holds its first
+   * frame back until it does, so a load never shows the wood filling in.
+   */
+  ready(): boolean {
+    // Nothing is on screen while the scene holds, so the uploads may have the frame.
+    this.cache.pump(HOLD_UPLOAD_MS);
+    return this.cache.warmed();
   }
 
   private draw(slot: Slot, feature: SceneryFeature, ctx: FrameContext): void {
@@ -190,24 +201,8 @@ export class SceneryLayer {
     if (this.swept !== pose) {
       this.candidates = sceneryNear(pose, localReach(this.bounds) + rowsToSink(TALLEST_BODY));
       this.swept = pose;
-      this.prewarmNearby(pose);
     }
     return this.candidates;
-  }
-
-  /**
-   * Queue bakes for every body within a couple of tiles of the field, in view
-   * or not — the ones just off the sides are the ones a strafe brings in at
-   * full size, with no horizon to have warmed them on the way.
-   */
-  private prewarmNearby(pose: PlanetPose): void {
-    const reach = localReach(this.bounds) + 2;
-    for (const feature of this.candidates) {
-      const local = toLocal(pose, feature);
-      if (Math.hypot(local.x, local.y) <= reach) {
-        this.cache.prewarm(feature);
-      }
-    }
   }
 }
 
@@ -222,8 +217,8 @@ function show(
     image.setVisible(false);
     return;
   }
-  if (image.texture.key !== baked.key) {
-    image.setTexture(baked.key);
+  if (image.texture.key !== baked.key || (baked.frame !== undefined && image.frame.name !== baked.frame)) {
+    image.setTexture(baked.key, baked.frame);
   }
   image
     .setPosition(footX - baked.originX, footY - baked.originY)

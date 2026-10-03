@@ -36,22 +36,46 @@ tint in eight dithered steps, and the clouds are three computed tones.
 | Every frame, and more than ~200 pixels (the hero, a slime, a flame) | A **`PixelSurface`**: `clear()`, `paint(cloud, x, y)`, `commit()` — one upload, one quad | `pixel-surface.ts` |
 | Every frame, a few dozen pixels (fireflies, a bolt) | `drawCloud` into a `Graphics` | `draw-cloud.ts` |
 
+Every texture here is a **byte texture uploaded straight from its buffer**
+(`addUint8Array`), never a canvas: a canvas cost a `putImageData` and a second
+copy per commit, ~0.7 ms a frame across a scene's surfaces. A surface whose
+drawing keeps to a band clears and uploads only that band
+(`clearRows`, `commit(rows)`) - the water surface covers the screen and changes
+only where the puddles are. A set of pictures goes in as one texture with a
+frame each (`installFrames`), not a texture per picture.
+
 **Never** fill hundreds of pixels a frame through `Graphics.fillRect`, and **never** draw
-through a per-frame `GameObjects.Shader`: the volume shader re-uploaded forty uniforms per
+*one `GameObjects.Shader` per object*: the volume shader re-uploaded forty uniforms per
 object per frame and cost 7.5 ms. It still exists — the tree lab renders with it and
-diffs it against the CPU — but the game draws scenery from bakes.
+diffs it against the CPU — but the game draws scenery from bakes. A handful of
+full-frame render-to-texture passes, off the display list, is a different thing and the
+right tool for per-pixel work (below).
 
 ## Scenery is baked, not rendered
 
 `scenery-bake.ts` poses a species at each of `WIND_LEVELS` by stepping it under a wind
 held fixed (`WindOptions.fixed`) until its own springs settle, then flattens body, outline
-and cast shadow to buffers. `scenery-cache.ts` turns those into textures: one bake per
-body per lean per light, a newly seen body baking only the lean it needs *now* and
-queueing the rest (one bake per frame within `BAKE_BUDGET_MS`), bodies on the horizon
-roll re-sampled at a quantised scale and warming their full-size leans as they approach,
-and a re-bake when the sun crosses a step that keeps the old picture until the new one is
-whole. `scenery-layer.ts` only chooses: the lean nearest the travelling wind at the body's
-planet point, eased.
+and cast shadow to buffers. **Bakes never run on the frame:** `scenery-baker.ts` runs
+them on Web Workers (`scenery-bake-worker.ts`, over the pure `scenery-bake-jobs.ts`), and
+`scenery-cache.ts` only submits jobs and uploads what comes back within a per-frame
+budget. Variety is bounded on purpose — every body is one of `SCENERY_VARIANTS` shapes
+per species (`scenery-features.ts`) — so the whole wood is a few dozen bodies, all asked
+for at `create`, and the scene holds its first frame behind a fade until each has a
+picture. A body is never hidden for want of a bake it once had: a horizon body shows
+its last light's ladder until this light's is back, and a re-bake for a new sun keeps the
+old picture until the new one is whole. `scenery-layer.ts` only chooses: the lean nearest
+the travelling wind at the body's planet point, eased.
+
+A body's horizon pictures are **one ladder**: every scale step from a speck to full size,
+baked in one job from one posing and installed as one texture with a frame per rung.
+Asked for a rung at a time, the wood was ~2,000 jobs and ~1,400 textures per light, each
+re-posing the body - four workers ran flat out for the first minute of every walk and
+took the frame's CPU with them. Workers are capped at two (`workerCount`) for the same
+reason: a worker on the frame's hyperthread slows the frame as much as one on its core.
+
+Unbounded variety is what this replaced: one seed per tree put ~900 distinct bodies in
+reach against a 320-entry cache, bakes never caught up, and the horizon filled in one
+body a frame while the hero stood still.
 
 Which body stands where is `scenery-features.ts`: seeded lattices of trees (a weighted
 species mix), bushes, boulders and mushroom rings over the planet.
@@ -86,17 +110,87 @@ per frame with `beginFrame`; no layer derives time, light or weather for itself.
 Ground-riding things that are not planet features (cloud shadows, fireflies, pollen) move
 with `odometer.ts`.
 
+## Per-pixel work belongs on the GPU
+
+A pass that decides every pixel of the frame in JavaScript costs milliseconds of
+the one thread everything else shares. The landform march is the worked example
+(`landform-gpu-layer.ts`), and its shape is the one to copy:
+
+- **The CPU decides what, the GPU decides each pixel.** The CPU still runs the
+  march *schedule* (a few hundred depths) and hands it over as a float texture
+  (`gpu/float-texture.ts`); the shader is a line-for-line port of the CPU code,
+  which stays as the tested reference and the `?render=cpu` fallback.
+- **Port the algorithm's shape, not just its arithmetic.** The CPU march is a
+  column scan; re-running that scan per pixel cost 25 ms on the HD 530. Three
+  passes - a probe per (column, step), block minima, then a per-pixel search -
+  do the same thing exactly in ~3 ms (`gpu/landform-shader.ts` says why).
+- **Never read back.** Anything the CPU needs to place the result - a slice's
+  rectangle - is bounded from the inputs (`landform-gpu-rows.ts`), not measured
+  off the picture.
+- **Sort by depth with plain images.** A pass that must interleave with sprites
+  packs its pixels into an atlas a band per depth group, and the display list
+  draws each band as an ordinary image; rows only split where something
+  standing sorts between them (`groupRows`). A `Shader` object per slice broke
+  the sprite batch a hundred times a frame.
+- **Prove parity.** Diff the GPU output against the CPU's on the same frame in
+  the running page; the landform march agrees on coverage exactly and on colour
+  but for ~0.6% of pixels one ramp step apart on dither seams.
+- **Round where the CPU stores.** The horizon lip (`roll-ground-gpu.ts`,
+  `gpu/lip-shader.ts`) rounds half-to-even at every step the CPU writes into a
+  `Uint8ClampedArray`, and is handed exact alphas by index rather than as
+  bytes; it matches `rollGroundPixels` on every pixel but the odd blade where
+  two tufts overlap in the dithered far rows, whose CPU order depends on which
+  pixels happened to be sampled first.
+- **The CPU says which cells, the GPU reads them.** The lip's per-frame CPU work
+  is a walk over the cells it reads (`visitLipCells`) making sure each has a
+  page in the atlas and its tufts at this frame's bend - most of it no change.
+
+Two GPU passes now: the landform march and the horizon lip. `?render=cpu`
+draws both on the CPU, which is also what runs without WebGL2.
+
+## Light never redraws anything on the CPU
+
+The sun moving, a cloud drifting, night falling: none of these may make a layer
+re-run CPU work. A standing sprite takes its cloud shadow as a tint at its foot
+(`CloudShade.tint`), the ground takes it from the cloud pass, the lighting pass
+multiplies the whole frame, and anything shaded per pixel samples the cloud tile
+in its own shader (`CloudShade.params`). The CPU landform march re-rendered on
+every pixel of cloud drift; the GPU march only re-runs a pass.
+
+## The next anchor is prepared ahead
+
+Every layer that reads the world through the anchor did its work on the frame
+the anchor moved - all of them on the same frame, one walking frame in eleven,
+at nearly twice the cost of the rest. Movement is free, so the next anchor is
+known well before it arrives (`upcomingAnchor`, which hands back the same pose
+object `settle` will), and a layer with per-anchor work exposes a `prefetch` (or
+`prefetchTasks`) that does it into a slot keyed on that pose. `prefetcher.ts`
+runs the tasks a few a frame, never on the frame that crossed; a guess that does
+not come true is simply never used. A new layer with per-anchor work joins it.
+
+**A task is never split once begun**, and the first of a frame always runs, so a
+task's size is the spike: cut work by cost, not by convenience (`warmChunks` -
+the lip's first point-sampled scanline composed a hundred tiles in one task, a
+7 ms frame). Caches behind it are keyed by what is *drawn*, not by object
+identity: puddle bodies were keyed by the sky object, which is remade every
+twentieth of an hour, and every crossing after one repainted them all.
+
 ## The budget
 
-Measured on an Intel HD 530. A frame is 16.7 ms; the JS half of it should stay near 8.
+Measured on an Intel HD 530 (this is the machine the numbers below are from). A
+frame is 16.7 ms; the JS half of it should stay near 8.
 
 | Where | Budget | How it stays there |
 | --- | --- | --- |
-| Scenery | ~1 ms + ≤ 3 ms of queued bakes | textures chosen per frame; bakes sliced |
-| Ground | ~0.5 ms | composed once per step into one surface |
-| Grass | ~1 ms | a baked tuft atlas; frames chosen from the wind |
-| Horizon lip | ~1.6 ms; ~7 ms on the frame a step lands. Water added ~1 ms a frame and ~2–3 ms a step, measured on a faster machine | one surface; the lattice read on demand, and never under a far pixel (far looks, counted once at load - tens of ms - and one hash a far pixel); tufts packed once and kept in an overlay a step, only the three swaying rows re-stamped; puddle outlines and bodies cached by shape |
-| Landforms | ~0.1 ms in open land; ~5 ms median beside a mountain, measured on a faster machine | a planet-fixed grid per landform, built once; the march visits only the columns each covers; far views kept between strides; one atlas upload of only the rows in use |
+| Scenery | ~1 ms walking | textures chosen per frame; bakes on two workers, a ladder per body per light; only uploads (≤ 2 ms) on the frame |
+| Ground | ~0.5 ms; ~0.5 ms on a crossing | composed once per anchor into one surface; planned ahead (`prefetch`) |
+| Grass | ~0.6 ms; ~0.9 ms on a crossing | a baked tuft atlas; frames chosen from the wind; tufts placed ahead |
+| Horizon lip (GPU) | ~0.4 ms CPU | one shader pass over tables (`lip-gpu-data.ts`); the CPU walks the cells read, pages tiles and puddles into an atlas, bends the swaying tufts; the next anchor's cells filled ahead in tasks cut by cost; far looks counted once at load (tens of ms) into one small texture |
+| Horizon lip (CPU, `?render=cpu`) | ~2.2 ms | one surface; the lattice read on demand, and never under a far pixel (far looks, counted once at load - tens of ms - and one hash a far pixel); tufts kept in an overlay an anchor, only the swaying rows re-stamped |
+| Landforms (GPU) | ~1–2 ms CPU walking beside a mountain; nothing idle | the march in five shader passes (below); the CPU only schedules and places slices, measuring only what sorts between them |
+| Landforms (CPU, `?render=cpu`) | ~0.1 ms in open land; ~5 ms median beside a mountain | a planet-fixed grid per landform, built once; the march visits only the columns each covers; far views kept between strides; one atlas upload of only the rows in use |
+| Water | ~0.5 ms | the surface cleared, painted and uploaded only over the rows the puddles span |
+| Next anchor, ahead | ≤ 2.5 ms a frame after the first task; tasks of ≤ ~1 ms | `Prefetcher` tasks, never on the frame that crossed |
 | Each actor | ≤ 0.5 ms | small surfaces, caches keyed by quantised pose |
 | Lighting | ~0.5 ms | one render texture, a stamp per light |
 
@@ -111,10 +205,19 @@ Export-checked by `src/game/rendering-rule.test.ts`, so it cannot rot.
 | --- | --- |
 | `palette.ts` | `INK_FAMILIES` · `familyRamp` · `rampSlice` · `familyHex` |
 | `pixel-buffer.ts` | `createBuffer` · `paintInto` · `bakeCloud` · `blitBuffer` · `compositeOver` |
-| `pixel-surface.ts` | `PixelSurface` · `installStrip` · `installBuffer` |
-| `scenery-bake.ts` | `WIND_LEVELS` · `settleAt` · `bakePose` · `bakeScaled` · `outlineCloud` · `quantizeLight` |
+| `pixel-surface.ts` | `PixelSurface` · `installStrip` · `installBuffer` · `installFrames` · `packFrames` |
+| `scenery-bake.ts` | `WIND_LEVELS` · `settleAt` · `bakePose` · `bakeScaled` · `bakeLadder` · `outlineCloud` · `quantizeLight` |
 | `scenery-cache.ts` | `SceneryCache` |
-| `scenery-features.ts` | `sceneryNear` · `PLACED_SPECIES` |
+| `scenery-baker.ts` | `createBaker` · `WorkerBaker` · `InlineBaker` |
+| `scenery-features.ts` | `sceneryNear` · `PLACED_SPECIES` · `SCENERY_VARIANTS` · `sceneryArchetypes` |
+| `gpu/float-texture.ts` | `FloatTexture` · `hasWebGL2` |
+| `landform-gpu-data.ts` | `packField` · `viewUniforms` · `scheduleTexels` · `columnBounds` |
+| `landform-gpu-rows.ts` | `rowRects` · `groupRows` · `stackBands` · `radialProfile` |
+| `landform-gpu-layer.ts` | `LandformGpuLayer` |
+| `lip-gpu-data.ts` | `lipLines` · `visitLipCells` · `warmChunks` · `PageAtlas` · `CellTable` · `TuftTable` · `tuftAtlas` · `farLookTexels` |
+| `roll-ground-gpu.ts` | `LipGpu` |
+| `prefetcher.ts` | `Prefetcher` |
+| `player.ts` | `upcomingAnchor` · `nextAnchor` |
 | `atmosphere.ts` | `atmosphereAt` · `clockHours` · `parseTime` |
 | `lights.ts` | `flicker` · `lightFalloff` · `lightPool` |
 | `lighting-layer.ts` | `LightingLayer` · `LIGHTING_DEPTH` |

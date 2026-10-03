@@ -54,6 +54,29 @@ function texelKey(gx: number, gy: number): number {
 }
 
 /**
+ * Every distinct ink alpha the lip's water has used, in the order first seen.
+ * A page stores an index into this rather than the alpha, so the shader blends
+ * with exactly the alpha the CPU does (`lip-gpu-data.ts`).
+ */
+export const WATER_ALPHAS: number[] = [];
+
+/** Most alphas a page code can name: seven bits, less the zero that means "no water". */
+export const MAX_WATER_ALPHAS = 127;
+
+/** A texel's code: 0 for none, else 1 + its alpha's index, plus 128 for water rather than damp ground. */
+export function waterCode(alpha: number, water: boolean): number {
+  let index = WATER_ALPHAS.indexOf(alpha);
+  if (index < 0) {
+    if (WATER_ALPHAS.length >= MAX_WATER_ALPHAS) {
+      throw new Error("More distinct water alphas than a page code can name");
+    }
+    WATER_ALPHAS.push(alpha);
+    index = WATER_ALPHAS.length - 1;
+  }
+  return 1 + index + (water ? 128 : 0);
+}
+
+/**
  * Whether a puddle centred at a local point can show on the lip: no nearer
  * than a puddle's depth short of the seam - nearer than that it is wholly the
  * field's - no farther than the horizon, and inside the cone the lip's columns
@@ -104,6 +127,23 @@ export class LipWater implements WaterLook {
 
   wetCell(cellX: number, cellY: number): boolean {
     return this.cells.has(texelKey(cellX, cellY));
+  }
+
+  /**
+   * A cell's water as a 16 x 12 page for the lip's shader: per texel its colour
+   * and `waterCode`, row 0 the cell's nearest texel row (`gy = cellY * 12`).
+   * `at` is the byte offset of the page's top-left in `data`, `stride` the bytes
+   * per row there.
+   */
+  page(cellX: number, cellY: number, data: Uint8Array, at: number, stride: number): void {
+    for (let row = 0; row < TILE_DEPTH; row += 1) {
+      for (let column = 0; column < TILE_WIDTH; column += 1) {
+        const texel = this.texels.get(texelKey(cellX * TILE_WIDTH + column, cellY * TILE_DEPTH + row));
+        if (texel !== undefined) {
+          data.set([texel.r, texel.g, texel.b, waterCode(texel.a, texel.water)], at + row * stride + column * 4);
+        }
+      }
+    }
   }
 
   blendInto(gx: number, gy: number, rgba: Uint8ClampedArray, at: number): boolean {

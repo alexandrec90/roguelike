@@ -22,7 +22,7 @@
  *
  * Measured under Node on the dev machine, settle plus bake, per lean: chestnut
  * 7.9 ms, boulder 4.1, spruce 2.6, mushrooms 2.5, bush 1.8, beech 1.5, ash 1.4,
- * oak 1.1. Hence one lean per frame from a queue, never a whole body at once.
+ * oak 1.1. Hence never on the frame: `scenery-baker.ts` runs them on workers.
  *
  * Pure and Phaser-free; `scenery-cache.ts` owns the textures these become.
  */
@@ -150,13 +150,30 @@ export function bakePose(instance: SceneryInstance, light: BakeLight, wind = 0):
  * difference cannot be seen.
  */
 export function bakeScaled(instance: SceneryInstance, light: BakeLight, scale: number): BakedCloud {
+  const [baked] = bakeLadder(instance, light, [scale]);
+  if (baked === undefined) {
+    throw new Error("bakeLadder returned nothing for one scale");
+  }
+  return baked;
+}
+
+/**
+ * The body at every scale in `scales`, for the horizon roll - one bake per
+ * scale, from one posing.
+ *
+ * The body is posed once and only re-sampled per scale: its volumes evaluated
+ * at each spacing, or its full-size cloud point-sampled. Posing a recursive oak
+ * is most of a bake, and a ladder asked for one scale at a time posed it forty
+ * times over.
+ */
+export function bakeLadder(instance: SceneryInstance, light: BakeLight, scales: readonly number[]): BakedCloud[] {
   const env = bakeEnv(light, { strength: 1, gustiness: 0.6, fixed: 0 });
   const parts = instance.volumes?.(env);
   if (parts !== undefined && parts.length > 0) {
-    const cloud = parts.flatMap((part) => volumeCloud(part.spec, part.light, part.clip, scale));
-    return bakeCloud(cloud);
+    return scales.map((scale) => bakeCloud(parts.flatMap((part) => volumeCloud(part.spec, part.light, part.clip, scale))));
   }
-  return bakeCloud(pointSample(instance.cloud(env), scale));
+  const cloud = instance.cloud(env);
+  return scales.map((scale) => bakeCloud(pointSample(cloud, scale)));
 }
 
 const NEIGHBOURS: readonly (readonly [number, number])[] = [
