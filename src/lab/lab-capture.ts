@@ -1,15 +1,15 @@
 /**
  * The capture `window.assetLab.snapshot()` returns.
  *
- * `LabScene.setState` moves game objects, and the canvas only changes when Phaser
- * draws them, which happens inside `game.loop`. An extension-driven tab is usually
+ * `LabScene.setState` moves game objects, and the canvas only changes when the
+ * game draws them, which happens inside its animation-frame loop. An extension-driven tab is usually
  * hidden, so Chrome freezes `requestAnimationFrame` and the loop never runs. Reading
  * the canvas there returned the same frame for all 16 frames of `hero-facings-free`.
- * So the capture draws the frame first. `step` with a zero delta runs every system
+ * So the capture draws the frame first. `step` with a zero delta runs the scene
  * without advancing time, which leaves a paused view exactly where `apply` put it.
  */
 
-/** The part of `Phaser.Game` a capture needs, so a test can stand in for it. */
+/** The part of the engine's `Game` a capture needs, so a test can stand in for it. */
 export interface CaptureTarget {
   readonly isBooted: boolean;
   readonly canvas: { toDataURL(type: string): string };

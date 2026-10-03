@@ -1,5 +1,5 @@
 /**
- * The asset lab's entry point: DOM chrome around one 320x180 Phaser canvas.
+ * The asset lab's entry point: DOM chrome around one 320x180 game canvas.
  *
  * Nothing here is exported. Every decision worth testing lives in a pure module
  * (`lab-state`, `lab-timeline`, `lab-layout`, `asset-registry`, `textures`) and
@@ -10,8 +10,7 @@
  * the art or rendering text at a size no 320x180 screen would ever use.
  */
 
-import Phaser from "phaser";
-
+import { Game } from "../engine";
 import { ASSET_REGISTRY, assetFrame, findAsset, type AssetCategory } from "../game/asset-registry";
 import { integerScale, letterbox } from "../game/integer-scale";
 import { TILE_PREVIEW_COLUMNS, TILE_PREVIEW_ROWS } from "../game/textures";
@@ -62,19 +61,15 @@ const tileToggle = need<HTMLInputElement>("tile");
 const statusText = need<HTMLParagraphElement>("status");
 const notesText = need<HTMLParagraphElement>("notes");
 
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
+const game = new Game({
   parent: canvasHost,
   width: LAB_SIZE.width,
   height: LAB_SIZE.height,
   backgroundColor: "#0e1015",
-  pixelArt: true,
-  roundPixels: true,
   // A snapshot has to be readable after the frame it was drawn in, or the
   // capture API returns a blank PNG on every browser that clears eagerly.
-  render: { preserveDrawingBuffer: true },
-  scale: { mode: Phaser.Scale.NONE, autoCenter: Phaser.Scale.NO_CENTER },
-  scene: [scene],
+  preserveDrawingBuffer: true,
+  scene,
 });
 
 function need<T extends HTMLElement>(id: string): T {
@@ -345,8 +340,8 @@ exposeApi();
 apply(state);
 
 window.addEventListener("resize", fitCanvas);
-game.events.once(Phaser.Core.Events.READY, fitCanvas);
+game.once("ready", fitCanvas);
 
 if (import.meta.hot) {
-  import.meta.hot.dispose(() => game.destroy(true));
+  import.meta.hot.dispose(() => game.destroy());
 }

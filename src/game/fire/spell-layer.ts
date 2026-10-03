@@ -17,7 +17,7 @@
  * in front of one and behind the other correctly.
  */
 
-import Phaser from "phaser";
+import type { Scene } from "../../engine";
 
 import { localRow } from "../camera";
 import type { Strike } from "../combat";
@@ -92,7 +92,7 @@ const BLAST_FOOT_X = SURFACE_WIDTH / 2;
 const BLAST_FOOT_Y = SURFACE_HEIGHT - 40;
 
 export class SpellLayer {
-  private scene!: Phaser.Scene;
+  private scene!: Scene;
   private decals: DecalLayer | null = null;
   private hitTest: HitTest = () => false;
   private readonly effects: Effect[] = [];
@@ -100,7 +100,7 @@ export class SpellLayer {
   private strikes: Strike[] = [];
   private launches = 0;
 
-  create(scene: Phaser.Scene, decals: DecalLayer | null, hitTest?: HitTest): void {
+  create(scene: Scene, decals: DecalLayer | null, hitTest?: HitTest): void {
     this.scene = scene;
     this.decals = decals;
     if (hitTest !== undefined) {

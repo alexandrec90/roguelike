@@ -20,8 +20,7 @@
  * at draw time, so the dither in them stays locked to the pixel grid.
  */
 
-import Phaser from "phaser";
-
+import type { RenderTarget, Scene } from "../engine";
 import { CLOUD_TILE_HEIGHT, cloudTile, tileOrigins } from "./cloud-shadow";
 import { hexToInt, mixHex } from "./color";
 import { MAX_SHAKE } from "./impulse";
@@ -69,13 +68,13 @@ export interface LightingFrame {
 }
 
 export class LightingLayer {
-  private scene!: Phaser.Scene;
-  private shade!: Phaser.GameObjects.RenderTexture;
-  private clouds!: Phaser.GameObjects.RenderTexture;
-  private glow!: Phaser.GameObjects.RenderTexture;
+  private scene!: Scene;
+  private shade!: RenderTarget;
+  private clouds!: RenderTarget;
+  private glow!: RenderTarget;
   private readonly baked = new Set<number>();
 
-  create(scene: Phaser.Scene, width: number, height: number): void {
+  create(scene: Scene, width: number, height: number): void {
     this.scene = scene;
     installBuffer(scene.textures, CLOUD_KEY, cloudTile());
     // A margin all round, so a camera shake never slides an unlit strip of
@@ -84,17 +83,17 @@ export class LightingLayer {
       .renderTexture(-MARGIN, -MARGIN, width + MARGIN * 2, height + MARGIN * 2)
       .setOrigin(0, 0)
       .setDepth(LIGHTING_DEPTH)
-      .setBlendMode(Phaser.BlendModes.MULTIPLY);
+      .setBlendMode("multiply");
     this.clouds = scene.add
       .renderTexture(-MARGIN, -MARGIN, width + MARGIN * 2, height + MARGIN * 2)
       .setOrigin(0, 0)
       .setDepth(CLOUD_DEPTH)
-      .setBlendMode(Phaser.BlendModes.MULTIPLY);
+      .setBlendMode("multiply");
     this.glow = scene.add
       .renderTexture(-MARGIN, -MARGIN, width + MARGIN * 2, height + MARGIN * 2)
       .setOrigin(0, 0)
       .setDepth(GLOW_DEPTH)
-      .setBlendMode(Phaser.BlendModes.ADD);
+      .setBlendMode("add");
   }
 
   /** Light one frame: cloud shadow on the ground, then ambient and every light's pool over all. */
@@ -144,7 +143,7 @@ export class LightingLayer {
         originX: 0,
         originY: 0,
         alpha: Math.min(frame.clouds.strength, 1),
-        blendMode: Phaser.BlendModes.MULTIPLY,
+        blendMode: "multiply",
       });
     }
     this.clouds.fill(0xffffff, 1, 0, 0, width, frame.skyRows + MARGIN);
@@ -152,7 +151,7 @@ export class LightingLayer {
   }
 
   private stamp(
-    target: Phaser.GameObjects.RenderTexture,
+    target: RenderTarget,
     light: LightSource,
     radius: number,
     alpha: number,
@@ -165,7 +164,7 @@ export class LightingLayer {
     target.stamp(key, undefined, Math.round(light.x) + MARGIN, Math.round(light.y) + MARGIN, {
       tint: hexToInt(light.color),
       alpha: Math.min(alpha, 1),
-      blendMode: Phaser.BlendModes.ADD,
+      blendMode: "add",
     });
   }
 

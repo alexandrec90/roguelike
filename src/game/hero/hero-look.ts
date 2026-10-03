@@ -3,7 +3,7 @@
  * lit body, the scarf's tail, the swing's crescent, the burning blade's flames
  * and embers, his shadow, and the light the blade throws.
  *
- * Phaser-free and deterministic, so it is testable and the lab could drive it;
+ * Renderer-free and deterministic, so it is testable and the lab could drive it;
  * `hero-layer.ts` only paints what this returns. It owns the few pieces of
  * presentation state that have memory — the particle pool, the scarf chain,
  * where the blade was last frame, how far round the drawn turn has swept — and

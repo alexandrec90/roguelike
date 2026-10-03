@@ -1,6 +1,6 @@
-import Phaser from "phaser";
-
+import { Scene } from "../engine";
 import { AmbientLayer } from "./ambient-layer";
+import type { FrameProfiler } from "./bench";
 import { visibleLocal, type CameraFrame, type LocalBounds } from "./camera";
 import { cloudShade, cloudShadowsAt } from "./cloud-shadow";
 import { Encounter } from "./encounter";
@@ -72,7 +72,7 @@ const REVEAL_FADE_MS = 250;
  * world slides and turns beneath him, which is what "the camera turns with the
  * player" has to mean when the camera is also the tile grid.
  */
-export class DemoScene extends Phaser.Scene {
+export class DemoScene extends Scene {
   private readonly skyFraction: number;
   private layout!: HorizonLayout;
   private anchor: ScreenPoint = { x: WIDTH / 2, y: HEIGHT / 2 };
@@ -104,9 +104,11 @@ export class DemoScene extends Phaser.Scene {
   private lastPose: PlanetPose | undefined;
   /** The `?map=1` instrument, or null on an ordinary load. */
   private map: MapOverlay | null = null;
+  /** Per-layer timing for `?bench=1`, or null on an ordinary load. */
+  private profiler: FrameProfiler | null = null;
 
   constructor(options: SceneOptions = DEFAULT_SCENE_OPTIONS) {
-    super("overworld-field");
+    super();
     this.skyFraction = options.skyFraction;
     this.renderPath = options.render;
     this.hero = new HeroLayer({ ...openGround(START), turn: 0 }, options.radius);
@@ -168,6 +170,8 @@ export class DemoScene extends Phaser.Scene {
     if (!this.revealed(time)) {
       return;
     }
+    const lap = this.profiler;
+    lap?.begin();
     const worldDelta = this.clock.tick(delta);
     this.hero.animate(worldDelta, this.clock.elapsedMs);
 
@@ -176,22 +180,45 @@ export class DemoScene extends Phaser.Scene {
     const pose = where.ground;
     const ctx = this.context(frame, pose);
     trackScroll(this.odometer, where.phase, pose);
+    lap?.lap("frame");
 
     this.ground.update(ctx);
+    lap?.lap("ground");
     this.rollGround.update(ctx, this.water.sizeScale());
+    lap?.lap("lip");
     this.vegetation.update(ctx, this.grassPushers(ctx));
+    lap?.lap("grass");
     this.scenery.update(ctx);
+    lap?.lap("scenery");
     this.landforms.update(ctx, ctx.shade);
+    lap?.lap("landforms");
     this.hero.update(ctx);
+    lap?.lap("hero");
     this.encounter.update(ctx, this.hero);
+    lap?.lap("encounter");
     this.drawWater(ctx);
+    lap?.lap("water");
     // After everything standing has been placed: the slices are cut round it.
     this.landforms.arrange();
+    lap?.lap("landforms");
     this.prefetch(ctx, where.upcoming?.pose);
+    lap?.lap("prefetch");
     this.sky.update(where.turn, ctx.atmosphere, ctx.elapsedMs);
     this.ambient.update(ctx, this.odometer);
+    lap?.lap("sky");
     this.light(ctx);
+    lap?.lap("lighting");
     this.drawMap(frame, pose, delta);
+  }
+
+  /** Time this scene's layers, a lap each, for `?bench=1`; null stops timing. */
+  setProfiler(profiler: FrameProfiler | null): void {
+    this.profiler = profiler;
+  }
+
+  /** Whether the world has been faded in: the bench waits for it. */
+  isRevealed(): boolean {
+    return this.shown;
   }
 
   /**
@@ -306,20 +333,9 @@ export class DemoScene extends Phaser.Scene {
    * rather than a second simulation that could drift from this one.
    */
   private drawMap(frame: CameraFrame, pose: PlanetPose, delta: number): void {
-    if (this.map === null) {
-      return;
+    if (this.map !== null) {
+      feedMap(this.map, this.hero, { frame, pose, delta, bounds: this.bounds });
     }
-    const debug = this.hero.debugState();
-    this.map.draw({
-      groundPose: pose,
-      livePose: debug.live,
-      gait: debug.gait,
-      progress: debug.progress,
-      phase: { x: frame.phaseX, y: frame.phaseY },
-      bounds: this.bounds,
-      radius: debug.radius,
-      frameMs: delta,
-    });
   }
 
   /** The one description of where the world has got to, this instant. */
@@ -351,3 +367,26 @@ export class DemoScene extends Phaser.Scene {
 }
 
 export const GAME_SIZE = { width: WIDTH, height: HEIGHT } as const;
+
+/** One frame's facts for the `?map=1` instrument. */
+interface MapFrame {
+  readonly frame: CameraFrame;
+  readonly pose: PlanetPose;
+  readonly delta: number;
+  readonly bounds: LocalBounds;
+}
+
+/** Hand the debug map this frame, with the hero's live state only it may see. */
+export function feedMap(map: MapOverlay, hero: HeroLayer, at: MapFrame): void {
+  const debug = hero.debugState();
+  map.draw({
+    groundPose: at.pose,
+    livePose: debug.live,
+    gait: debug.gait,
+    progress: debug.progress,
+    phase: { x: at.frame.phaseX, y: at.frame.phaseY },
+    bounds: at.bounds,
+    radius: debug.radius,
+    frameMs: at.delta,
+  });
+}

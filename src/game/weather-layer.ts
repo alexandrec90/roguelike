@@ -23,8 +23,7 @@
  * found dry ground throws a splash.
  */
 
-import Phaser from "phaser";
-
+import type { Rectangle, Scene } from "../engine";
 import { atmosphereAt, clockHours } from "./atmosphere";
 import { scrollOffset, type CameraFrame } from "./camera";
 import { CLEAR_SKY } from "./cloud-shadow";
@@ -71,7 +70,7 @@ export class WeatherLayer {
   private rainSurface!: PixelSurface;
   private mistSurface!: PixelSurface;
   private boltSurface!: PixelSurface;
-  private flash!: Phaser.GameObjects.Rectangle;
+  private flash!: Rectangle;
   private horizonY = 0;
   private wet = START_WETNESS;
   private flashLevel = 0;
@@ -87,7 +86,7 @@ export class WeatherLayer {
     this.splashes = createPool(160, seed ^ 0x5b1a);
   }
 
-  create(scene: Phaser.Scene, width: number, height: number, horizonY: number): void {
+  create(scene: Scene, width: number, height: number, horizonY: number): void {
     this.horizonY = horizonY;
     this.mistSurface = new PixelSurface(scene, width, height, "weather-mist");
     this.mistSurface.image.setDepth(RAIN_DEPTH - 1);
@@ -99,7 +98,7 @@ export class WeatherLayer {
       .rectangle(0, 0, width, height, hexToInt(INK_COLORS["frost-4"]), 1)
       .setOrigin(0, 0)
       .setDepth(BOLT_DEPTH + 1)
-      .setBlendMode(Phaser.BlendModes.ADD)
+      .setBlendMode("add")
       .setVisible(false);
   }
 

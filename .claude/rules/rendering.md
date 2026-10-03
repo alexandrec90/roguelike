@@ -37,7 +37,7 @@ tint in eight dithered steps, and the clouds are three computed tones.
 | Every frame, a few dozen pixels (fireflies, a bolt) | `drawCloud` into a `Graphics` | `draw-cloud.ts` |
 
 Every texture here is a **byte texture uploaded straight from its buffer**
-(`addUint8Array`), never a canvas: a canvas cost a `putImageData` and a second
+(`textures.addBytes`, `Texture.uploadRows`), never a canvas: a canvas cost a `putImageData` and a second
 copy per commit, ~0.7 ms a frame across a scene's surfaces. A surface whose
 drawing keeps to a band clears and uploads only that band
 (`clearRows`, `commit(rows)`) - the water surface covers the screen and changes
@@ -45,11 +45,42 @@ only where the puddles are. A set of pictures goes in as one texture with a
 frame each (`installFrames`), not a texture per picture.
 
 **Never** fill hundreds of pixels a frame through `Graphics.fillRect`, and **never** draw
-*one `GameObjects.Shader` per object*: the volume shader re-uploaded forty uniforms per
+*one shader per object*: the volume shader re-uploaded forty uniforms per
 object per frame and cost 7.5 ms. It still exists — the tree lab renders with it and
 diffs it against the CPU — but the game draws scenery from bakes. A handful of
-full-frame render-to-texture passes, off the display list, is a different thing and the
+full-frame shader passes (`scene.add.pass`), off the display list, is a different thing and the
 right tool for per-pixel work (below).
+
+## The renderer is ours
+
+`src/engine/` replaced Phaser, and is the whole of what stands between a layer and the
+GPU (`src/engine/index.ts` maps its modules). What a layer can rely on:
+
+- **One depth-sorted list, one batch.** Every `Image`, `Blitter`, `Graphics`,
+  `Rectangle` and `RenderTarget` sorts by `depth`, ties broken by the order added; the
+  batch draws them in as few calls as textures (up to 16 a call) and blend modes
+  allow — ~20 draw calls and ~0.4 ms of CPU for a whole frame on the HD 530, where
+  Phaser took ~1 ms.
+- **Phaser's pixel rules, kept.** Origin as a share of the frame (default 0.5), a crop
+  shown where it sat in the frame, unscaled corners rounded to whole pixels,
+  premultiplied blending with Phaser's factors (`src/engine/blend.ts`). A port that moved a
+  pixel would show in a capture; the deterministic diff against Phaser found only
+  one-pixel dither shifts where a half-texel stamp is the GPU's tie to break.
+- **A shader pass runs when asked.** `pass.render()` clears its target and draws there
+  and then, so a chain of passes reads each other within one update. Uniforms are set by
+  the type the program reports; an array goes by its first element, `u_ramp[0]`.
+- **A pass's target is GL-way-up.** Row 0 of a framebuffer is the *bottom* of the
+  picture, which is what the passes' `gl_FragCoord` arithmetic assumes; the batch flips
+  such a texture when it is drawn as an image (`Texture.flipY`). A byte texture is
+  top-row-first.
+- **It allocates nothing per frame.** Measured: with the scene's update switched off,
+  the heap does not grow. Every byte of garbage is the layers'.
+- **WebGL lives in five files.** `src/engine/batcher.ts`, `src/engine/pass.ts`,
+  `src/engine/texture.ts`, `src/engine/render-target.ts` and `src/engine/game.ts` (plus
+  `gpu/float-texture.ts`) are the only code that
+  touches the context; layers see `Scene`. A WebGPU backend would replace those and port
+  the passes' GLSL to WGSL, checked against the CPU references that already exist - worth
+  it when something needs compute shaders, not before.
 
 ## Scenery is baked, not rendered
 
@@ -130,7 +161,7 @@ the one thread everything else shares. The landform march is the worked example
 - **Sort by depth with plain images.** A pass that must interleave with sprites
   packs its pixels into an atlas a band per depth group, and the display list
   draws each band as an ordinary image; rows only split where something
-  standing sorts between them (`groupRows`). A `Shader` object per slice broke
+  standing sorts between them (`groupRows`). A shader per slice broke
   the sprite batch a hundred times a frame.
 - **Prove parity.** Diff the GPU output against the CPU's on the same frame in
   the running page; the landform march agrees on coverage exactly and on colour
@@ -192,10 +223,37 @@ frame is 16.7 ms; the JS half of it should stay near 8.
 | Water | ~0.5 ms | the surface cleared, painted and uploaded only over the rows the puddles span |
 | Next anchor, ahead | ≤ 2.5 ms a frame after the first task; tasks of ≤ ~1 ms | `Prefetcher` tasks, never on the frame that crossed |
 | Each actor | ≤ 0.5 ms | small surfaces, caches keyed by quantised pose |
-| Lighting | ~0.5 ms | one render texture, a stamp per light |
+| Lighting | ~0.1 ms | one render target, a stamp per light |
+| Drawing the frame | ~0.4 ms; ~20 draw calls | the engine's depth-sorted batch, up to 16 textures a call (`src/engine/`) |
 
 A change that adds a per-frame cost names it in the budget, and is measured in the running
-page (`window.__game` in a dev build) — not guessed.
+page — not guessed. `?bench=1&sync=1` is the measurement: a fixed route (stand, the three
+gaits, a fight), each layer timed by the scene's own laps, frame work as p50/p95/max,
+hitches and garbage per segment (`bench.ts`, `bench-runner.ts`; `window.__bench` holds the
+result). Run it foregrounded and alone - a background tab is throttled. `window.__game`
+and `window.__scene` are the handles in a dev build.
+
+What the swap from Phaser bought, stormy night on the HD 530, frame work p50 measured back
+to back (the machine's own load moves every number by 1–2 ms between sessions, so only a
+pair taken together means anything):
+
+| Segment | Phaser | Engine | Phaser, later | Engine, later |
+| --- | --- | --- | --- | --- |
+| stand | 4.6 | 4.2 | 5.8 | 5.0–5.6 |
+| walking (north / strafe / diagonal) | 7.3 / 6.4 / 7.3 | 6.1–6.6 / 6.2–6.6 / 6.2–6.3 | 9.8 / 8.2 / 8.7 | 8.1–8.5 / 8.1–8.2 / 7.7–8.0 |
+| fight | 7.9 | 4.4–4.6 | 6.9 | 5.6–5.9 |
+
+Drawing is now ~0.4 ms; walking is the layers' own CPU (prefetch, water, the lip), which
+the renderer cannot touch. Garbage is ~25 MB/s standing and ~60 MB/s walking, all of it
+from layers building pixel clouds as objects, and it is cheap: a fight's trace shows a
+minor collection every ~300 ms freeing ~27 MB in 1.3–3.6 ms - about 1% of the main thread,
+and ~2 ms on one frame in twenty. Turning `PixelCloud` into typed arrays was weighed
+against that and left alone: it is the art pipeline's core type, for a percent.
+
+**The stutters left are spikes, not garbage.** Walking north, single frames reach 16–21 ms
+in `prefetch`, the lip and scenery uploads (`?bench=1` names them per segment): a task
+that should have been cut by cost, or an upload that landed with others. That is where
+the next frame-time work is.
 
 ## The API, in one table
 

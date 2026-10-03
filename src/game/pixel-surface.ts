@@ -15,58 +15,36 @@
  *   seen) and each frame afterwards is just choosing a frame.
  *
  * **Bytes go straight to the GPU.** These used to be canvas textures: a commit
- * copied the buffer into a 2D canvas with `putImageData` and Phaser then
+ * copied the buffer into a 2D canvas with `putImageData` and the framework then
  * uploaded the canvas - two copies, and the first through the 2D canvas's own
  * pixel conversion. Measured on the HD 530 that was ~0.7 ms a frame across the
  * dozen surfaces a scene keeps. A buffer is now a `Uint8Array` texture, uploaded
  * from the buffer itself, premultiplied on the way up exactly as a canvas was.
  */
 
-import type Phaser from "phaser";
-
+import { uniqueKey, type Image, type Scene, type Texture, type TextureStore } from "../engine";
 import type { PixelCloud } from "./ink";
 import { clearBuffer, createBuffer, paintInto, type PixelBuffer } from "./pixel-buffer";
 
-let surfaceCount = 0;
+export { uniqueKey };
 
-/** A texture key nothing else has taken. */
-export function uniqueKey(prefix: string): string {
-  surfaceCount += 1;
-  return `${prefix}-${surfaceCount}`;
-}
-
-/** A buffer's bytes as the `Uint8Array` Phaser uploads directly - the same memory, not a copy. */
+/** A buffer's bytes as the `Uint8Array` the GPU uploads directly - the same memory, not a copy. */
 function bytesOf(data: Uint8ClampedArray<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   return new Uint8Array(data.buffer, data.byteOffset, data.length);
 }
 
-/** Make a byte texture with no frames but its base, or throw. */
-function addBytes(
-  textures: Phaser.Textures.TextureManager,
-  key: string,
-  bytes: Uint8Array<ArrayBuffer>,
-  width: number,
-  height: number,
-): Phaser.Textures.Texture {
-  const texture = textures.addUint8Array(key, bytes, width, height);
-  if (texture === null) {
-    throw new Error(`Could not create texture '${key}'`);
-  }
-  return texture;
-}
-
 export class PixelSurface {
-  readonly image: Phaser.GameObjects.Image;
+  readonly image: Image;
   readonly buffer: PixelBuffer;
-  private readonly texture: Phaser.Textures.Texture;
+  private readonly texture: Texture;
   private readonly bytes: Uint8Array<ArrayBuffer>;
   private dirty = false;
 
-  constructor(scene: Phaser.Scene, width: number, height: number, prefix = "surface") {
+  constructor(scene: Scene, width: number, height: number, prefix = "surface") {
     const key = uniqueKey(prefix);
     this.buffer = createBuffer(width, height);
     this.bytes = bytesOf(this.buffer.data);
-    this.texture = addBytes(scene.textures, key, this.bytes, width, height);
+    this.texture = scene.textures.addBytes(key, this.bytes, width, height);
     this.image = scene.add.image(0, 0, key).setOrigin(0, 0);
   }
 
@@ -117,34 +95,13 @@ export class PixelSurface {
     if (!this.dirty) {
       return this;
     }
-    const wrapper = this.texture.source[0]?.glTexture;
-    if (wrapper !== null && wrapper !== undefined) {
-      if (rows === undefined) {
-        wrapper.update(this.bytes, this.width, this.height, wrapper.flipY, wrapper.wrapS, wrapper.wrapT, wrapper.minFilter, wrapper.magFilter, wrapper.format);
-      } else {
-        this.uploadRows(wrapper, Math.max(0, rows.from), Math.min(this.height, rows.to));
-      }
+    if (rows === undefined) {
+      this.texture.update(this.bytes);
+    } else {
+      this.texture.uploadRows(this.bytes, Math.max(0, rows.from), Math.min(this.height, rows.to));
     }
     this.dirty = false;
     return this;
-  }
-
-  /**
-   * Re-upload buffer rows `from..to` in place. The texture was made flipped
-   * (`flipY`, as Phaser makes every texture), so the band lands at GL row
-   * `height - to` and the driver flips it on the way up, exactly as a whole
-   * upload would have placed those rows.
-   */
-  private uploadRows(wrapper: Phaser.Renderer.WebGL.Wrappers.WebGLTextureWrapper, from: number, to: number): void {
-    if (to <= from) {
-      return;
-    }
-    const renderer = wrapper.renderer;
-    const gl = renderer.gl as WebGL2RenderingContext;
-    renderer.glTextureUnits.bind(wrapper, 0, true, true);
-    renderer.glWrapper.updateTexturing({ texturing: { flipY: wrapper.flipY, premultiplyAlpha: wrapper.pma } });
-    const y = wrapper.flipY ? this.height - to : from;
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y, this.width, to - from, gl.RGBA, gl.UNSIGNED_BYTE, this.bytes, from * this.width * 4);
   }
 
   destroy(): void {
@@ -196,18 +153,14 @@ export function packFrames(buffers: readonly PixelBuffer[]): PackedFrames {
  * horizon ladder is forty pictures, and forty textures each was two thousand
  * across a wood. Returns false when the key already exists.
  */
-export function installFrames(
-  textures: Phaser.Textures.TextureManager,
-  key: string,
-  buffers: readonly PixelBuffer[],
-): boolean {
+export function installFrames(textures: TextureStore, key: string, buffers: readonly PixelBuffer[]): boolean {
   if (textures.exists(key) || buffers.length === 0) {
     return false;
   }
   const packed = packFrames(buffers);
-  const texture = addBytes(textures, key, packed.data, packed.width, packed.height);
+  const texture = textures.addBytes(key, packed.data, packed.width, packed.height);
   packed.frames.forEach((frame, index) => {
-    texture.add(String(index), 0, frame.x, 0, frame.width, frame.height);
+    texture.add(String(index), frame.x, 0, frame.width, frame.height);
   });
   return true;
 }
@@ -218,11 +171,7 @@ export function installFrames(
  * Laid out in a row, so frame `i` is at `x = i * width`. Returns false when the
  * key already exists, which lets a caller bake lazily and idempotently.
  */
-export function installStrip(
-  textures: Phaser.Textures.TextureManager,
-  key: string,
-  frames: readonly PixelBuffer[],
-): boolean {
+export function installStrip(textures: TextureStore, key: string, frames: readonly PixelBuffer[]): boolean {
   const first = frames[0];
   frames.forEach((frame, index) => {
     if (first !== undefined && (frame.width !== first.width || frame.height !== first.height)) {
@@ -233,10 +182,6 @@ export function installStrip(
 }
 
 /** Install a single buffer as a texture. */
-export function installBuffer(
-  textures: Phaser.Textures.TextureManager,
-  key: string,
-  buffer: PixelBuffer,
-): boolean {
+export function installBuffer(textures: TextureStore, key: string, buffer: PixelBuffer): boolean {
   return installStrip(textures, key, [buffer]);
 }

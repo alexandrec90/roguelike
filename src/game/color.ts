@@ -70,7 +70,7 @@ export function sampleRamp(ramp: readonly string[], t: number): string {
   return mixHex(from, to, k - index);
 }
 
-/** Phaser's fill colours are numbers, not strings. */
+/** The renderer's fill colours are numbers, not strings. */
 export function hexToInt(hex: string): number {
   const { r, g, b } = hexToRgb(hex);
   return (r << 16) | (g << 8) | b;

@@ -1,5 +1,5 @@
 /**
- * What the horizon lip's shader is handed, built on the CPU: pure, and Phaser
+ * What the horizon lip's shader is handed, built on the CPU: pure, and renderer
  * free, so every table is tested here and the shader only reads them.
  *
  * The lip used to be painted in JavaScript, pixel by pixel - 320 x 24 pixels,

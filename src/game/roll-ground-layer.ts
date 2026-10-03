@@ -34,7 +34,7 @@
  * on the lip - a tree, a landform - is drawn over it by its own layer.
  */
 
-import type Phaser from "phaser";
+import type { Scene } from "../engine";
 
 import type { CameraFrame, LocalBounds } from "./camera";
 import { terrainFarLooks } from "./far-looks";
@@ -94,7 +94,7 @@ export class RollGroundLayer {
   private surface: PixelSurface | undefined;
   /** The GPU lip, when the scene draws on the GPU; the CPU surface otherwise. */
   private gpu: LipGpu | undefined;
-  private scene: Phaser.Scene | undefined;
+  private scene: Scene | undefined;
   private useGpu = false;
   private frame: CameraFrame | undefined;
   private width = 0;
@@ -125,7 +125,7 @@ export class RollGroundLayer {
   lastFrameMs = 0;
 
   /** `gpu` draws the lip in a shader (`roll-ground-gpu.ts`); the CPU paints it otherwise. */
-  create(scene: Phaser.Scene, frame: CameraFrame, width: number, field: LocalBounds, gpu = false): void {
+  create(scene: Scene, frame: CameraFrame, width: number, field: LocalBounds, gpu = false): void {
     this.width = width;
     this.scene = scene;
     this.useGpu = gpu;

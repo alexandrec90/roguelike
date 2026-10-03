@@ -33,7 +33,7 @@
  * slides; and it needs no tile composed - reading the lattice under the far lip
  * is what used to stall a step.
  *
- * Pure: a frame, a width, a cell lookup and the haze in, RGBA out. The Phaser
+ * Pure: a frame, a width, a cell lookup and the haze in, RGBA out. The renderer
  * wiring - which tile and which tufts a cell has - is `roll-ground-layer.ts`;
  * rock standing on the lip is `roll-rock.ts`, painted over this.
  */

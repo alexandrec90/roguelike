@@ -48,7 +48,7 @@
  * | Screen | pixels. `projection.ts` owns that step and this file never sees  |
  * |        | it.                                                             |
  *
- * Everything here is pure and Phaser-free, so the geometry is asserted in tests
+ * Everything here is pure and renderer-free, so the geometry is asserted in tests
  * rather than eyeballed through a canvas.
  */
 

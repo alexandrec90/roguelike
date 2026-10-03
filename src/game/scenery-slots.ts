@@ -2,7 +2,7 @@
  * Which body gets which slot, on a planet with more trees than slots.
  *
  * Split out of `scenery-layer.ts` for the reason every layer here is thin: the
- * layer is Phaser wiring and cannot be tested without a canvas, while *this* is
+ * layer is renderer wiring and cannot be tested without a canvas, while *this* is
  * the part that can be wrong in a way no screenshot shows. A slot that changes
  * tenant when it did not have to resets an integrator, and a chestnut that was
  * mid-sway snaps upright for one frame - visible for 16ms, and impossible to

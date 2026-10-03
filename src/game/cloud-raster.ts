@@ -1,7 +1,7 @@
 /**
  * The second bridge from a pixel cloud to a screen: an RGBA buffer.
  *
- * `draw-cloud.ts` is the bridge to Phaser, and it is the right one inside the
+ * `draw-cloud.ts` is the bridge to the renderer, and it is the right one inside the
  * game. It is the wrong one for a page that wants to paint tens of thousands of
  * logical pixels per frame — a `Graphics` object costs a fill command each, and
  * a canopy that is a thresholded noise field is a great many pixels.

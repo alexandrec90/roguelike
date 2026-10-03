@@ -3,7 +3,7 @@
  *
  * The split this file defends is the one `CLAUDE.md` asks for - the movement
  * simulation is deterministic and knows nothing about the presentation. So the
- * interesting parts live elsewhere and none of them import Phaser:
+ * interesting parts live elsewhere and none of them touch the renderer:
  * `keybindings.ts` says what an input means, `controls.ts` says what is held,
  * `planet.ts` says what a step does to a pose on a round world, `player.ts`
  * says what the hero does about it, `hero/hero-actions.ts` says what his blows
@@ -25,10 +25,7 @@
  * still gets a drawn hero from `animate` alone, under a default sun.
  */
 
-// `Phaser` is an ambient *type* namespace, so annotations alone compile without
-// this import - but `Phaser.Core.Events.BLUR` below is a value read at runtime.
-import Phaser from "phaser";
-
+import type { Pointer, Scene } from "../engine";
 import type { Strike } from "./combat";
 import {
   aimAt,
@@ -141,7 +138,7 @@ export class HeroLayer {
     this.world = { radius, blocked: blockedByLand };
   }
 
-  create(scene: Phaser.Scene, groundTop: number, foot: Foot): void {
+  create(scene: Scene, groundTop: number, foot: Foot): void {
     this.groundTop = groundTop;
     this.foot = foot;
     this.shade = new PixelSurface(scene, SHADOW.width, SHADOW.height, "hero-shadow");
@@ -345,38 +342,35 @@ export class HeroLayer {
    * page, the arrows scroll it too), and an unbound one is left alone so
    * refresh and devtools still work.
    */
-  private bindInput(scene: Phaser.Scene): void {
-    const keyboard = scene.input.keyboard;
-    if (keyboard !== null) {
-      keyboard.on("keydown", (event: KeyboardEvent) => {
-        if (pressKey(this.controls, event.code)) {
-          event.preventDefault();
-        }
-      });
-      keyboard.on("keyup", (event: KeyboardEvent) => {
-        if (releaseKey(this.controls, event.code)) {
-          event.preventDefault();
-        }
-      });
-    }
+  private bindInput(scene: Scene): void {
+    scene.input.keyboard.on("keydown", (event: KeyboardEvent) => {
+      if (pressKey(this.controls, event.code)) {
+        event.preventDefault();
+      }
+    });
+    scene.input.keyboard.on("keyup", (event: KeyboardEvent) => {
+      if (releaseKey(this.controls, event.code)) {
+        event.preventDefault();
+      }
+    });
 
     // Right-click is the cast, so the context menu is in the way.
-    scene.input.mouse?.disableContextMenu();
+    scene.input.disableContextMenu();
     // Aim is taken from his chest, not his feet, so the cursor on his body is on centre.
     const chest = (): Foot => ({ x: this.foot.x, y: this.foot.y - this.chestHeight });
-    scene.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+    scene.input.on("pointermove", (pointer: Pointer) => {
       aimFrom(this.controls, pointer, scene, chest());
     });
-    scene.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+    scene.input.on("pointerdown", (pointer: Pointer) => {
       aimFrom(this.controls, pointer, scene, chest());
       pressButton(this.controls, mouseButtonOf(pointer.button));
     });
-    scene.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+    scene.input.on("pointerup", (pointer: Pointer) => {
       releaseButton(this.controls, mouseButtonOf(pointer.button));
     });
 
     // A key released while the tab is in the background never sends its keyup.
-    scene.game.events.on(Phaser.Core.Events.BLUR, () => releaseAll(this.controls));
+    scene.game.on("blur", () => releaseAll(this.controls));
   }
 
 }
@@ -384,11 +378,11 @@ export class HeroLayer {
 /**
  * Point the aim at the cursor, measured from `from`.
  *
- * The page position is mapped back through the canvas's own box rather than
- * read from Phaser's pointer coordinates: the canvas is sized by CSS under
- * `Scale.NONE`, so Phaser's idea of the display scale is not the one to trust.
+ * The page position is mapped back through the canvas's own box: the canvas is
+ * sized by CSS at a whole-number scale, so its box is the one truth about
+ * where a logical pixel is on the page.
  */
-function aimFrom(controls: ControlState, pointer: Phaser.Input.Pointer, scene: Phaser.Scene, from: Foot): void {
+function aimFrom(controls: ControlState, pointer: Pointer, scene: Scene, from: Foot): void {
   const event = pointer.event;
   if (!("clientX" in event)) {
     return;

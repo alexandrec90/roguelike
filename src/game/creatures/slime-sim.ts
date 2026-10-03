@@ -2,7 +2,7 @@
  * The slime population: who is alive near the hero, what hit them, and what
  * the rest of the game should hear about it.
  *
- * Pure, deterministic and Phaser-free — the `Separation` contract. Each frame
+ * Pure, deterministic and renderer-free — the `Separation` contract. Each frame
  * the scene hands it the hero's position, the frame's pose and the strikes the
  * hero's weapons produced; it hands back events (a hit landed here, a slime
  * died there, one landed from a hop) that the presentation turns into hit

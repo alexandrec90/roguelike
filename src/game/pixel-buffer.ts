@@ -8,7 +8,7 @@
  * body — has to stay sheer, so the world underneath still shows through when
  * the texture is drawn. That needs the full "over" operator, so it lives here.
  *
- * Pure and Phaser-free: a buffer in, a buffer out. `pixel-surface.ts` is the
+ * Pure and renderer-free: a buffer in, a buffer out. `pixel-surface.ts` is the
  * thin half that hands one to the GPU.
  */
 

@@ -9,7 +9,7 @@
  * land on the same frame.
  */
 
-import type Phaser from "phaser";
+import type { Scene } from "../engine";
 
 import type { Strike } from "./combat";
 import { SlimeLayer } from "./creatures/slime-layer";
@@ -32,7 +32,7 @@ export class Encounter {
   readonly slimes = new SlimeLayer();
   readonly wildfire = new WildfireLayer();
 
-  create(scene: Phaser.Scene, width: number, height: number, campfireAt: PlanetPoint): void {
+  create(scene: Scene, width: number, height: number, campfireAt: PlanetPoint): void {
     this.decals.create(scene, width, height);
     this.wildfire.create(scene, width, height);
     this.campfire.create(scene, campfireAt, 0xf17e);

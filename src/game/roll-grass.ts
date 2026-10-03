@@ -9,7 +9,7 @@
  * kept for as long as the ground pose holds; a frame re-stamps only the rows
  * whose blades sway (`forget`), and every other tuft is paid for once a step.
  *
- * Pure: no Phaser, no clock. The layer decides when to forget.
+ * Pure: no renderer, no clock. The layer decides when to forget.
  */
 
 import type { CameraFrame, LocalBounds } from "./camera";

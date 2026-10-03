@@ -13,8 +13,7 @@
  * tiles it stands on mid-stride.
  */
 
-import type Phaser from "phaser";
-
+import type { Image, Scene, Texture } from "../engine";
 import { scrollOffset, type CameraFrame } from "./camera";
 import type { FrameContext } from "./frame-context";
 import { createLandformPixels, type LandformLight, type LandformPixels } from "./landform-frame";
@@ -37,34 +36,29 @@ export class LandformLayer {
   private far!: LandformPixels;
   private farRendered = "";
   private nearWasEmpty = false;
-  private texture!: Phaser.Textures.CanvasTexture;
+  private texture!: Texture;
   private key = "";
   private atlasHeight = ATLAS_STEP;
   private atlas = new Uint8ClampedArray(0);
-  private upload: ImageData | undefined;
   /** How much of the atlas the last frame used, so a shrinking frame still clears it. */
   private lastAtlasHeight = 0;
-  private slices: Phaser.GameObjects.Image[] = [];
-  private scene: Phaser.Scene | undefined;
+  private slices: Image[] = [];
+  private scene: Scene | undefined;
   private rendered = "";
   /** How tall the hero stands, for the window kept clear round him. */
   private heroHeight = 32;
   /** The last render's cost, ms - read it from the console when profiling. */
   lastFrameMs = 0;
 
-  create(scene: Phaser.Scene, width: number, height: number, heroHeight: number): void {
+  create(scene: Scene, width: number, height: number, heroHeight: number): void {
     this.scene = scene;
     this.heroHeight = heroHeight;
     this.pixels = createLandformPixels(width, height);
     this.near = createLandformPixels(width, height);
     this.far = createLandformPixels(width, height);
     this.key = uniqueKey("landforms");
-    const texture = scene.textures.createCanvas(this.key, width, this.atlasHeight);
-    if (texture === null) {
-      throw new Error(`Could not create landform atlas '${this.key}'`);
-    }
-    this.texture = texture;
     this.atlas = new Uint8ClampedArray(width * this.atlasHeight * 4);
+    this.texture = scene.textures.addBytes(this.key, this.bytes(), width, this.atlasHeight);
     this.slices = Array.from({ length: SLICE_POOL }, () =>
       scene.add.image(0, 0, this.key).setOrigin(0, 0).setVisible(false),
     );
@@ -133,7 +127,12 @@ export class LandformLayer {
     for (const image of this.slices) {
       image.destroy();
     }
-    this.texture.destroy();
+    this.scene?.textures.remove(this.key);
+  }
+
+  /** The atlas's bytes as the GPU uploads them - the same memory. */
+  private bytes(): Uint8Array {
+    return new Uint8Array(this.atlas.buffer, this.atlas.byteOffset, this.atlas.length);
   }
 
   /** Cut, pack, upload, and point an image at each slice. */
@@ -142,12 +141,9 @@ export class LandformLayer {
     this.fit(atlasHeight);
     packSlices(this.pixels, slices, this.atlas);
     if (slices.length > 0) {
-      this.upload ??= this.texture.getContext().createImageData(this.pixels.width, this.atlasHeight);
-      this.upload.data.set(this.atlas);
-      // Only the shelves in use reach the canvas; the GPU upload is the whole texture either way.
-      this.texture.getContext().putImageData(this.upload, 0, 0, 0, 0, this.pixels.width, Math.max(atlasHeight, this.lastAtlasHeight));
+      // Only the shelves in use, and those the last frame used, are uploaded.
+      this.texture.uploadRows(this.bytes(), 0, Math.min(this.atlasHeight, Math.max(atlasHeight, this.lastAtlasHeight)));
       this.lastAtlasHeight = atlasHeight;
-      this.texture.refresh();
     }
     while (this.slices.length < slices.length && this.scene !== undefined) {
       this.slices.push(this.scene.add.image(0, 0, this.key).setOrigin(0, 0).setVisible(false));
@@ -173,9 +169,12 @@ export class LandformLayer {
       return;
     }
     this.atlasHeight = needed;
-    this.texture.setSize(this.pixels.width, needed);
     this.atlas = new Uint8ClampedArray(this.pixels.width * needed * 4);
-    this.upload = undefined;
+    if (this.scene === undefined) {
+      return;
+    }
+    this.scene.textures.remove(this.key);
+    this.texture = this.scene.textures.addBytes(this.key, this.bytes(), this.pixels.width, needed);
     for (const image of this.slices) {
       image.setTexture(this.key);
     }

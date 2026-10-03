@@ -2,7 +2,7 @@
  * One slime's life, stepped: the state machine, the hop it chooses, and the
  * physics that carries it.
  *
- * Pure and Phaser-free. A slime is planet-anchored — its position is a
+ * Pure and renderer-free. A slime is planet-anchored — its position is a
  * `PlanetPoint`, and every decision is taken in planet coordinates — so the
  * camera turning under the hero never changes what a slime does, only where it
  * is drawn. Every choice it makes is a seeded hash of its own seed and hop

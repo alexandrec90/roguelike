@@ -14,9 +14,6 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run test && npm run build"
   },
-  "dependencies": {
-    "phaser": "4.2.1"
-  },
   "devDependencies": {
     "@types/node": "26.4.0",
     "typescript": "7.0.2",

@@ -7,7 +7,7 @@
  * names exists and exports every symbol it lists.
  *
  * Exports are read from the source text rather than by importing, because
- * several of these modules import Phaser, which will not load under Node.
+ * several of these modules touch WebGL or the DOM, which Node does not have.
  */
 
 import { existsSync, readFileSync } from "node:fs";

@@ -3,7 +3,7 @@
  *
  * The visual contract in CLAUDE.md is "render the world at 320x180, then
  * nearest-neighbor upscale the whole canvas by an integer factor". A
- * fractional fit (Phaser's `Scale.FIT`) breaks that: it
+ * fractional fit (a framework's "scale to fit") breaks that: it
  * resamples logical pixels onto non-integer device pixels, so a 1px highlight
  * becomes 1.4px on one row and 0.6px on the next. Everything here is pure so the
  * factor can be asserted in tests instead of eyeballed in a browser.

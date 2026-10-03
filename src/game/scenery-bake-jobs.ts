@@ -7,7 +7,7 @@
  * Web Worker (`scenery-bake-worker.ts`) or inline (`scenery-baker.ts`'s
  * fallback, and the tests) and makes the same picture either way.
  *
- * Pure and Phaser-free.
+ * Pure and renderer-free.
  */
 
 import type { BakedCloud } from "./pixel-buffer";

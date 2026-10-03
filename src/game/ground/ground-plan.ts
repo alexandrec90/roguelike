@@ -2,7 +2,7 @@
  * From a lattice sample to "which tile goes where": the ground's whole layout
  * for one pose, as plain data.
  *
- * Pure and Phaser-free so the lab and the tests can compose exactly what the
+ * Pure and renderer-free so the lab and the tests can compose exactly what the
  * game composes. The layer turns a plan into pixels (`ground-layer.ts`); the lab
  * turns the same plan into a text sprite (`composeGrid`).
  *

@@ -1,5 +1,5 @@
 /**
- * The slimes on screen: the Phaser half of `slime-sim.ts`.
+ * The slimes on screen: the drawing half of `slime-sim.ts`.
  *
  * Wiring only. The population, its decisions and its combat are the pure sim;
  * the pixels of each slime are `slimeFrame`; this file lends each live slime a
@@ -12,7 +12,7 @@
  * events so the scene can add decals, sounds or score on top.
  */
 
-import Phaser from "phaser";
+import type { Scene } from "../../engine";
 
 import { localPlacement, localRow } from "../camera";
 import type { Strike } from "../combat";
@@ -83,7 +83,7 @@ export class SlimeLayer {
     this.impulses = options.impulses ?? true;
   }
 
-  create(scene: Phaser.Scene): void {
+  create(scene: Scene): void {
     for (let index = 0; index < MAX_SLIMES; index += 1) {
       const surface = new PixelSurface(scene, SURFACE_WIDTH, SURFACE_HEIGHT, "slime");
       surface.image.setVisible(false);

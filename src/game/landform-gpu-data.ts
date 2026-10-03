@@ -11,7 +11,7 @@
  * frame on the CPU. Where the picture is cut into depth slices is
  * `landform-gpu-rows.ts`.
  *
- * Pure and Phaser-free: numbers in, `Float32Array`s out.
+ * Pure and renderer-free: numbers in, `Float32Array`s out.
  */
 
 import type { CameraFrame } from "./camera";

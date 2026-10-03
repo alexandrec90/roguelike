@@ -1,7 +1,7 @@
 /**
  * A fireball in flight: where it is, what it has hit, and what it looks like.
  *
- * Pure and Phaser-free, so the lab steps exactly the projectile the game
+ * Pure and renderer-free, so the lab steps exactly the projectile the game
  * throws. The layer (`fireball-layer.ts`) owns the list and the surface.
  *
  * **Two coordinate systems, on purpose.** The fireball *is* on the planet — its

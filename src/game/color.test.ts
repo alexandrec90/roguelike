@@ -33,7 +33,7 @@ describe("colour arithmetic", () => {
     expect(() => sampleRamp([], 0)).toThrow(/at least one stop/);
   });
 
-  it("converts to the integer Phaser fills want", () => {
+  it("converts to the integer the renderer's fills want", () => {
     expect(hexToInt("#ff8000")).toBe(0xff8000);
   });
 });

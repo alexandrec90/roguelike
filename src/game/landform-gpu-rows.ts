@@ -9,7 +9,7 @@
  * footprint, the projection and each landform's radial profile - so the CPU
  * can place the slices on the frame the GPU draws them.
  *
- * Pure and Phaser-free.
+ * Pure and renderer-free.
  */
 
 import { projectDepth, type CameraFrame } from "./camera";
