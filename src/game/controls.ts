@@ -2,7 +2,7 @@
  * What the player is holding down right now, in actions rather than in keys.
  *
  * Everything here is a pure function over a small mutable record, so the whole
- * input model is testable without a browser: the Phaser layer only translates
+ * input model is testable without a browser: the hero layer only translates
  * DOM events into `pressKey` / `releaseKey` / `pressButton` / `releaseButton`
  * and never decides anything.
  *

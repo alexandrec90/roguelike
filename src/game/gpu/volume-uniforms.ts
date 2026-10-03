@@ -257,11 +257,12 @@ export const HEAT_TEXTURE_UNIT = 0;
 /**
  * The uniforms WebGL reports under an indexed name.
  *
- * Our own renderer resolves `getUniformLocation("u_lobes")` happily, but Phaser
- * matches against the *active uniform* list, where an array is reported as
- * `u_lobes[0]`. Sending the bare name there is silently ignored — the body then
+ * `getUniformLocation("u_lobes")` resolves happily, but a host that sets
+ * uniforms by matching the *active uniform* list - as the engine's shader
+ * passes do (`engine/pass.ts`) - sees an array reported as `u_lobes[0]`.
+ * Sending the bare name there is silently ignored — the body then
  * has lobes of radius zero and draws nothing at all, with no error anywhere.
- * That cost two rounds of debugging; the set lives here so both hosts agree.
+ * That cost two rounds of debugging; the set lives here so every host agrees.
  */
 export const ARRAY_UNIFORMS: ReadonlySet<string> = new Set([
   "u_lobes",

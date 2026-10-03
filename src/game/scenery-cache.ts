@@ -20,8 +20,7 @@
  *   than flickering through it.
  */
 
-import type Phaser from "phaser";
-
+import type { TextureStore } from "../engine";
 import type { BakedCloud } from "./pixel-buffer";
 import { installBuffer, installFrames } from "./pixel-surface";
 import { lightKey, WIND_LEVELS, type BakeLight } from "./scenery-bake";
@@ -102,7 +101,7 @@ const UPLOAD_BUDGET_MS = 2;
 let serial = 0;
 
 export class SceneryCache {
-  private readonly textures: Phaser.Textures.TextureManager;
+  private readonly textures: TextureStore;
   private readonly baker: Baker;
   private readonly records = new Map<string, BodyRecord>();
   private readonly tickets = new Map<number, Ticket>();
@@ -113,7 +112,7 @@ export class SceneryCache {
   private light: BakeLight = { light: { x: -0.6, y: -0.8 }, elevation: 0.7 };
   private lightId = lightKey(this.light);
 
-  constructor(textures: Phaser.Textures.TextureManager, baker: Baker = createBaker()) {
+  constructor(textures: TextureStore, baker: Baker = createBaker()) {
     this.textures = textures;
     this.baker = baker;
   }

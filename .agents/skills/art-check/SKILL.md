@@ -91,29 +91,28 @@ about one a second and does not run rAF at all.
 
 The lab draws on demand, which is why it works from an extension-driven tab. The
 game runs on a loop, and that tab is usually hidden (`document.visibilityState` reads
-`hidden`): Chrome freezes `requestAnimationFrame` and Phaser pauses `game.loop`, so the
+`hidden`): Chrome freezes `requestAnimationFrame`, and the game's loop with it, so the
 scene stops between tool calls. A held synthetic keydown then moves the hero about one
 cell per screenshot, and a `Runtime.evaluate` that awaits rAF times out outright — the
 capture shows a game that is not running, which reads as a movement bug.
 
-**Step the loop by hand rather than waiting for it.** Hiding the tab pauses only
-`game.loop`: `game.step(time, delta)` still runs every system and renders. In the dev
-build `window.__game` is the `Phaser.Game` (`src/main.ts`), and
-`renderer.snapshot(callback)` captures the frame the *next* step renders, so schedule
-it before the last one:
+**Step the loop by hand rather than waiting for it.** Hiding the tab pauses only the
+animation-frame loop: `game.step(time, delta)` still updates the scene and renders. In
+the dev build `window.__game` is the engine's `Game` (`src/main.ts`, `src/engine/game.ts`),
+and `snapshot()` draws the current frame and returns it as a PNG data URL in the same
+call:
 
 ```js
 const g = window.__game, dt = 1000 / 60;
 let t = performance.now();
-for (let i = 0; i < 29; i++) g.step((t += dt), dt);
-const png = new Promise((done) => g.renderer.snapshot((img) => done(img.src)));
-g.step((t += dt), dt);
-await png; // a PNG data URL of frame 30
+for (let i = 0; i < 30; i++) g.step((t += dt), dt);
+const png = g.snapshot(); // a PNG data URL of frame 30
 ```
 
 Thirty steps fit in one short call. Hundreds do not: run those in a `MessageChannel`
 loop, as shown above, a few dozen steps per message. For an input check, dispatch the
-keydown first, then step: the keyboard plugin reads its queue inside the step. A fixed `dt` makes the same steps give the same frames, so
+keydown first, then step: the controls take the key when it is dispatched and the hero
+reads them inside the step. A fixed `dt` makes the same steps give the same frames, so
 two runs can be compared the way `seek(t)` is compared in the lab. What a frame *looks
 like* is still the lab's question; this is for what the game *does* with it.
 

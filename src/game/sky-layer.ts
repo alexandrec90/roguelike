@@ -32,7 +32,7 @@
  * `roll-ground-layer.ts`, which borrows only the haze colour from here.
  */
 
-import type Phaser from "phaser";
+import type { Scene } from "../engine";
 
 import type { Atmosphere } from "./atmosphere";
 import type { HorizonLayout } from "./horizon";
@@ -52,7 +52,7 @@ export class SkyLayer {
   private painter!: SkyPainter;
   private rendered = "";
 
-  create(scene: Phaser.Scene, layout: HorizonLayout, width: number): void {
+  create(scene: Scene, layout: HorizonLayout, width: number): void {
     this.surface = new PixelSurface(scene, width, Math.max(layout.skyHeight, 1), "sky");
     this.surface.image.setDepth(HORIZON_DEPTH);
     this.painter = new SkyPainter(this.surface.buffer, layout);

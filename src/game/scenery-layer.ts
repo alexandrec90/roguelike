@@ -29,8 +29,7 @@
  * rolls across a wood as the same travelling wave that rolls across the grass.
  */
 
-import type Phaser from "phaser";
-
+import type { Image, Scene } from "../engine";
 import { localPlacement, localReach, localRow, type LocalBounds } from "./camera";
 import type { FrameContext } from "./frame-context";
 import { rowsToSink } from "./horizon";
@@ -57,8 +56,8 @@ const SHADOW_RANK = RANK.grass + 0.5;
 interface Slot {
   key: string | null;
   feature: SceneryFeature | null;
-  readonly body: Phaser.GameObjects.Image;
-  readonly shadow: Phaser.GameObjects.Image;
+  readonly body: Image;
+  readonly shadow: Image;
   /** The wind this body last leaned to, eased so it never snaps between leans. */
   lean: number;
 }
@@ -71,7 +70,7 @@ export class SceneryLayer {
   private swept: PlanetPose | undefined;
   private candidates: readonly SceneryFeature[] = [];
 
-  create(scene: Phaser.Scene, bounds: LocalBounds, width: number): void {
+  create(scene: Scene, bounds: LocalBounds, width: number): void {
     this.layout(bounds, width);
     this.cache = new SceneryCache(scene.textures);
     this.cache.warm(sceneryArchetypes());
@@ -207,7 +206,7 @@ export class SceneryLayer {
 }
 
 function show(
-  image: Phaser.GameObjects.Image,
+  image: Image,
   baked: BakedTexture | undefined,
   footX: number,
   footY: number,
@@ -217,7 +216,7 @@ function show(
     image.setVisible(false);
     return;
   }
-  if (image.texture.key !== baked.key || (baked.frame !== undefined && image.frame.name !== baked.frame)) {
+  if (image.texture.key !== baked.key || (baked.frame !== undefined && String(image.frameName) !== String(baked.frame))) {
     image.setTexture(baked.key, baked.frame);
   }
   image
@@ -231,7 +230,7 @@ function show(
  * below the line and only what still stands above it shows. Nothing is cut
  * this side of the horizon.
  */
-function clipAt(image: Phaser.GameObjects.Image, clipY: number): void {
+function clipAt(image: Image, clipY: number): void {
   if (!image.visible) {
     return;
   }

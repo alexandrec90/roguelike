@@ -35,11 +35,19 @@ is one an ordinary refactor breaks by accident:
 
 | Layer | Choice |
 | --- | --- |
-| Game | Phaser 4.2 on a 320×180 WebGL canvas |
+| Game | Our own WebGL2 renderer (`src/engine/`) on a 320×180 canvas — no framework |
 | Language | TypeScript 7; Python 3.12 for repository tooling |
 | Dev server | Vite 8 |
 | Tests | Vitest and pytest |
 | Checks | TypeScript compiler and ruff |
+
+**Why no game framework.** Phaser was the renderer until the per-pixel work moved to
+the GPU and every surface upload, pass and input had become the game's own code
+reaching round it. What the game still needed from a framework — a depth-sorted sprite
+batch, render targets, shader passes, a loop — is `src/engine/`, small enough to read in
+one sitting (`src/engine/index.ts` maps it). It keeps Phaser's draw rules where they decide a
+pixel (origin, crop, rounding, blend factors), so a frame drawn by it matches one Phaser
+drew. Reach for a library only for something the engine cannot reasonably grow.
 
 ## Visual and Asset Architecture
 
@@ -132,7 +140,7 @@ and disappears on bone is a fault you only see with both on screen at the same m
 
 **Rendering on demand is also why it is the fallback for an input change.** A
 live-loop check needs the tab **foregrounded** — backgrounded, Chrome freezes rAF and
-the Phaser loop stops, so the capture shows a game that is not running. `/art-check`
+the game's loop stops, so the capture shows a game that is not running. `/art-check`
 step 3 has the tell and the remedy.
 
 Everything it shows is in the URL, so a capture can be reopened exactly:
@@ -217,8 +225,8 @@ Four files, and no fifth place where any of this is decided:
 | --- | --- |
 | `src/game/keybindings.ts` | What an input *means*: the binding table, the lookups over it, and `headingToward` — a free direction (a mouse, one day a stick) snapped to the nearest of the eight headings. |
 | `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, one winner per axis summed into a `Heading` (newest-press-wins within an axis), and the one-shot queue that keeps a tap shorter than a frame, two same-frame taps joining into the diagonal they mean. Also the **aim**: `aimAt` takes the cursor's screen offset from the hero's chest, un-foreshortens it by `DEPTH_RATIO` so the angle is the one on the ground, and holds the last angle pointed at — unsnapped. |
-| `src/game/player.ts` | What the hero *does* about it: a pure, Phaser-free simulation over (state, intent, elapsed, world). **North and south walk the heading; east and west strafe, and strafing turns the world** — a press is two gaits over a `PlanetPose` (`Gait`), not a direction on a map, and a diagonal is both walks at once rather than a fifth direction the planet does not have. Two tracks — the legs (`anchor` and `offset`, walked by velocity) and `attackMs` for the sword arm — aged independently, so he can swing mid-stride. Movement is free: a frame walks its share of the heading at one speed in all eight directions, and stops the frame the heading does. `facing` is a `Facing` (a yaw) read from `Intent.aim` when there is one and from the heading otherwise, and `facingYaw` is the one place a heading becomes a turn of the rig. It hands the renderer three views of the pose: `groundPose` (the anchor: whole tiles, what the world is sampled from), `scrollPhase` (the remainder, under a tile on each axis, that it is drawn at) and `livePose` (the continuous truth, which only the horizon shows). The anchor moves a tile when the remainder passes one, and the two cancel. `nextAnchor` hands back the same pose object for the same whole-tile walk, and `upcomingAnchor` names the one he is walking into, so the layers' work for it is done in the frames before he arrives (`prefetcher.ts`). |
-| `src/game/hero-layer.ts` | The wiring only — DOM events in (the pointer mapped back to a logical pixel through the canvas's own box by `logicalPoint`, since the canvas is CSS-scaled under `Scale.NONE`), and a frame of `hero/hero-look.ts` into two `PixelSurface`s. The tracks are put back together in `layeredPose` (`hero/hero-figure.ts`), which **layers** the clips — unkeyed channels fall through, and `SWING` keys nothing below the waist. A blow or a spell leaves along `facing`, the aim, not the heading. The single file here that imports Phaser. |
+| `src/game/player.ts` | What the hero *does* about it: a pure, renderer-free simulation over (state, intent, elapsed, world). **North and south walk the heading; east and west strafe, and strafing turns the world** — a press is two gaits over a `PlanetPose` (`Gait`), not a direction on a map, and a diagonal is both walks at once rather than a fifth direction the planet does not have. Two tracks — the legs (`anchor` and `offset`, walked by velocity) and `attackMs` for the sword arm — aged independently, so he can swing mid-stride. Movement is free: a frame walks its share of the heading at one speed in all eight directions, and stops the frame the heading does. `facing` is a `Facing` (a yaw) read from `Intent.aim` when there is one and from the heading otherwise, and `facingYaw` is the one place a heading becomes a turn of the rig. It hands the renderer three views of the pose: `groundPose` (the anchor: whole tiles, what the world is sampled from), `scrollPhase` (the remainder, under a tile on each axis, that it is drawn at) and `livePose` (the continuous truth, which only the horizon shows). The anchor moves a tile when the remainder passes one, and the two cancel. `nextAnchor` hands back the same pose object for the same whole-tile walk, and `upcomingAnchor` names the one he is walking into, so the layers' work for it is done in the frames before he arrives (`prefetcher.ts`). |
+| `src/game/hero-layer.ts` | The wiring only — DOM events in (the pointer mapped back to a logical pixel through the canvas's own box by `logicalPoint`, since the canvas is CSS-scaled at a whole factor), and a frame of `hero/hero-look.ts` into two `PixelSurface`s. The tracks are put back together in `layeredPose` (`hero/hero-figure.ts`), which **layers** the clips — unkeyed channels fall through, and `SWING` keys nothing below the waist. A blow or a spell leaves along `facing`, the aim, not the heading. The single file here that listens to input (through `scene.input`, `src/engine/input.ts`). |
 
 That split is the `Separation` contract above, applied to input: the simulation is
 deterministic and testable without a canvas, and the presentation layer can exaggerate a
@@ -316,13 +324,20 @@ inspected in the running browser as well — `npm run dev`, then the scene at an
 zoom and `/lab.html` for the frames. A test can only assert the property you thought to
 name; the screen asserts the rest.
 
-The same gap has a second, sharper form: **`Phaser` is an ambient type namespace, so a
-module can annotate `Phaser.GameObjects.Graphics` all day without importing it — and then
-die on the first frame at `Phaser.BlendModes.ADD`, which is a *value*.** `tsc --noEmit`
-and all 306 tests passed on exactly that; the browser said `Phaser is not defined` and the
-canvas was black. Any new module that touches Phaser at runtime needs
-`import Phaser from "phaser"`, and the only thing that catches a missing one is loading
-the page.
+The same gap has a second, sharper form: **the GPU half of a frame is invisible to
+`tsc` and to Vitest.** A shader that fails to compile, a pass whose sampler points at the
+wrong texture, a render target drawn the wrong way up — each type-checks, passes every
+test (Node has no WebGL), and shows as a black or garbled canvas on the first frame. An
+earlier form of this was Phaser's ambient type namespace: 306 tests passed on a module
+that died at `Phaser.BlendModes.ADD`. The only thing that catches either is loading the
+page.
+
+**Performance is a number, not an impression.** `?bench=1&sync=1` (with `&time=21&weather=storm`
+for the heaviest sky) walks a fixed route — standing, each gait, then a fight — by pressing
+the keys a player would, and reports each segment's frame work (p50/p95/max), hitches and
+garbage, plus the cost of every layer (`src/game/bench.ts`, `bench-runner.ts`). Run it in a
+foregrounded tab with nothing else open; a background tab is throttled and its numbers are
+meaningless. A change that claims a saving shows the before and after.
 
 ## Guardrails
 

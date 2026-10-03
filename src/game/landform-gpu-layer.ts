@@ -2,7 +2,7 @@
  * Landforms drawn on the GPU: the same march as `landform-layer.ts`, per pixel
  * in a shader rather than per column on the CPU.
  *
- * Two passes, both inside Phaser's renderer. The **march** renders the whole
+ * Two kinds of pass, both shader passes of the engine's (`engine/pass.ts`). The **march** renders the whole
  * frame into a texture once - colour, and in alpha the depth row each pixel
  * shows (`gpu/landform-shader.ts`). Then one **slice** per row stands in the
  * display list at that row's depth, keeping only its own row's pixels, so a
@@ -19,8 +19,7 @@
  * Needs WebGL2 (`hasWebGL2`); the scene keeps the CPU layer for anything else.
  */
 
-import type Phaser from "phaser";
-
+import type { GameObject, Image, Scene, ShaderPass, UniformValue } from "../engine";
 import { CLOUD_TILE_HEIGHT, CLOUD_TILE_WIDTH, cloudTile, type CloudShade } from "./cloud-shadow";
 import type { FrameContext } from "./frame-context";
 import { FloatTexture } from "./gpu/float-texture";
@@ -71,35 +70,23 @@ const SLICE_POOL = 96;
 const BAND_WIDTH = 256;
 
 /** Where a standing object is and how it sorts, or undefined for one that cannot overlap a slice. */
-function standingBounds(object: Phaser.GameObjects.GameObject): Obstacle | undefined {
-  const shown = object as Partial<Phaser.GameObjects.Image>;
-  if (shown.visible !== true || shown.depth === undefined || shown.displayWidth === undefined) {
+function standingBounds(object: GameObject): Obstacle | undefined {
+  if (!object.visible) {
     return undefined;
   }
-  const left = (shown.x ?? 0) - (shown.displayOriginX ?? 0) * (shown.scaleX ?? 1);
-  const top = (shown.y ?? 0) - (shown.displayOriginY ?? 0) * (shown.scaleY ?? 1);
-  return {
-    depth: shown.depth,
-    left,
-    top,
-    right: left + (shown.displayWidth ?? 0),
-    bottom: top + (shown.displayHeight ?? 0),
-  };
+  const box = object.bounds();
+  return box === undefined ? undefined : { depth: object.depth, ...box };
 }
 
-/** A render-to-texture pass, and the key its output is read by. */
-interface Pass {
-  readonly shader: Phaser.GameObjects.Shader;
-  readonly key: string;
-}
+type Pass = ShaderPass;
 
 /** Everything the march's uniform callback reads, set once per render. */
 interface MarchUniforms {
-  readonly values: Record<string, unknown>;
+  readonly values: Record<string, UniformValue>;
 }
 
 export class LandformGpuLayer {
-  private scene!: Phaser.Scene;
+  private scene!: Scene;
   private width = 0;
   private height = 0;
   private heroHeight = 32;
@@ -115,8 +102,8 @@ export class LandformGpuLayer {
   private bands!: FloatTexture;
   private readonly bandData = new Float32Array(ATLAS_ROWS * 4);
   private marchUniforms: MarchUniforms = { values: {} };
-  private readonly slices: Phaser.GameObjects.Image[] = [];
-  private readonly sliceSet = new Set<Phaser.GameObjects.GameObject>();
+  private readonly slices: Image[] = [];
+  private readonly sliceSet = new Set<GameObject>();
   private rendered = "";
   /** The rows the last march drew, and the farthest that kept its own code. */
   private rects: readonly RowRect[] = [];
@@ -124,7 +111,7 @@ export class LandformGpuLayer {
   /** The last frame's CPU share, ms - read it from the console when profiling. */
   lastFrameMs = 0;
 
-  create(scene: Phaser.Scene, width: number, height: number, heroHeight: number): void {
+  create(scene: Scene, width: number, height: number, heroHeight: number): void {
     this.scene = scene;
     this.width = width;
     this.height = height;
@@ -168,13 +155,11 @@ export class LandformGpuLayer {
     const rects = rowRects(frame, views, this.width, this.height);
     const base = rowBase(rects.map((rect) => rect.row));
     this.marchUniforms = { values: this.uniforms(ctx, frame, views, shade, base) };
-    // Every pass renders its whole target. `setSize` on a render-to-texture
-    // shader reallocates the target rather than shrinking the quad, and the
-    // texture frame an image crops from keeps the old size - so unused rows
-    // are skipped in the shader instead (a step past the count, an empty band).
+    // Every pass renders its whole target; unused rows are skipped in the
+    // shader instead (a step past the count, an empty band), so a target never
+    // has to be resized and the frames cropped from it never go stale.
     for (const pass of [this.probe, this.blocks, this.march, this.lined]) {
-      pass.shader.drawingContext?.clear();
-      pass.shader.renderImmediate();
+      pass.render();
     }
     this.rects = rects;
     this.base = base;
@@ -198,8 +183,8 @@ export class LandformGpuLayer {
     }
     const obstacles: Obstacle[] = [];
     for (const object of this.scene.children.list) {
-      const depth = (object as Partial<Phaser.GameObjects.Image>).depth;
-      if (depth === undefined || depth < low || depth > high || this.sliceSet.has(object)) {
+      const depth = object.depth;
+      if (depth < low || depth > high || this.sliceSet.has(object)) {
         continue;
       }
       const bounds = standingBounds(object);
@@ -209,8 +194,7 @@ export class LandformGpuLayer {
     }
     const groups = stackBands(groupRows(this.rects, this.base, obstacles, (row) => standingDepth(row, RANK.body)));
     const used = this.fillBands(groups);
-    this.pack.shader.drawingContext?.clear();
-    this.pack.shader.renderImmediate();
+    this.pack.render();
     this.place(groups, used);
   }
 
@@ -219,7 +203,7 @@ export class LandformGpuLayer {
       slice.destroy();
     }
     for (const pass of [this.probe, this.blocks, this.march, this.lined, this.pack]) {
-      pass.shader.destroy();
+      pass.destroy();
     }
   }
 
@@ -253,31 +237,15 @@ export class LandformGpuLayer {
     height: number,
     samplers: Readonly<Record<string, string>>,
   ): Pass {
-    const names = Object.keys(samplers);
-    const shader = this.scene.add.shader(
-      {
-        name,
-        fragmentSource: source,
-        vertexSource: LANDFORM_VERTEX_SHADER,
-        setupUniforms: (set: (uniform: string, value: unknown) => void) => {
-          names.forEach((sampler, unit) => set(sampler, unit));
-          for (const [uniform, value] of Object.entries(this.marchUniforms.values)) {
-            set(uniform, value);
-          }
-        },
-      },
-      0,
-      0,
+    return this.scene.add.pass({
+      name,
+      fragmentSource: source,
+      vertexSource: LANDFORM_VERTEX_SHADER,
       width,
       height,
-      Object.values(samplers),
-    );
-    const key = uniqueKey(name);
-    shader.setRenderToTexture(key);
-    // Off the display list: left on it, Phaser re-renders it every frame on
-    // top of the renders asked for.
-    shader.removeFromDisplayList();
-    return { shader, key };
+      samplers,
+      uniforms: () => this.marchUniforms.values,
+    });
   }
 
   private uniforms(
@@ -286,7 +254,7 @@ export class LandformGpuLayer {
     views: readonly LandformView[],
     shade: CloudShade,
     base: number,
-  ): Record<string, unknown> {
+  ): Record<string, UniformValue> {
     const slots = views.map((view) => {
       const placed = this.atlas.place(view.field);
       if (placed.fresh) {

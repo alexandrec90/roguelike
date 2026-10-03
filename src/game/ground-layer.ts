@@ -20,7 +20,7 @@
  * agree). The ground is flat: what stands on it is a landform or a body.
  */
 
-import Phaser from "phaser";
+import type { Scene } from "../engine";
 
 import { localOrigin, scrollOffset, type CameraFrame, type LocalBounds } from "./camera";
 import type { FrameContext } from "./frame-context";
@@ -51,7 +51,7 @@ function wordTarget(surface: PixelSurface): WordTarget {
 }
 
 export class GroundLayer {
-  private scene!: Phaser.Scene;
+  private scene!: Scene;
   private ground: PixelSurface | undefined;
   private groundTarget: WordTarget | undefined;
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
@@ -70,7 +70,7 @@ export class GroundLayer {
   /** The last resample's cost, ms - read it from the console when profiling. */
   lastResampleMs = 0;
 
-  create(scene: Phaser.Scene, frame: CameraFrame, bounds: LocalBounds): void {
+  create(scene: Scene, frame: CameraFrame, bounds: LocalBounds): void {
     this.scene = scene;
     this.layout(frame, bounds);
   }

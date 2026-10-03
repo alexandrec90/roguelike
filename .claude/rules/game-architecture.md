@@ -194,15 +194,16 @@ species nobody has written yet.
 | `src/game/lod.ts` | The detail budget. A distant body evaluates the **same field** more cheaply — never a different, simpler model — so it gains detail as you walk toward it instead of popping. |
 | `src/game/scenery-bake.ts`, `scenery-cache.ts` | Bodies baked once per lean, per light, per horizon scale — posed by stepping the species under a fixed wind — into textures. |
 | `src/game/scenery-bake-jobs.ts`, `scenery-baker.ts`, `scenery-bake-worker.ts` | A bake as plain data, and where it runs: Web Workers, routed so one body's leans settle in order on one bench, or inline where there are none (the tests). |
-| `src/game/scenery-features.ts`, `scenery-layer.ts` | Which species stands where on the planet; the Phaser wiring that picks a baked lean from the wind. |
+| `src/game/scenery-features.ts`, `scenery-layer.ts` | Which species stands where on the planet; the wiring that picks a baked lean from the wind. |
 | `src/game/scenery-slots.ts` | Which body gets which slot, pure and tested — the pool is smaller than the planet, so a slot is *lent* to whichever tree is in reach and an incumbent keeps it. |
 
 Two things about it that are easy to break:
 
 - **A body is a baked image, not a per-frame shader.** Each body is two images (body,
   shadow) that depth-sort with the hero for free; per-frame shader bodies cost a third of
-  the frame on an integrated GPU. The lab's GPU path still needs `ARRAY_UNIFORMS`:
-  Phaser matches uniforms by *active* name (`u_lobes[0]`), and a bare name is silently ignored.
+  the frame on an integrated GPU. Any host that sets uniforms by *active* name - the
+  engine's shader passes do - needs `ARRAY_UNIFORMS`: an array is `u_lobes[0]` there,
+  and a bare name is silently ignored.
 - **A tree is a point feature, not a cell.** It has planet coordinates out of
   `terrain.ts`, keeps its identity as the world scrolls, and is seeded and wind-sampled
   from the *planet* point rather than from where it happens to be on screen — otherwise a

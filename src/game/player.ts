@@ -14,7 +14,7 @@
  * `SWING` keys only the sword arm, the sword and the torso, and leaves the legs
  * to whatever is walking them.
  *
- * Deterministic and Phaser-free by design - `advancePlayer` is a pure function
+ * Deterministic and renderer-free by design - `advancePlayer` is a pure function
  * of (state, intent, elapsed, world), so the whole feel of the controls is
  * testable without a canvas, and the presentation layer can exaggerate a step
  * without being able to change where it lands.

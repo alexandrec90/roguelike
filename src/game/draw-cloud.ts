@@ -8,20 +8,23 @@
  * host it is how two modules quietly become one.
  */
 
+import type { Graphics } from "../engine";
 import { hexToInt } from "./color";
 import { INK_ALPHA, INK_COLORS, type InkId, type PixelCloud } from "./ink";
 
 /**
- * Group by ink so a 100-pixel model costs a handful of fill-style switches.
+ * Group by ink, as it always has: the order pixels are filled in decides which
+ * wins where two overlap, and a capture should not change for the renderer
+ * having changed under it.
  *
  * `alpha` is the *caller's* opinion — how hard this particular draw is lit —
  * and it multiplies the ink's own `INK_ALPHA`, which is a property of the
- * colour and travels with it everywhere. Phaser takes the two as a numeric fill
+ * colour and travels with it everywhere. A fill takes the two as a numeric
  * alpha rather than as an eight-digit hex, which `hexToInt` could not parse
  * anyway.
  */
 export function drawCloud(
-  gfx: Phaser.GameObjects.Graphics,
+  gfx: Graphics,
   cloud: PixelCloud,
   originX: number,
   originY: number,

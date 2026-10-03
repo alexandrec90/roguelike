@@ -36,7 +36,7 @@ describe("captureNow", () => {
     expect(calls[0]).toMatch(/ 0$/);
   });
 
-  it("reads without stepping before Phaser has booted", () => {
+  it("reads without stepping before the game has booted", () => {
     const { game, calls } = fakeGame(false);
     expect(captureNow(game)).toBe("frame-0");
     expect(calls).toEqual(["read image/png"]);

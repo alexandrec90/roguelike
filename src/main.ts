@@ -1,6 +1,5 @@
-import Phaser from "phaser";
-
 import "./style.css";
+import { Game } from "./engine";
 import { DemoScene, GAME_SIZE } from "./game/demo-scene";
 import { readSceneOptions } from "./game/scene-options";
 import { coverOffset, integerCoverScale } from "./game/integer-scale";
@@ -20,90 +19,29 @@ const showMap = wantsMap(query.get("map"));
 // the render target survived the window's crop.
 const scene = new DemoScene(readSceneOptions(query));
 
-/**
- * The one place the renderer's context is decided.
- *
- * Phaser 4.2 asks for `'webgl'` and would give us a WebGL1 context, where the
- * scenery shader cannot run at all: GLSL ES 1.00 has no unsigned integers and
- * no bitwise operators, and `pixelHash` — the lattice every procedural body is
- * built on — is nothing but shifts, xors and a wrapping 32-bit multiply. The
- * usual float-hash substitute is a *different* lattice, which is a different
- * warp and a visibly different tree: an art fork wearing an optimisation's
- * clothes.
- *
- * Phaser does accept a context of our own (`game.config.context`), and it runs
- * on WebGL2 without complaint, so we make one and hand it over. Its own shaders
- * are GLSL ES 1.00 and compile there unchanged; ours are `#version 300 es` and
- * compile there too.
- *
- * A machine without WebGL2 gets `null` here, Phaser makes its own WebGL1
- * context as it always did, and `SceneryLayer` notices and falls back to the
- * CPU path — the same picture, more slowly.
- */
-function webgl2Canvas(): { canvas: HTMLCanvasElement; context: WebGL2RenderingContext } | null {
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("webgl2", {
-    alpha: false,
-    antialias: false,
-    // The integrated GPU where a laptop has two: the target the frame budget is
-    // held to (`.claude/rules/rendering.md`), so what is measured is what ships.
-    powerPreference: "low-power",
-  });
-  return context === null ? null : { canvas, context };
+const host = gameHost();
+
+function gameHost(): HTMLElement {
+  const element = document.getElementById("game");
+  if (element === null) {
+    throw new Error("The page has no #game element to draw into");
+  }
+  return element;
 }
 
-const webgl2 = webgl2Canvas();
-
-const game = new Phaser.Game({
-  type: Phaser.WEBGL,
-  parent: "game",
-  ...(webgl2 === null
-    ? {}
-    : {
-        canvas: webgl2.canvas,
-        // Phaser publishes `context` as a CanvasRenderingContext2D, but its
-        // WebGL renderer reads this very field as the GL context — see
-        // "Did they provide their own context?" in WebGLRenderer#init. The
-        // runtime is right and the type is wrong, so the cast is narrowed to
-        // this one field rather than loosening the whole config.
-        context: webgl2.context as unknown as CanvasRenderingContext2D,
-      }),
+// WebGL2 or nothing: every per-pixel pass, and `pixelHash` itself, is GLSL ES
+// 3.00 - shifts, xors and unsigned integers ES 1.00 does not have.
+const game = new Game({
+  parent: host,
   width: GAME_SIZE.width,
   height: GAME_SIZE.height,
   backgroundColor: "#1b2440",
-  pixelArt: true,
-  roundPixels: true,
-  antialias: false,
-  antialiasGL: false,
   scene,
-  fps: {
-    target: 60,
-    smoothStep: true,
-  },
-  scale: {
-    // NONE, not ENVELOP: Phaser may pick a fractional factor, while the cover
-    // layout below keeps every logical pixel at a uniform whole-number size.
-    mode: Phaser.Scale.NONE,
-    autoCenter: Phaser.Scale.NO_CENTER,
-  },
-  render: {
-    powerPreference: "low-power",
-  },
 });
 
 /** Whole-number cover scale with centred sides and a horizon-pinned top edge. */
 function coverCanvas(): void {
-  const host = game.canvas.parentElement;
-  if (host === null) {
-    return;
-  }
-
-  const { factor, width } = integerCoverScale(
-    host.clientWidth,
-    host.clientHeight,
-    GAME_SIZE.width,
-    GAME_SIZE.height,
-  );
+  const { factor, width } = integerCoverScale(host.clientWidth, host.clientHeight, GAME_SIZE.width, GAME_SIZE.height);
   const { left, top } = coverOffset(host.clientWidth, width);
 
   game.canvas.style.width = `${GAME_SIZE.width * factor}px`;
@@ -118,20 +56,36 @@ function coverCanvas(): void {
 }
 
 window.addEventListener("resize", coverCanvas);
-game.events.once(Phaser.Core.Events.READY, () => {
+game.once("ready", () => {
   coverCanvas();
-  const host = game.canvas.parentElement;
-  if (host !== null) {
-    scene.setMap(MapOverlay.attach(host, showMap));
-    HelpOverlay.attach(host);
-  }
+  scene.setMap(MapOverlay.attach(host, showMap));
+  HelpOverlay.attach(host);
 });
+
+// `?bench=1` walks the fixed route and reports what each layer cost; `&sync=1`
+// drains the GPU every frame so its time is counted too.
+if (query.get("bench") === "1") {
+  void import("./game/bench-runner").then(({ runBench }) =>
+    runBench(
+      {
+        scene,
+        gl: game.gl,
+        onFrame: (start, end) => {
+          game.on("prestep", start);
+          game.on("postrender", end);
+        },
+      },
+      { sync: query.get("sync") === "1" },
+    ),
+  );
+}
 
 // A handle for a browser-driving agent profiling the dev build; never shipped.
 if (import.meta.env.DEV) {
-  (window as unknown as { __game: Phaser.Game }).__game = game;
+  (window as unknown as { __game: Game; __scene: DemoScene }).__game = game;
+  (window as unknown as { __game: Game; __scene: DemoScene }).__scene = scene;
 }
 
 if (import.meta.hot) {
-  import.meta.hot.dispose(() => game.destroy(true));
+  import.meta.hot.dispose(() => game.destroy());
 }

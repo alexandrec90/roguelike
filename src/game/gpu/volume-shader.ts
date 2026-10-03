@@ -8,18 +8,18 @@
  * path is that it draws *the same tree*, faster. A shader that invents its own
  * noise is a second art direction with a plausible excuse.
  *
- * ## Why WebGL2, and not a Phaser shader
+ * ## Why WebGL2
  *
- * Phaser 4.2 creates a **WebGL1** context (`'webgl'` / `experimental-webgl`,
- * GLSL ES 1.00). GLSL ES 1.00 has no unsigned integers and no bitwise
+ * GLSL ES 1.00 (WebGL1) has no unsigned integers and no bitwise
  * operators, and `pixelHash` is nothing but shifts, xors and a wrapping 32-bit
  * multiply. It cannot be expressed there. The usual workaround —
  * `fract(sin(dot(p, k)) * 43758.5453)` — is a *different hash*, which produces
  * different lattice values, a different warp and therefore a visibly different
  * silhouette from the CPU model. That is not an optimisation, it is a fork.
  *
- * So the bodies render in a WebGL2 context of their own and reach Phaser as a
- * texture. Phaser stays on its own renderer and never learns about any of this.
+ * The tree lab renders the bodies in a WebGL2 context of its own
+ * (`volume-gl.ts`), reads them back and diffs them against the CPU; the game
+ * draws the same bodies from CPU bakes.
  *
  * ## What still differs, and by how much
  *
@@ -48,13 +48,13 @@ export const MAX_RAMP = 8;
 export const MAX_OCTAVES = 4;
 
 /**
- * Two vertex shaders, one per host, and both have exactly one job: deliver
- * `outTexCoord` with (0, 0) at the **top-left of the quad**.
+ * The vertex shader, whose one job is to deliver `outTexCoord` with (0, 0) at
+ * the **top-left of the quad**.
  *
  * The fragment stage derives its cloud coordinate from that, so it does not
- * care whether it is being drawn by our own full-screen quad or by Phaser's
- * positioned one. Getting the orientation wrong here renders the body upside
- * down and nowhere else — which is why it is stated twice rather than inferred.
+ * care where the quad is drawn. Getting the orientation wrong here renders the
+ * body upside down and nowhere else — which is why it is stated rather than
+ * inferred.
  */
 export const VOLUME_VERTEX_SHADER = `#version 300 es
 in vec2 a_clip;
@@ -66,29 +66,6 @@ void main() {
 }
 `;
 
-/**
- * The same, for a Phaser `GameObjects.Shader` quad.
- *
- * Phaser supplies `inPosition` in quad space and expects it through
- * `uProjectionMatrix`, and hands the texture coordinate over as `inTexCoord`.
- * Matching those three names is the whole contract.
- */
-export const VOLUME_PHASER_VERTEX_SHADER = `#version 300 es
-uniform mat4 uProjectionMatrix;
-in vec2 inPosition;
-in vec2 inTexCoord;
-out vec2 outTexCoord;
-void main() {
-  gl_Position = uProjectionMatrix * vec4(inPosition, 1.0, 1.0);
-  // Flipped: Phaser hands over a texture coordinate with y=0 at the BOTTOM,
-  // and a pixel cloud counts rows from the top. Without this every body renders
-  // upside down — canopy under trunk — which is the one failure mode of this
-  // whole migration that compiles, runs, reports no error, and is instantly
-  // obvious on screen.
-  outTexCoord = vec2(inTexCoord.x, 1.0 - inTexCoord.y);
-}
-`;
-
 export const VOLUME_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
@@ -97,9 +74,7 @@ in vec2 outTexCoord;
 out vec4 fragColor;
 
 // The QUAD: where its top-left pixel sits in cloud space, and how many pixels
-// across it is. These describe the rectangle being rasterised, which for a
-// Phaser game object is a fixed footprint and for our own renderer is the
-// body's tight box.
+// across it is - the body's tight box.
 uniform vec2 u_boxOrigin;
 uniform vec2 u_viewport;
 
@@ -380,8 +355,7 @@ void castShadow(vec2 ground, ivec2 screen) {
 
 void main() {
   // From the quad's own texture coordinate rather than gl_FragCoord, so the
-  // body does not care where on screen it was placed — which is what lets a
-  // Phaser game object draw it anywhere in the world.
+  // body does not care where on screen it was placed.
   // \`screen\` is the pixel relative to the foot; \`at\` is the cloud point it
   // samples. They are the same numbers in the field, and diverge on the roll.
   vec2 screen = u_boxOrigin + floor(outTexCoord * u_viewport);

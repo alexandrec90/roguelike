@@ -1,5 +1,4 @@
-import Phaser from "phaser";
-
+import type { Graphics, Image, Scene } from "../engine";
 import { assetFrame, textureKey, type AssetEntry } from "../game/asset-registry";
 import {
   createEmitter,
@@ -47,15 +46,15 @@ interface Placement {
  * at the same moment.
  */
 export class LabPane {
-  private readonly background: Phaser.GameObjects.Graphics;
-  private readonly sprite: Phaser.GameObjects.Image;
-  private readonly overlay: Phaser.GameObjects.Graphics;
-  private readonly particles: Phaser.GameObjects.Image[] = [];
+  private readonly background: Graphics;
+  private readonly sprite: Image;
+  private readonly overlay: Graphics;
+  private readonly particles: Image[] = [];
   private emitter: EmitterState | null = null;
   private emitterZoom = 1;
 
   constructor(
-    scene: Phaser.Scene,
+    scene: Scene,
     private readonly rect: Rect,
     private readonly side: 0 | 1,
   ) {
@@ -69,7 +68,7 @@ export class LabPane {
           .image(-8, -8, "__DEFAULT")
           .setOrigin(0, 0)
           .setVisible(false)
-          .setBlendMode(Phaser.BlendModes.ADD),
+          .setBlendMode("add"),
       );
     }
   }

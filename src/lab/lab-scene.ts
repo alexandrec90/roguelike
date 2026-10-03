@@ -1,5 +1,4 @@
-import Phaser from "phaser";
-
+import { Scene, type Graphics, type Image } from "../engine";
 import { assetFrame, findAsset, textureKey, type AssetEntry } from "../game/asset-registry";
 import { validateRegistry } from "../game/asset-registry";
 import { integerScale } from "../game/integer-scale";
@@ -30,19 +29,15 @@ const CELL_ACTIVE = 0xe8c07a;
  * controls, which is what lets a URL reopen an exact view — the thing that makes
  * a screenshot comparable with the one taken before the change.
  */
-export class LabScene extends Phaser.Scene {
+export class LabScene extends Scene {
   /** Called when playback advances the frame, so the chrome can follow along. */
   onFrameChange: ((frame: number) => void) | null = null;
 
   private state: LabState = normalizeLabState();
   private panes: LabPane[] = [];
-  private stripGraphics!: Phaser.GameObjects.Graphics;
-  private stripImages: Phaser.GameObjects.Image[] = [];
+  private stripGraphics!: Graphics;
+  private stripImages: Image[] = [];
   private elapsedMs = 0;
-
-  constructor() {
-    super("asset-lab");
-  }
 
   create(): void {
     // The lab is what a broken catalogue actually breaks, and every fault
@@ -103,7 +98,7 @@ export class LabScene extends Phaser.Scene {
 
   setState(next: LabState): void {
     // Reachable before `create` runs: the page parses its URL and hands the
-    // opening view over while Phaser is still booting. Store it; `create` draws it.
+    // opening view over while the game is still booting. Store it; `create` draws it.
     if (this.panes.length === 0) {
       this.state = next;
       return;

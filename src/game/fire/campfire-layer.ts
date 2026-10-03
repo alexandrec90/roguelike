@@ -14,7 +14,7 @@
  * stones and logs are copied from clouds built once rather than re-evaluated.
  */
 
-import Phaser from "phaser";
+import type { Scene } from "../../engine";
 
 import { localRow } from "../camera";
 import type { FrameContext } from "../frame-context";
@@ -56,7 +56,7 @@ export class CampfireLayer {
   private footNow: ScreenPoint = { x: -99, y: -99 };
   private shown = false;
 
-  create(scene: Phaser.Scene, at: PlanetPoint, seed: number): void {
+  create(scene: Scene, at: PlanetPoint, seed: number): void {
     this.at = at;
     this.state = createCampfire(seed);
     this.body = new PixelSurface(scene, BODY_WIDTH, BODY_HEIGHT, "campfire");

@@ -4,7 +4,7 @@
  * on them — the sky's glint, reflections, rain rings, a lightning flash.
  *
  * The shapes and the maths belong to `puddles.ts` and `water/`. What lives here
- * is only the Phaser side: two `PixelSurface`s and when each is repainted.
+ * is only the drawing side: two `PixelSurface`s and when each is repainted.
  *
  * - **The body** (`PUDDLE_DEPTH`) is baked, not drawn: re-painted only when the
  *   puddles are re-grown (once a step), when the sky they mirror has visibly
@@ -23,7 +23,7 @@
  * way, and that subtraction is the whole of the trick.
  */
 
-import type Phaser from "phaser";
+import type { Scene } from "../engine";
 
 import { atmosphereAt, clockHours, type Atmosphere } from "./atmosphere";
 import { localFoot, localReach, scrollOffset, visibleLocal, type CameraFrame } from "./camera";
@@ -133,7 +133,7 @@ export class WaterLayer {
   private painted: Rows | undefined;
 
   /** The two surfaces. What is on them arrives with the first `update`. */
-  create(scene: Phaser.Scene, width = 320, height = 180): void {
+  create(scene: Scene, width = 320, height = 180): void {
     this.mask = createMask(width, height, MARGIN);
     this.body = new PixelSurface(scene, this.mask.width, this.mask.height, "water-body");
     this.body.image.setDepth(PUDDLE_DEPTH);

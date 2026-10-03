@@ -158,7 +158,7 @@ export function isHelpKey(code: string): boolean {
   return HELP_KEYS.includes(code);
 }
 
-/** `MouseEvent.button` / Phaser's `Pointer.button`, named. */
+/** `MouseEvent.button`, named. */
 const BUTTON_BY_INDEX: readonly MouseButton[] = ["left", "middle", "right"];
 
 export function mouseButtonOf(index: number): MouseButton | undefined {

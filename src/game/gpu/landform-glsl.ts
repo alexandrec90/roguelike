@@ -42,8 +42,10 @@ const BAYER = BAYER_4X4.flat()
 export const NO_TOP = 255;
 
 /**
- * The vertex stage for a Phaser `Shader` quad: `outTexCoord` with (0, 0) at the
- * quad's top-left. Phaser hands the coordinate over with y up; flipped here.
+ * The vertex stage for a shader pass's quad (`engine/pass.ts`): `outTexCoord`
+ * with (0, 0) at the quad's top-left. The pass hands the coordinate over with
+ * y up; flipped here. The passes themselves read `gl_FragCoord`, where row 0 is
+ * the bottom of the target.
  */
 export const LANDFORM_VERTEX_SHADER = `#version 300 es
 uniform mat4 uProjectionMatrix;

@@ -1,5 +1,5 @@
 /**
- * The Phaser side of `wildfire.ts`: scars on the ground, flames standing in the
+ * The drawing side of `wildfire.ts`: scars on the ground, flames standing in the
  * grass, sparks going up, and the light a burning meadow throws.
  *
  * Placed exactly as the decals are (`fire/anchor.ts`): a planet cell's point
@@ -13,7 +13,7 @@
  * - **Sparks** are one pooled particle system drawn over the world.
  */
 
-import type Phaser from "phaser";
+import type { Scene } from "../engine";
 
 import { localFoot, localRow, scrollOffset, type CameraFrame } from "./camera";
 import { groundFoot, onField } from "./fire/anchor";
@@ -83,7 +83,7 @@ export class WildfireLayer {
   private flames: PixelSurface[] = [];
   private painted = "";
 
-  create(scene: Phaser.Scene, width: number, height: number): void {
+  create(scene: Scene, width: number, height: number): void {
     this.scars = new PixelSurface(scene, width + MARGIN * 2, height + MARGIN * 2, "scars");
     this.scars.image.setDepth(SCAR_DEPTH).setVisible(false);
     this.sparks = new PixelSurface(scene, width, height, "sparks");

@@ -1,7 +1,7 @@
 /**
- * The horizon lip drawn on the GPU: the Phaser side of `gpu/lip-shader.ts`.
+ * The horizon lip drawn on the GPU: the wiring of `gpu/lip-shader.ts`.
  *
- * One render-to-texture pass the size of the lip, off the display list, and
+ * One shader pass the size of the lip, off the display list, and
  * one image showing it at the horizon band's depth - where the CPU path's
  * `PixelSurface` stood. Each frame the CPU only says which cells the lip reads
  * (`visitLipCells`) and makes sure each has what the shader will ask of it: a
@@ -13,8 +13,7 @@
  * (`warmTasks`) arrives with its tiles composed and paged in.
  */
 
-import type Phaser from "phaser";
-
+import type { Image, Scene, ShaderPass, UniformValue } from "../engine";
 import type { CameraFrame, LocalBounds } from "./camera";
 import { scrollOffset } from "./camera";
 import type { Rgb } from "./color";
@@ -68,8 +67,8 @@ interface Fill {
 let waterCount = 0;
 
 export class LipGpu {
-  readonly image: Phaser.GameObjects.Image;
-  private readonly pass: Phaser.GameObjects.Shader;
+  readonly image: Image;
+  private readonly pass: ShaderPass;
   private readonly lines: FloatTexture;
   private readonly cells: FloatTexture;
   private readonly pages: FloatTexture;
@@ -79,14 +78,14 @@ export class LipGpu {
   private readonly waterIds = new WeakMap<LipWater, number>();
   private readonly alphas = new Float32Array(MAX_WATER_ALPHAS);
   private shown: LipState | undefined;
-  private values: Record<string, unknown> = {};
+  private values: Record<string, UniformValue> = {};
 
   /**
    * `far` is what each terrain code looks like from too far to point sample:
    * grass, then dirt.
    */
   constructor(
-    scene: Phaser.Scene,
+    scene: Scene,
     private readonly width: number,
     frame: CameraFrame,
     private readonly lipBounds: LocalBounds,
@@ -112,31 +111,17 @@ export class LipGpu {
       u_tuftAtlas: atlas.key,
       u_farLooks: farLooks.key,
     };
-    const names = Object.keys(samplers);
-    this.pass = scene.add.shader(
-      {
-        name: "roll-ground-gpu",
-        fragmentSource: LIP_FRAGMENT_SHADER,
-        vertexSource: LANDFORM_VERTEX_SHADER,
-        setupUniforms: (set: (uniform: string, value: unknown) => void) => {
-          names.forEach((sampler, unit) => set(sampler, unit));
-          for (const [uniform, value] of Object.entries(this.values)) {
-            set(uniform, value);
-          }
-        },
-      },
-      0,
-      0,
+    this.pass = scene.add.pass({
+      name: "roll-ground-gpu",
+      fragmentSource: LIP_FRAGMENT_SHADER,
+      vertexSource: LANDFORM_VERTEX_SHADER,
       width,
-      frame.rollHeight,
-      Object.values(samplers),
-    );
-    const key = uniqueKey("roll-ground-gpu");
-    this.pass.setRenderToTexture(key);
-    // Off the display list, or Phaser re-renders it every frame on top of ours.
-    this.pass.removeFromDisplayList();
+      height: frame.rollHeight,
+      samplers,
+      uniforms: () => this.values,
+    });
     this.image = scene.add
-      .image(0, frame.groundTop - frame.rollHeight, key)
+      .image(0, frame.groundTop - frame.rollHeight, this.pass.key)
       .setOrigin(0, 0)
       .setDepth(HORIZON_DEPTH);
   }
@@ -167,8 +152,7 @@ export class LipGpu {
       u_haze: [haze.r, haze.g, haze.b],
       "u_alphas[0]": this.alphas,
     };
-    this.pass.drawingContext?.clear();
-    this.pass.renderImmediate();
+    this.pass.render();
   }
 
   /**

@@ -27,8 +27,7 @@
  * feet away from it, and flattens the ones right under it.
  */
 
-import Phaser from "phaser";
-
+import type { Blitter, Bob, Scene } from "../engine";
 import {
   localFoot,
   localOrigin,
@@ -82,7 +81,7 @@ interface Placements {
 }
 
 interface LiveTuft {
-  readonly bob: Phaser.GameObjects.Bob;
+  readonly bob: Bob;
   readonly placement: TuftPlacement;
   frame: number;
   bare: boolean;
@@ -91,9 +90,9 @@ interface LiveTuft {
 const FRAME_NAMES = Array.from({ length: TUFT_SHAPES.length * BEND_FRAMES }, (_unused, index) => String(index));
 
 export class VegetationLayer {
-  private scene!: Phaser.Scene;
-  private rows: Phaser.GameObjects.Blitter[] = [];
-  private pools: Phaser.GameObjects.Bob[][] = [];
+  private scene!: Scene;
+  private rows: Blitter[] = [];
+  private pools: Bob[][] = [];
   private tufts: LiveTuft[] = [];
   private wind: WindGrid | undefined;
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
@@ -109,7 +108,7 @@ export class VegetationLayer {
   /** The last frame's cost, ms - read it from the console when profiling. */
   lastFrameMs = 0;
 
-  create(scene: Phaser.Scene, frame: CameraFrame, bounds: LocalBounds): void {
+  create(scene: Scene, frame: CameraFrame, bounds: LocalBounds): void {
     this.scene = scene;
     installStrip(scene.textures, TUFT_TEXTURE, tuftBuffers());
     this.layout(frame, bounds);

@@ -24,7 +24,7 @@
  * 7.9 ms, boulder 4.1, spruce 2.6, mushrooms 2.5, bush 1.8, beech 1.5, ash 1.4,
  * oak 1.1. Hence never on the frame: `scenery-baker.ts` runs them on workers.
  *
- * Pure and Phaser-free; `scenery-cache.ts` owns the textures these become.
+ * Pure and renderer-free; `scenery-cache.ts` owns the textures these become.
  */
 
 import { cloudBounds, type InkId, type PixelCloud } from "./ink";

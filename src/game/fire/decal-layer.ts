@@ -14,7 +14,7 @@
  * costs nothing.
  */
 
-import Phaser from "phaser";
+import type { Scene } from "../../engine";
 
 import { localFoot, scrollOffset, type CameraFrame } from "../camera";
 import type { FrameContext } from "../frame-context";
@@ -47,7 +47,7 @@ export class DecalLayer {
   private paintedVersion = -1;
   private paintedTick = -1;
 
-  create(scene: Phaser.Scene, width: number, height: number): void {
+  create(scene: Scene, width: number, height: number): void {
     this.surface = new PixelSurface(scene, width + MARGIN * 2, height + MARGIN * 2, "decals");
     this.surface.image.setDepth(DECAL_DEPTH).setVisible(false);
   }

@@ -3,7 +3,7 @@
 2D, pixel-art, real-time twin-stick shooter. Movement is eight-way — two directions
 held at once make the diagonal between them — and the hero faces where he is going,
 front, back, or either of those mirrored. The current proof of concept is a small
-animated outdoor scene built with Phaser: a rigged hero under a rolled-over horizon,
+animated outdoor scene drawn by its own small WebGL2 renderer: a rigged hero under a rolled-over horizon,
 rain, lightning, and a puddle that takes the rings.
 
 It is **not** a roguelike and **not** turn based, whatever the repository name and the
@@ -46,7 +46,8 @@ the worktree they target.
 ## Layout
 
 ```text
-src/                       Phaser scene, text sprite sources, and Vitest tests
+src/engine/                the WebGL2 renderer: sprite batch, render targets, shader passes, loop
+src/game/                  the scene, its layers, text sprite sources, and Vitest tests
 roguelike/                 Python tooling package
 tests/                     Python tooling tests
 scripts/                   project scripts (Python, each with tests)

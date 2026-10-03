@@ -2,7 +2,7 @@
  * Painting the water into pixel buffers: the still body (baked), and
  * everything that moves on it (every frame).
  *
- * Phaser-free on purpose — `water-layer.ts` owns the textures and the
+ * Renderer-free on purpose — `water-layer.ts` owns the textures and the
  * coordinate bookkeeping, and this owns what goes into them — so the whole of
  * a frame of water can be painted and read back in a test.
  *

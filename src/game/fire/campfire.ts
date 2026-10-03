@@ -11,7 +11,7 @@
  * | the smoke | the same pool, drawn as growing puffs bent by the wind |
  * | the light | a flickering `LightSource`, and a dithered warm pool on the ground |
  *
- * Phaser-free, so the asset lab and the tests step exactly the fire the game
+ * Renderer-free, so the asset lab and the tests step exactly the fire the game
  * draws. Every cloud is foot-anchored on the middle of the pit.
  */
 

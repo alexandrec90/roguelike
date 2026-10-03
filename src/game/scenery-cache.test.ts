@@ -1,24 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import type Phaser from "phaser";
-
+import type { TextureStore } from "../engine";
 import { quantizeLight, WIND_LEVELS } from "./scenery-bake";
 import { InlineBaker, type Baker } from "./scenery-baker";
 import { SceneryCache } from "./scenery-cache";
 import type { SceneryFeature } from "./scenery-features";
 
-/** Just enough of a texture manager for the cache to install into. */
-function fakeTextures(): { manager: Phaser.Textures.TextureManager; keys: Set<string> } {
+/** Just enough of a texture store for the cache to install into. */
+function fakeTextures(): { manager: TextureStore; keys: Set<string> } {
   const keys = new Set<string>();
   const manager = {
     exists: (key: string) => keys.has(key),
     remove: (key: string) => keys.delete(key),
-    addUint8Array: (key: string) => {
+    addBytes: (key: string) => {
       keys.add(key);
       return { add: () => undefined };
     },
   };
-  return { manager: manager as unknown as Phaser.Textures.TextureManager, keys };
+  return { manager: manager as unknown as TextureStore, keys };
 }
 
 const OAK: SceneryFeature = { x: 10, y: 10, seed: 11, size: 0, species: "oak-recursive" };

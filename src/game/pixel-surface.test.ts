@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type Phaser from "phaser";
-
+import type { TextureStore } from "../engine";
 import { createBuffer, type PixelBuffer } from "./pixel-buffer";
 import { installFrames, installStrip, packFrames } from "./pixel-surface";
 
@@ -11,21 +10,21 @@ function filled(width: number, height: number, value: number): PixelBuffer {
   return buffer;
 }
 
-/** A texture manager that records what was installed, and the frames added to it. */
+/** A texture store that records what was installed, and the frames added to it. */
 function recorder(): {
-  manager: Phaser.Textures.TextureManager;
+  manager: TextureStore;
   installed: Map<string, { width: number; height: number; data: Uint8Array; frames: string[] }>;
 } {
   const installed = new Map<string, { width: number; height: number; data: Uint8Array; frames: string[] }>();
   const manager = {
     exists: (key: string) => installed.has(key),
-    addUint8Array: (key: string, data: Uint8Array, width: number, height: number) => {
+    addBytes: (key: string, data: Uint8Array, width: number, height: number) => {
       const entry = { width, height, data, frames: [] as string[] };
       installed.set(key, entry);
       return { add: (name: string) => entry.frames.push(name) };
     },
   };
-  return { manager: manager as unknown as Phaser.Textures.TextureManager, installed };
+  return { manager: manager as unknown as TextureStore, installed };
 }
 
 describe("packFrames", () => {
@@ -44,7 +43,7 @@ describe("packFrames", () => {
     expect(at(2, 1)).toBe(0);
   });
 
-  it("is a Uint8Array, which Phaser uploads directly", () => {
+  it("is a Uint8Array, which the GPU uploads directly", () => {
     expect(packFrames([filled(1, 1, 5)]).data).toBeInstanceOf(Uint8Array);
   });
 });
