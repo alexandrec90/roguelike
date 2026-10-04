@@ -154,6 +154,35 @@ export function localPlacement(frame: CameraFrame, local: LocalPoint): Placement
   };
 }
 
+/** A pixel carried onto the roll: where it lands, and how large the thing it belongs to is there. */
+export interface RolledPoint extends ScreenPoint {
+  readonly scale: number;
+}
+
+/**
+ * `localPlacement` for something already laid out on the flat field's screen -
+ * a projectile, whose trail is pixels rather than local points.
+ *
+ * `groundY` is the scanline of the ground under the pixel as the affine grid
+ * would put it, and `height` how far above that ground it is drawn, so a pixel
+ * at `(x, groundY - height)` on the field stays exactly there. One whose ground
+ * the affine grid puts above `groundTop` is carried up the roll by the same
+ * curve every standing body takes (`projectDepth`): its ground lifted, its
+ * height and its distance from the hero's column shrunk by the roll's scale.
+ * Null once it has sunk behind the horizon line.
+ */
+export function rollPoint(frame: CameraFrame, x: number, groundY: number, height = 0): RolledPoint | null {
+  if (groundY >= frame.groundTop) {
+    return { x: Math.round(x), y: Math.round(groundY - height), scale: 1 };
+  }
+  const depth = projectDepth(frame, (frame.footY - groundY) / TILE_DEPTH + frame.phaseY);
+  const y = Math.round(depth.ground - height * depth.scale);
+  if (depth.sink >= DEEPEST_SINK || y >= depth.clipY) {
+    return null;
+  }
+  return { x: Math.round(frame.footX + (x - frame.footX) * depth.scale), y, scale: depth.scale };
+}
+
 /**
  * The scroll, as a whole-pixel offset.
  *

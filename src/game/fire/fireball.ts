@@ -215,14 +215,20 @@ export function fireballSpent(ball: Fireball): boolean {
 /**
  * The core: a small sphere hot at its heart and red at its rim, its outline
  * boiling with a little noise so it burns rather than glows.
+ *
+ * `scale` shrinks the sphere itself - the horizon roll's size for a thing that
+ * far off - rather than the picture of it, so a small core is still evaluated
+ * pixel by pixel and its centre always shows.
  */
-export function coreCloud(ageMs: number, seed: number, cx = 0, cy = 0): PixelCloud {
+export function coreCloud(ageMs: number, seed: number, cx = 0, cy = 0, scale = 1): PixelCloud {
   const cloud: PixelCloud = [];
-  const reach = Math.ceil(CORE_RADIUS + 1);
+  const radius = CORE_RADIUS * scale;
+  const reach = Math.ceil(radius + 1);
   for (let oy = -reach; oy <= reach; oy += 1) {
     for (let ox = -reach; ox <= reach; ox += 1) {
-      const boil = valueNoise3(ox * 0.7, oy * 0.7, ageMs / 60, seed) - 0.5;
-      const d = Math.hypot(ox, oy) / (CORE_RADIUS + boil * 1.4);
+      // The noise is sampled on the full-size sphere, so it boils the same shape at any size.
+      const boil = valueNoise3((ox / scale) * 0.7, (oy / scale) * 0.7, ageMs / 60, seed) - 0.5;
+      const d = Math.hypot(ox, oy) / (radius + boil * 1.4 * scale);
       if (d > 1) {
         continue;
       }
@@ -230,7 +236,7 @@ export function coreCloud(ageMs: number, seed: number, cx = 0, cy = 0): PixelClo
       const y = Math.round(cy) + oy;
       // A hot centre, lifted a pixel toward the top-left where the sphere would
       // catch its own light, falling to red at the rim.
-      const hot = 1 - Math.hypot(ox + 0.6, oy + 0.8) / (CORE_RADIUS + 0.4);
+      const hot = 1 - Math.hypot(ox / scale + 0.6, oy / scale + 0.8) / (CORE_RADIUS + 0.4);
       cloud.push({ x, y, ink: rampInk(FLAME_RAMP, 0.35 + hot * 0.85, { x, y }) });
     }
   }
@@ -251,25 +257,66 @@ function shadowCloud(x: number, y: number): PixelCloud {
   return cloud;
 }
 
-/** Everything the fireball draws, in offsets from its launch point's foot. */
-export function fireballCloud(ball: Fireball): PixelCloud {
+/**
+ * Where a pixel laid out on the flat field actually lands: `x` and `groundY`
+ * are the flat field's answer for it and the ground under it, `height` how far
+ * above that ground it is. `camera.ts`'s `rollPoint`, in whatever frame the
+ * cloud is drawn in; null hides the pixel.
+ */
+export type RollProjection = (x: number, groundY: number, height: number) => { x: number; y: number; scale: number } | null;
+
+/** The field with no far edge: every pixel where it was laid out. */
+const FLAT: RollProjection = (x, groundY, height) => ({ x, y: groundY - height, scale: 1 });
+
+/** Where the core is drawn, and at what size, once `roll` has carried it. */
+export function fireballCore(ball: Fireball, roll: RollProjection = FLAT): { x: number; y: number; scale: number } | null {
   const at = fireballOffset(ball);
-  const cloud: PixelCloud = [...puffCloud(ball.smoke, TRAIL_PUFF)];
+  return roll(at.x, at.y + FIREBALL_HEIGHT, FIREBALL_HEIGHT);
+}
+
+/**
+ * Everything the fireball draws, in offsets from its launch point's foot.
+ *
+ * Laid out on the flat field and handed through `roll`, so a ball flown past
+ * the field's far edge goes up the horizon roll and shrinks like any body
+ * there. The trail and the smoke are taken to hang at the core's height - a
+ * puff that has drifted up reads a little further off, which on the roll is a
+ * fraction of a pixel - and the core is redrawn at its own scale rather than
+ * squashed pixel by pixel, so it stays round.
+ */
+export function fireballCloud(ball: Fireball, roll: RollProjection = FLAT): PixelCloud {
+  const at = fireballOffset(ball);
+  const cloud: PixelCloud = [];
+  const hanging = (pixels: PixelCloud): void => {
+    for (const pixel of pixels) {
+      const placed = roll(pixel.x, pixel.y + FIREBALL_HEIGHT, FIREBALL_HEIGHT);
+      if (placed !== null) {
+        cloud.push({ x: placed.x, y: placed.y, ink: pixel.ink });
+      }
+    }
+  };
+  hanging(puffCloud(ball.smoke, TRAIL_PUFF));
   if (ball.flying) {
-    cloud.push(...shadowCloud(Math.round(at.x), Math.round(at.y + FIREBALL_HEIGHT)));
+    for (const pixel of shadowCloud(Math.round(at.x), Math.round(at.y + FIREBALL_HEIGHT))) {
+      const placed = roll(pixel.x, pixel.y, 0);
+      if (placed !== null) {
+        cloud.push({ x: placed.x, y: placed.y, ink: pixel.ink });
+      }
+    }
   }
-  cloud.push(...particleCloud(ball.trail));
-  if (ball.flying) {
-    cloud.push(...coreCloud(ball.ageMs, ball.seed, at.x, at.y));
+  hanging(particleCloud(ball.trail));
+  const core = ball.flying ? fireballCore(ball, roll) : null;
+  if (core !== null) {
+    cloud.push(...coreCloud(ball.ageMs, ball.seed, core.x, core.y, core.scale));
   }
   return cloud;
 }
 
-/** The light it carries while it flies, at a screen position. */
-export function fireballLight(ball: Fireball, x: number, y: number): LightSource | null {
+/** The light it carries while it flies, at a screen position; its pool shrinks with the ball on the roll. */
+export function fireballLight(ball: Fireball, x: number, y: number, scale = 1): LightSource | null {
   if (!ball.flying) {
     return null;
   }
   const pulse = 0.85 + 0.15 * Math.sin(ball.ageMs / 37);
-  return { x, y, radius: 44, color: familyHex("fire-5"), intensity: 0.95 * pulse };
+  return { x, y, radius: 44 * scale, color: familyHex("fire-5"), intensity: 0.95 * pulse };
 }

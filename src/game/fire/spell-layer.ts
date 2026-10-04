@@ -19,13 +19,13 @@
 
 import type { Scene } from "../../engine";
 
-import { groundRow } from "../camera";
+import { groundRow, rollPoint } from "../camera";
 import type { Strike } from "../combat";
 import type { FrameContext } from "../frame-context";
 import { particleCloud } from "../fx/particles";
 import { PixelSurface } from "../pixel-surface";
 import { fromLocal, toLocal, type LocalPoint, type PlanetPoint, type PlanetPose } from "../planet";
-import { RANK, TILE_DEPTH, TILE_WIDTH } from "../projection";
+import { RANK, standingDepth, TILE_DEPTH, TILE_WIDTH } from "../projection";
 import { blockedByLand } from "../landforms";
 import { pixelHash } from "../transforms";
 import { windAt } from "../wind";
@@ -36,13 +36,14 @@ import {
   FIREBALL_HEIGHT,
   FIREBALL_RANGE,
   fireballCloud,
+  fireballCore,
   fireballLight,
-  fireballOffset,
   fireballPoint,
   fireballSpent,
   flyFireball,
   launchFireball,
   type Fireball,
+  type RollProjection,
 } from "./fireball";
 import { createFrostNova, frostNovaDone, frostNovaLight, novaRingCloud, stepFrostNova, type FrostNova } from "./frost-nova";
 
@@ -187,14 +188,20 @@ export class SpellLayer {
     const origin = groundFoot(ctx.frame, toLocal(ctx.pose, flight.ball.origin));
     const left = origin.x - flight.originX;
     const top = origin.y - flight.originY;
-    const at = fireballOffset(flight.ball);
+    // The flight is laid out from the launch point's foot; past the field's far
+    // edge `rollPoint` carries it up the horizon roll like any standing body.
+    const roll: RollProjection = (x, groundY, height) => {
+      const placed = rollPoint(ctx.frame, origin.x + x, origin.y + groundY, height);
+      return placed === null ? null : { x: placed.x - origin.x, y: placed.y - origin.y, scale: placed.scale };
+    };
     const ballRow = groundRow(ctx.frame, toLocal(ctx.pose, fireballPoint(flight.ball)));
-    flight.surface.clear().paint(fireballCloud(flight.ball), flight.originX, flight.originY).commit();
+    flight.surface.clear().paint(fireballCloud(flight.ball, roll), flight.originX, flight.originY).commit();
     flight.surface.image
       .setPosition(left, top)
-      .setDepth(ballRow * TILE_WIDTH + RANK.actor)
+      .setDepth(standingDepth(ballRow, RANK.actor))
       .setVisible(true);
-    const light = fireballLight(flight.ball, origin.x + at.x, origin.y + at.y);
+    const core = fireballCore(flight.ball, roll);
+    const light = core === null ? null : fireballLight(flight.ball, origin.x + core.x, origin.y + core.y, core.scale);
     if (light !== null) {
       ctx.lights.push(light);
     }

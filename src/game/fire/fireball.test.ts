@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { PlanetPoint, PlanetPose } from "../planet";
 import {
   coreCloud,
+  FIREBALL_HEIGHT,
   FIREBALL_RANGE,
   FIREBALL_SPEED,
   fireballCloud,
+  fireballCore,
   fireballLight,
   fireballOffset,
   fireballPoint,
@@ -13,6 +15,7 @@ import {
   flyFireball,
   launchFireball,
   localToPlanetVector,
+  type RollProjection,
 } from "./fireball";
 
 const POSE: PlanetPose = { x: 50, y: 50, turn: 0 };
@@ -88,7 +91,53 @@ describe("flight", () => {
   });
 });
 
+describe("rolling over the horizon", () => {
+  it("draws exactly the flat picture when the projection leaves every pixel alone", () => {
+    const { ball } = fly(300);
+    const flat: RollProjection = (x, groundY, height) => ({ x, y: groundY - height, scale: 1 });
+    expect(fireballCloud(ball, flat)).toEqual(fireballCloud(ball));
+  });
+
+  it("hands the core's ground and height to the projection, and redraws the core at its scale", () => {
+    const { ball } = fly(300);
+    const at = fireballOffset(ball);
+    const seen: Array<[number, number, number]> = [];
+    const shrink: RollProjection = (x, groundY, height) => {
+      seen.push([x, groundY, height]);
+      return { x: Math.round(x / 2), y: Math.round((groundY - height) / 2), scale: 0.5 };
+    };
+    const core = fireballCore(ball, shrink);
+    expect(seen[0]).toEqual([at.x, at.y + FIREBALL_HEIGHT, FIREBALL_HEIGHT]);
+    expect(core?.scale).toBe(0.5);
+
+    const full = fireballCloud(ball).filter((pixel) => pixel.ink.startsWith("fire"));
+    const small = fireballCloud(ball, shrink).filter((pixel) => pixel.ink.startsWith("fire"));
+    expect(small.length).toBeLessThan(full.length);
+  });
+
+  it("drops every pixel the projection hides", () => {
+    expect(fireballCloud(fly(300).ball, () => null)).toEqual([]);
+    expect(fireballCore(fly(300).ball, () => null)).toBeNull();
+  });
+
+  it("shrinks its light with it", () => {
+    const { ball } = fly(200);
+    expect(fireballLight(ball, 0, 0, 0.5)?.radius).toBeCloseTo((fireballLight(ball, 0, 0)?.radius ?? 0) / 2);
+  });
+});
+
 describe("the core", () => {
+  it("shrinks the sphere, not the picture, and always keeps its centre", () => {
+    const full = coreCloud(0, 3);
+    for (const scale of [0.6, 0.3, 0.05]) {
+      const small = coreCloud(0, 3, 0, 0, scale);
+      expect(small.length).toBeLessThan(full.length);
+      expect(small.some((pixel) => pixel.x === 0 && pixel.y === 0)).toBe(true);
+      expect(small.every((pixel) => Math.hypot(pixel.x, pixel.y) <= 5 * scale + 1)).toBe(true);
+    }
+    expect(coreCloud(0, 3, 0, 0, 1)).toEqual(full);
+  });
+
   it("is a small disc, hottest near the middle", () => {
     const core = coreCloud(0, 3);
     expect(core.length).toBeGreaterThan(20);

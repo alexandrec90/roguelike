@@ -9,6 +9,7 @@ import {
   localRow,
   localReach,
   projectDepth,
+  rollPoint,
   scrollOffset,
   scrollRows,
   visibleLocal,
@@ -28,6 +29,49 @@ const FRAME: CameraFrame = {
 
 /** Local rows ahead at which the affine foot lands exactly on `groundTop`. */
 const FAR_EDGE = (FRAME.footY - FRAME.groundTop) / TILE_DEPTH;
+
+describe("rollPoint", () => {
+  it("leaves a pixel on the flat field exactly where it was laid out", () => {
+    expect(rollPoint(FRAME, 120, 60, 7)).toEqual({ x: 120, y: 53, scale: 1 });
+    expect(rollPoint(FRAME, 200, FRAME.groundTop, 0)).toEqual({ x: 200, y: FRAME.groundTop, scale: 1 });
+  });
+
+  it("carries a pixel past the far edge onto the roll, as localPlacement carries a body", () => {
+    for (const rows of [0.5, 2, 9, 30]) {
+      const local = { x: 3, y: FAR_EDGE + rows };
+      const flat = localFoot(FRAME, local);
+      const body = localPlacement(FRAME, local);
+      const placed = rollPoint(FRAME, flat.x, flat.y, 0);
+      expect(placed).toMatchObject({ x: body.x, y: body.y });
+      expect(placed?.scale).toBeCloseTo(body.scale, 12);
+    }
+  });
+
+  it("shrinks a height above the ground with the roll's scale", () => {
+    const flatGround = FRAME.groundTop - 4 * TILE_DEPTH;
+    const foot = rollPoint(FRAME, FRAME.footX, flatGround, 0);
+    const raised = rollPoint(FRAME, FRAME.footX, flatGround, 20);
+    expect(foot).not.toBeNull();
+    expect(raised).not.toBeNull();
+    expect(foot!.scale).toBeLessThan(1);
+    expect(raised!.scale).toBe(foot!.scale);
+    expect(Math.abs(foot!.y - raised!.y - 20 * foot!.scale)).toBeLessThanOrEqual(1);
+  });
+
+  it("is never drawn below where the flat field would have put it, nor below the seam", () => {
+    for (let ground = FRAME.groundTop - 1; ground > FRAME.groundTop - 60; ground -= 3) {
+      const placed = rollPoint(FRAME, 140, ground, 7);
+      expect(placed).not.toBeNull();
+      expect(placed!.y).toBeGreaterThanOrEqual(ground - 7);
+      expect(placed!.y).toBeLessThanOrEqual(FRAME.groundTop);
+    }
+  });
+
+  it("hides a pixel that has sunk behind the horizon line", () => {
+    const past = FRAME.groundTop - (ROLL_ROWS + 30) * TILE_DEPTH;
+    expect(rollPoint(FRAME, FRAME.footX, past, 0)).toBeNull();
+  });
+});
 
 describe("localPlacement", () => {
   it("is localFoot at full size anywhere in the flat field", () => {
