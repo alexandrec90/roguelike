@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  groundRow,
+  latticeRow,
   localFoot,
   localOrigin,
   localPlacement,
@@ -8,11 +10,12 @@ import {
   localReach,
   projectDepth,
   scrollOffset,
+  scrollRows,
   visibleLocal,
   type CameraFrame,
 } from "./camera";
 import { HORIZON_SCALE, ROLL_ROWS } from "./horizon";
-import { TILE_DEPTH, TILE_WIDTH } from "./projection";
+import { RANK, rootedDepth, standingDepth, TILE_DEPTH, TILE_WIDTH } from "./projection";
 
 const FRAME: CameraFrame = {
   groundTop: 9,
@@ -175,6 +178,41 @@ describe("localRow", () => {
   it("stays fractional between rows, so a scrolling thing sorts as it moves", () => {
     const half = localRow({ ...FRAME, phaseY: 0.5 }, { x: 0, y: 0 });
     expect(Number.isInteger(half)).toBe(false);
+  });
+});
+
+describe("groundRow", () => {
+  /** A row of tufts, as the vegetation layer sorts it. */
+  const grassDepth = (frame: CameraFrame, y: number): number =>
+    rootedDepth(latticeRow(frame, { x: 0, y }), RANK.grass) + scrollRows(frame) * TILE_WIDTH;
+
+  it("keeps a body and the grass beside it in one order through a whole stride", () => {
+    // The bug this pins: a boulder's row was rounded after the scroll and the
+    // grass's before it, so the tufts at its foot blinked over and under it
+    // twice a tile as the hero walked.
+    for (const bodyY of [2.3, 2.5, 2.7, 3.05, 3.45]) {
+      for (const cellY of [1, 2, 3, 4]) {
+        const orders = new Set<boolean>();
+        for (let phase = -0.99; phase < 1; phase += 0.01) {
+          const frame = { ...FRAME, phaseY: phase };
+          orders.add(standingDepth(groundRow(frame, { x: 0, y: bodyY }), RANK.body) > grassDepth(frame, cellY));
+        }
+        expect(orders.size, `body ${bodyY}, grass row ${cellY}`).toBe(1);
+      }
+    }
+  });
+
+  it("slides by the same whole-pixel scroll the ground is drawn with", () => {
+    for (const phase of [-0.7, -0.31, 0.04, 0.5, 0.96]) {
+      const frame = { ...FRAME, phaseY: phase };
+      const at = groundRow(frame, { x: 0, y: 2.4 });
+      expect(at - latticeRow(frame, { x: 0, y: 2.4 })).toBeCloseTo(scrollOffset(frame).y / TILE_DEPTH, 9);
+    }
+  });
+
+  it("rounds on the zero-phase grid, so a slid row is a lattice row plus the slide", () => {
+    expect(Number.isInteger(latticeRow({ ...FRAME, phaseY: 0.43 }, { x: 0, y: 1.2 }))).toBe(true);
+    expect(latticeRow({ ...FRAME, phaseY: 0.43 }, { x: 0, y: 1.2 })).toBe(latticeRow(FRAME, { x: 0, y: 1.2 }));
   });
 });
 

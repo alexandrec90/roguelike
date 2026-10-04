@@ -19,7 +19,7 @@
 
 import type { Scene } from "../../engine";
 
-import { localRow } from "../camera";
+import { groundRow } from "../camera";
 import type { Strike } from "../combat";
 import type { FrameContext } from "../frame-context";
 import { particleCloud } from "../fx/particles";
@@ -188,11 +188,11 @@ export class SpellLayer {
     const left = origin.x - flight.originX;
     const top = origin.y - flight.originY;
     const at = fireballOffset(flight.ball);
-    const ballRow = localRow(ctx.frame, toLocal(ctx.pose, fireballPoint(flight.ball)));
+    const ballRow = groundRow(ctx.frame, toLocal(ctx.pose, fireballPoint(flight.ball)));
     flight.surface.clear().paint(fireballCloud(flight.ball), flight.originX, flight.originY).commit();
     flight.surface.image
       .setPosition(left, top)
-      .setDepth(Math.round(ballRow) * TILE_WIDTH + RANK.actor)
+      .setDepth(ballRow * TILE_WIDTH + RANK.actor)
       .setVisible(true);
     const light = fireballLight(flight.ball, origin.x + at.x, origin.y + at.y);
     if (light !== null) {
@@ -216,7 +216,7 @@ export class SpellLayer {
     blast.surface.clear().paint(explosionCloud(blast.explosion), BLAST_FOOT_X, BLAST_FOOT_Y).commit();
     blast.surface.image
       .setPosition(foot.x - BLAST_FOOT_X, foot.y - BLAST_FOOT_Y)
-      .setDepth(Math.round(localRow(ctx.frame, local)) * TILE_WIDTH + RANK.actor);
+      .setDepth(groundRow(ctx.frame, local) * TILE_WIDTH + RANK.actor);
     const light = explosionLight(blast.explosion, foot.x, foot.y);
     if (light !== null) {
       ctx.lights.push(light);
@@ -239,7 +239,7 @@ export class SpellLayer {
       .commit();
     nova.surface.image
       .setPosition(foot.x - BLAST_FOOT_X, foot.y - BLAST_FOOT_Y)
-      .setDepth(Math.round(localRow(ctx.frame, local)) * TILE_WIDTH + RANK.actor + 1)
+      .setDepth(groundRow(ctx.frame, local) * TILE_WIDTH + RANK.actor + 1)
       .setVisible(onField(ctx.frame, foot, ctx.width, ctx.height, SURFACE_WIDTH));
     const light = frostNovaLight(nova.nova, foot.x, foot.y);
     if (light !== null) {
