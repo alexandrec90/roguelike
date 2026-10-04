@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CameraFrame } from "./camera";
+import { projectDepth, type CameraFrame } from "./camera";
 import { ROLL_ROWS } from "./horizon";
 import { surfaceLevel } from "./landform-colour";
 import {
@@ -11,8 +11,8 @@ import {
   type LandformPixels,
   type LandformView,
 } from "./landform-frame";
-import { landformFog, marchSchedule } from "./landform-march";
-import { isFarView, mergeLandforms, outlineLandforms, renderLandforms, viewsInSight } from "./landform-render";
+import { CLOUD_FADE_ROWS, cloudPoint, cloudReach, landformFog, marchSchedule } from "./landform-march";
+import { FAR_ROWS, isFarView, mergeLandforms, outlineLandforms, renderLandforms, viewsInSight } from "./landform-render";
 import { landformField, type Landform } from "./landforms";
 import { rowAtFoot, TILE_DEPTH, TILE_WIDTH } from "./projection";
 
@@ -127,9 +127,60 @@ describe("renderLandforms", () => {
     expect(shaded.rgba[index * 4] ?? 0).toBeLessThan(lit.rgba[index * 4] ?? 0);
   });
 
+  it("fades the cloud shadow out with distance, so land up the roll is never striped by it", () => {
+    // Up the roll a whole tile of depth is a scanline or less, so a shadow read
+    // off the screen there raced over the land at many times its own speed.
+    const red = (pixels: LandformPixels, index: number): number => pixels.rgba[index * 4] ?? 0;
+    const darkened = (at: number): number => {
+      const tower = view(TOWER, 0, at);
+      const lit = render([tower]);
+      const shaded = render([tower], { ...LIGHT, shade: () => 0.5 });
+      const shown = painted(lit);
+      expect(shown.length).toBeGreaterThan(0);
+      return shown.filter((index) => red(shaded, index) < red(lit, index)).length / shown.length;
+    };
+    expect(darkened(3)).toBeGreaterThan(0.9);
+    // Its near wall well past the fade, though not yet past the horizon line.
+    expect(darkened(SEAM + CLOUD_FADE_ROWS + 3 + TOWER.radius)).toBe(0);
+  });
+
   it("is deterministic, and draws nothing with nothing in view", () => {
     expect(render([view(TOWER, 2, 3)]).rgba).toEqual(render([view(TOWER, 2, 3)]).rgba);
     expect(painted(render([]))).toHaveLength(0);
+  });
+});
+
+describe("cloudPoint", () => {
+  it("is the pixel itself on the flat field, where the ground beside a landform reads the same", () => {
+    const depth = projectDepth(FRAME, 3.25);
+    expect(cloudPoint(FRAME, 97, 3.25, depth.scale)).toEqual({ x: 97, y: Math.round(depth.ground) });
+  });
+
+  it("moves a whole tile's depth for a tile walked, however squeezed the roll draws it", () => {
+    // The cloud tile slides TILE_DEPTH a tile walked (`trackScroll`); a surface
+    // point must read it from a place that slides as far, or the shadow streams.
+    for (const y of [3, SEAM + 2, SEAM + 20, SEAM + ROLL_ROWS + 10]) {
+      const before = cloudPoint(FRAME, 150, y, projectDepth(FRAME, y).scale);
+      const after = cloudPoint(FRAME, 150, y - 1, projectDepth(FRAME, y - 1).scale);
+      expect(after.y - before.y).toBe(TILE_DEPTH);
+    }
+  });
+
+  it("spreads a converged column back out to the width it has on the field", () => {
+    const y = SEAM + 10;
+    const { scale } = projectDepth(FRAME, y);
+    expect(scale).toBeLessThan(1);
+    expect(cloudPoint(FRAME, FRAME.footX + 10, y, scale).x).toBe(Math.round(FRAME.footX + 10 / scale));
+  });
+});
+
+describe("cloudReach", () => {
+  it("is whole on the field and gone before a view counts as far, which takes no cloud", () => {
+    expect(cloudReach(0)).toBe(1);
+    expect(cloudReach(CLOUD_FADE_ROWS / 2)).toBeCloseTo(0.5);
+    expect(cloudReach(FAR_ROWS)).toBe(0);
+    expect(cloudReach(FAR_ROWS + 30)).toBe(0);
+    expect(CLOUD_FADE_ROWS).toBeLessThanOrEqual(FAR_ROWS);
   });
 });
 

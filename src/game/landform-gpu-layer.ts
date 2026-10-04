@@ -301,6 +301,7 @@ export class LandformGpuLayer {
       u_cutRow: [cut.row, 1],
       u_shade: clouds === undefined ? [0, 0, 0, 0] : [clouds.x, clouds.y, clouds.strength, clouds.margin],
       u_cloudSize: [CLOUD_TILE_WIDTH, CLOUD_TILE_HEIGHT],
+      u_groundTop: frame.groundTop,
       u_rowBase: base,
       "u_ramp[0]": RAMP_COLOURS,
       "u_rampSpan[0]": RAMP_SPANS,
