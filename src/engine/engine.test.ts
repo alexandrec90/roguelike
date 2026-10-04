@@ -4,6 +4,7 @@ import { BLEND_FACTORS, blendChannel } from "./blend";
 import { fadeLevel, Camera } from "./camera";
 import { FrameClock, MAX_DELTA_MS, SMOOTHING_FRAMES } from "./loop";
 import { packColor } from "./batcher";
+import { backingScale } from "./game";
 import { pixelProjection } from "./pass";
 import { imageQuad, type QuadInput } from "./quad";
 
@@ -185,5 +186,21 @@ describe("FrameClock", () => {
     clock.tick(50);
     clock.reset();
     expect(clock.tick(5000)).toBe(0);
+  });
+});
+
+describe("backingScale", () => {
+  it("keeps the canvas at its logical size with no backdrop to show finer", () => {
+    expect(backingScale(6, false)).toBe(1);
+  });
+
+  it("is a whole number of device pixels to a logical one when presenting", () => {
+    expect(backingScale(6, true)).toBe(6);
+    expect(backingScale(4.6, true)).toBe(5);
+  });
+
+  it("never drops below one, and ignores nonsense", () => {
+    expect(backingScale(0, true)).toBe(1);
+    expect(backingScale(Number.NaN, true)).toBe(1);
   });
 });

@@ -39,10 +39,10 @@ import type { HorizonLayout } from "./horizon";
 import { bearingOffset } from "./panorama";
 import { PixelSurface } from "./pixel-surface";
 import { HORIZON_DEPTH } from "./projection";
+import type { SkyStyle } from "./scene-options";
+import { SKY_DRIFT } from "./sky-clouds";
+import { HdSkyLayer } from "./sky-hd-layer";
 import { SkyPainter } from "./sky-paint";
-
-/** Clouds move this many panorama pixels per second, on their own. */
-const CLOUD_DRIFT = 1.6;
 
 /** The sky is re-rendered at most this often for the clouds' drift, ms. */
 const CLOUD_TICK_MS = 200;
@@ -51,23 +51,41 @@ export class SkyLayer {
   private surface!: PixelSurface;
   private painter!: SkyPainter;
   private rendered = "";
+  private readonly ridgesOnly: boolean;
+  /** The air at the screen's own resolution, behind the world (`?sky=hd`), or undefined. */
+  private hd: HdSkyLayer | undefined;
+
+  /**
+   * `hd` leaves the air out of the pixel band - gradient, stars, sun and
+   * clouds - and the rest of it transparent, and has `sky-hd-layer.ts` draw the
+   * air behind the world at the screen's own resolution instead.
+   */
+  constructor(style: SkyStyle = "pixel") {
+    this.ridgesOnly = style === "hd";
+  }
 
   create(scene: Scene, layout: HorizonLayout, width: number): void {
     this.surface = new PixelSurface(scene, width, Math.max(layout.skyHeight, 1), "sky");
     this.surface.image.setDepth(HORIZON_DEPTH);
-    this.painter = new SkyPainter(this.surface.buffer, layout);
+    this.painter = new SkyPainter(this.surface.buffer, layout, this.ridgesOnly);
+    if (this.ridgesOnly) {
+      this.hd = new HdSkyLayer();
+      this.hd.create(scene, layout, width);
+    }
   }
 
   /** One frame of sky for a heading, a time of day and a clock. */
   update(turn: number, atmosphere: Atmosphere, elapsedMs: number): void {
+    this.hd?.update(turn, atmosphere, elapsedMs);
     const offset = bearingOffset(turn);
-    const tick = Math.floor(elapsedMs / CLOUD_TICK_MS);
+    // Nothing on the ridges drifts or twinkles: they repaint only for a turn or the light.
+    const tick = this.ridgesOnly ? 0 : Math.floor(elapsedMs / CLOUD_TICK_MS);
     const signature = `${offset}|${atmosphere.hours.toFixed(2)}|${atmosphere.overcast.toFixed(2)}|${tick}`;
     if (signature === this.rendered) {
       return;
     }
     this.rendered = signature;
-    const drift = (tick * CLOUD_TICK_MS * CLOUD_DRIFT) / 1000;
+    const drift = (tick * CLOUD_TICK_MS * SKY_DRIFT) / 1000;
     this.painter.paint(atmosphere, offset, elapsedMs, drift);
     this.surface.touch().commit();
   }

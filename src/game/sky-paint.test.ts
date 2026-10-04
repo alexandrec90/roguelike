@@ -55,6 +55,20 @@ describe("painting the sky band", () => {
     expect(paint(15, 0.3, 0).data).toEqual(a.data);
   });
 
+  it("paints only the ridges when the air is drawn behind the world (?sky=hd)", () => {
+    const buffer = createBuffer(320, LAYOUT.skyHeight);
+    new SkyPainter(buffer, LAYOUT, true).paint(atmosphereAt(13), 0, 0, 0);
+    // The top of the band - sky, sun, clouds - is left clear for the backdrop...
+    for (let x = 0; x < buffer.width; x += 5) {
+      expect(bufferPixel(buffer, x, 0)[3]).toBe(0);
+    }
+    // ...and the ridge still stands on the horizon line, opaque, where it always did.
+    const full = paint(13);
+    for (let x = 0; x < buffer.width; x += 5) {
+      expect(bufferPixel(buffer, x, LAYOUT.horizonY - 1)).toEqual(bufferPixel(full, x, LAYOUT.horizonY - 1));
+    }
+  });
+
   it("leaves the roll below the horizon line to the ground", () => {
     const buffer = createBuffer(320, LAYOUT.bandHeight);
     new SkyPainter(buffer, LAYOUT).paint(atmosphereAt(13), 0, 0, 0);
