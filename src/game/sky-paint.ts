@@ -21,9 +21,11 @@ export class SkyPainter {
   private readonly ridges: { readonly profile: readonly number[]; readonly near: boolean }[];
   private readonly width: number;
 
+  /** `ridgesOnly` paints the ridges and leaves the rest of the band transparent (`?sky=hd`). */
   constructor(
     private readonly buffer: PixelBuffer,
     private readonly layout: HorizonLayout,
+    private readonly ridgesOnly = false,
   ) {
     this.width = buffer.width;
     this.stars = starField(PANORAMA_WIDTH, layout.skyHeight);
@@ -36,10 +38,12 @@ export class SkyPainter {
   /** The whole band for one moment: `offset` is the bearing, `drift` the clouds' own travel. */
   paint(atmosphere: Atmosphere, offset: number, elapsedMs: number, drift: number): void {
     this.buffer.data.fill(0);
-    this.paintSky(atmosphere);
-    this.paintStars(atmosphere, offset, elapsedMs);
-    this.paintSun(atmosphere);
-    this.paintClouds(atmosphere, offset, drift);
+    if (!this.ridgesOnly) {
+      this.paintSky(atmosphere);
+      this.paintStars(atmosphere, offset, elapsedMs);
+      this.paintSun(atmosphere);
+      this.paintClouds(atmosphere, offset, drift);
+    }
     this.paintRidges(atmosphere, offset);
     this.unlight(atmosphere.ambient);
   }

@@ -11,7 +11,7 @@ import type { Camera } from "./camera";
 import { Blitter, Image, type DisplayList, type Stage } from "./display";
 import type { Game } from "./game";
 import type { Input } from "./input";
-import { ShaderPass, type PassOptions } from "./pass";
+import { ScreenPass, ShaderPass, type PassOptions, type ScreenPassOptions } from "./pass";
 import { RenderTarget } from "./render-target";
 import { Graphics, Rectangle } from "./shapes";
 import type { TextureStore } from "./texture";
@@ -54,6 +54,11 @@ export class Factory {
   /** A shader pass - off the list; show its output with an `image` of `pass.key`. */
   pass(options: PassOptions, key = uniqueKey(options.name)): ShaderPass {
     return new ShaderPass(this.gl, this.stage.textures, key, options);
+  }
+
+  /** A shader over the canvas at its own resolution - what a `Backdrop` draws with. */
+  screenPass(options: ScreenPassOptions): ScreenPass {
+    return new ScreenPass(this.gl, this.stage.textures, options);
   }
 }
 

@@ -14,6 +14,8 @@
  * | `weather`  | pin the weather: `clear`, `rain` or `storm`                 |
  * | `render`   | `cpu` draws every per-pixel pass on the CPU, as before the  |
  * |            | GPU ports: the reference to compare a capture against       |
+ * | `sky`      | `hd` draws the air above the horizon at the screen's own    |
+ * |            | resolution behind the pixel world (`sky-hd-layer.ts`)       |
  * | `map`      | `1` stacks the debug map over the canvas                    |
  */
 
@@ -26,6 +28,9 @@ export type WeatherPin = "clear" | "rain" | "storm";
 /** Where the per-pixel passes run: the GPU where WebGL2 allows, or the CPU. */
 export type RenderPath = "gpu" | "cpu";
 
+/** How the air above the horizon is drawn: in logical pixels like the world, or at the screen's. */
+export type SkyStyle = "pixel" | "hd";
+
 export interface SceneOptions {
   readonly skyFraction: number;
   readonly radius: number;
@@ -34,6 +39,7 @@ export interface SceneOptions {
   readonly dayMs: number;
   readonly weather: WeatherPin | undefined;
   readonly render: RenderPath;
+  readonly sky: SkyStyle;
 }
 
 export const DEFAULT_SCENE_OPTIONS: SceneOptions = {
@@ -43,7 +49,13 @@ export const DEFAULT_SCENE_OPTIONS: SceneOptions = {
   dayMs: DEFAULT_DAY_MS,
   weather: undefined,
   render: "gpu",
+  sky: "pixel",
 };
+
+/** `hd` asks for the screen-resolution sky; anything else, or nothing, the pixel one. */
+export function parseSkyStyle(raw: string | null): SkyStyle {
+  return raw?.trim().toLowerCase() === "hd" ? "hd" : "pixel";
+}
 
 export function parseWeather(raw: string | null): WeatherPin | undefined {
   const value = raw?.trim().toLowerCase();
@@ -63,5 +75,6 @@ export function readSceneOptions(query: URLSearchParams): SceneOptions {
     dayMs: parseDayLength(query.get("day")),
     weather: parseWeather(query.get("weather")),
     render: parseRenderPath(query.get("render")),
+    sky: parseSkyStyle(query.get("sky")),
   };
 }

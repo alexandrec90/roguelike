@@ -29,10 +29,17 @@ export {
   WHITE_TEXTURE,
   type Box,
 } from "./display";
-export { createContext, Game, type GameConfig, type GameEvent } from "./game";
+export { createContext, Game, type Backdrop, type BackdropView, type GameConfig, type GameEvent } from "./game";
 export { Input, Keyboard, type Pointer } from "./input";
 export { FrameClock } from "./loop";
-export { ShaderPass, type PassOptions, type UniformValue } from "./pass";
+export {
+  ScreenPass,
+  ShaderPass,
+  type PassOptions,
+  type ScreenPassOptions,
+  type ScreenRect,
+  type UniformValue,
+} from "./pass";
 export { imageQuad, type FrameRect, type Quad } from "./quad";
 export { RenderTarget, type StampConfig } from "./render-target";
 export { Factory, Scene, uniqueKey } from "./scene";
