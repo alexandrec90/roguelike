@@ -158,6 +158,17 @@ export function isHelpKey(code: string): boolean {
   return HELP_KEYS.includes(code);
 }
 
+/**
+ * The keys that switch to the next skin (`src/skins/skin.ts`). Like the help
+ * keys, not a `GameAction`: a skin changes how the world looks, never what
+ * happens in it, so the simulation never sees the press.
+ */
+export const SKIN_KEYS: readonly string[] = ["F2"];
+
+export function isSkinKey(code: string): boolean {
+  return SKIN_KEYS.includes(code);
+}
+
 /** `MouseEvent.button`, named. */
 const BUTTON_BY_INDEX: readonly MouseButton[] = ["left", "middle", "right"];
 
@@ -216,6 +227,9 @@ export function validateKeybindings(bindings: Keybindings): string[] {
   const helpClashes = HELP_KEYS.filter((key) => claimedKeys.has(key));
   for (const key of helpClashes) {
     problems.push(`key ${key} opens the controls reminder, so it cannot also be ${claimedKeys.get(key)}`);
+  }
+  for (const key of SKIN_KEYS.filter((code) => claimedKeys.has(code))) {
+    problems.push(`key ${key} switches the skin, so it cannot also be ${claimedKeys.get(key)}`);
   }
   return problems;
 }

@@ -49,9 +49,35 @@ one sitting (`src/engine/index.ts` maps it). It keeps Phaser's draw rules where 
 pixel (origin, crop, rounding, blend factors), so a frame drawn by it matches one Phaser
 drew. Reach for a library only for something the engine cannot reasonably grow.
 
+## Skins
+
+**How the game looks is a skin, chosen by `?skin=` and cycled with F2** (`SKIN_KEYS`;
+the page reloads under the next skin with every other knob kept). `src/skins/skin.ts`
+lists them; `src/main.ts` lazily imports only the one shown.
+
+| Skin | Module | Look |
+| --- | --- | --- |
+| `pixel` (default) | `src/skins/pixel.ts` → `src/game/` layers on `src/engine/` | the 320×180 pixel art below |
+| `lowpoly` | `src/skins/lowpoly/` (`.claude/rules/skin-lowpoly.md`) | flat-shaded 3D geometry at window resolution |
+
+**A skin decides how things look, never what happens.** The planet, terrain, landforms,
+lakes, scenery placement, the hero (`hero/hero-driver.ts`) and, for skins other than
+pixel, the fight (`encounter-sim.ts`) are renderer-free simulation that every skin reads.
+Two things are identity rather than art and **bind every skin**: the pitched-back local
+view (rows and columns axis-aligned, depth foreshortened by `DEPTH_RATIO`, the hero
+pinned while the planet turns) and the treadmill-lip horizon from `horizon.ts`'s one
+curve. The planned **caves** — walking in and having the horizon band show the cave's
+depths instead of sky — belong to that identity too: build them as simulation plus a
+change to what the lip shows, so every skin gets them. Nothing below this section about
+pixels, inks, dither or the 320×180 target binds a skin other than `pixel`.
+
+Not yet in the low-poly skin: weather, the campfire, wildfire and decals (their
+simulation still lives inside pixel layers), and the `?bench=1` route.
+
 ## Visual and Asset Architecture
 
-These are product constraints, not suggestions tied to the proof of concept.
+These are product constraints **of the pixel skin**, not suggestions tied to the proof
+of concept.
 
 ### The bet: the procedural graphics *are* the art style
 
@@ -226,7 +252,7 @@ Four files, and no fifth place where any of this is decided:
 | `src/game/keybindings.ts` | What an input *means*: the binding table, the lookups over it, and `headingToward` — a free direction (a mouse, one day a stick) snapped to the nearest of the eight headings. |
 | `src/game/controls.ts` | What is *held*, in actions rather than keys — per-action source sets so redundant bindings do not cancel each other, one winner per axis summed into a `Heading` (newest-press-wins within an axis), and the one-shot queue that keeps a tap shorter than a frame, two same-frame taps joining into the diagonal they mean. Also the **aim**: `aimAt` takes the cursor's screen offset from the hero's chest, un-foreshortens it by `DEPTH_RATIO` so the angle is the one on the ground, and holds the last angle pointed at — unsnapped. |
 | `src/game/player.ts` | What the hero *does* about it: a pure, renderer-free simulation over (state, intent, elapsed, world). **North and south walk the heading; east and west strafe, and strafing turns the world** — a press is two gaits over a `PlanetPose` (`Gait`), not a direction on a map, and a diagonal is both walks at once rather than a fifth direction the planet does not have. Two tracks — the legs (`anchor` and `offset`, walked by velocity) and `attackMs` for the sword arm — aged independently, so he can swing mid-stride. Movement is free: a frame walks its share of the heading at one speed in all eight directions, and stops the frame the heading does. `facing` is a `Facing` (a yaw) read from `Intent.aim` when there is one and from the heading otherwise, and `facingYaw` is the one place a heading becomes a turn of the rig. It hands the renderer three views of the pose: `groundPose` (the anchor: whole tiles, what the world is sampled from), `scrollPhase` (the remainder, under a tile on each axis, that it is drawn at) and `livePose` (the continuous truth, which only the horizon shows). The anchor moves a tile when the remainder passes one, and the two cancel. `nextAnchor` hands back the same pose object for the same whole-tile walk, and `upcomingAnchor` names the one he is walking into, so the layers' work for it is done in the frames before he arrives (`prefetcher.ts`). |
-| `src/game/hero-layer.ts` | The wiring only — DOM events in (the pointer mapped back to a logical pixel through the canvas's own box by `logicalPoint`, since the canvas is CSS-scaled at a whole factor), and a frame of `hero/hero-look.ts` into two `PixelSurface`s. The tracks are put back together in `layeredPose` (`hero/hero-figure.ts`), which **layers** the clips — unkeyed channels fall through, and `SWING` keys nothing below the waist. A blow or a spell leaves along `facing`, the aim, not the heading. The single file here that listens to input (through `scene.input`, `src/engine/input.ts`). |
+| `src/game/hero-layer.ts` | The wiring only — DOM events in (the pointer mapped back to a logical pixel through the canvas's own box by `logicalPoint`, since the canvas is CSS-scaled at a whole factor), and a frame of `hero/hero-look.ts` into two `PixelSurface`s. The tracks are put back together in `layeredPose` (`hero/hero-figure.ts`), which **layers** the clips — unkeyed channels fall through, and `SWING` keys nothing below the waist. A blow or a spell leaves along `facing`, the aim, not the heading. The pixel skin's one file that listens to input (through `scene.input`, `src/engine/input.ts`); the low-poly skin's is `src/skins/lowpoly/index.ts`. Both feed the same `hero/hero-driver.ts`, which holds the control state and steps `player.ts`. |
 
 That split is the `Separation` contract above, applied to input: the simulation is
 deterministic and testable without a canvas, and the presentation layer can exaggerate a
@@ -357,5 +383,7 @@ Cross-reference this project's own scoped rules here, one line each.
   bakes vs surfaces, the lighting pass, `FrameContext`, and the per-frame budget.
 - **`.claude/rules/game-architecture.md`** (`src/game/**/*.ts`) — which module owns each
   decision: camera and horizon, the ink pipeline, scenery.
+- **`.claude/rules/skin-lowpoly.md`** (`src/skins/lowpoly/**/*.ts`) — the low-poly skin:
+  its projection twin of the pixel skin's, body anchors on the lip, and its budget.
 - **`/art-check`** (`.claude/skills/art-check/`) — the browser capture ritual that turns
   "the tests are green" into "the picture is right". Every art change ends there.

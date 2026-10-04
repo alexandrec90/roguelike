@@ -15,7 +15,9 @@ import {
   headingToward,
   isDiagonal,
   isHelpKey,
+  isSkinKey,
   mouseButtonOf,
+  SKIN_KEYS,
   validateKeybindings,
   type Keybindings,
 } from "./keybindings";
@@ -72,6 +74,17 @@ describe("the default control map", () => {
     }
     const clash = { ...DEFAULT_KEYBINDINGS, frost: { keys: ["KeyH"] } };
     expect(validateKeybindings(clash).join()).toMatch(/controls reminder/);
+  });
+
+  it("keeps the skin switch apart from every action", () => {
+    expect(isSkinKey("F2")).toBe(true);
+    expect(isSkinKey("KeyW")).toBe(false);
+    for (const key of SKIN_KEYS) {
+      expect(actionForKey(key)).toBeUndefined();
+      expect(isHelpKey(key)).toBe(false);
+    }
+    const clash = { ...DEFAULT_KEYBINDINGS, enchant: { keys: ["F2"] } };
+    expect(validateKeybindings(clash).join()).toMatch(/switches the skin/);
   });
 
   it("claims nothing it was not given", () => {

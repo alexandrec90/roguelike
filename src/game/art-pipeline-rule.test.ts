@@ -158,12 +158,13 @@ describe("the /art-check skill", () => {
     }
   });
 
-  it("drives the game's loop by hand for an in-scene check, through the handle main.ts exposes", () => {
+  it("drives the game's loop by hand for an in-scene check, through the handle the pixel skin exposes", () => {
     // An extension-driven tab is hidden, so Chrome freezes rAF and the game's loop
     // with it; the skill once said such a check needed a human to foreground the
     // tab, and a session found stepping the game by hand and snapshotting worked.
-    const main = readFileSync(resolve(REPO_ROOT, "src", "main.ts"), "utf8");
-    expect(main, "src/main.ts no longer exposes window.__game").toMatch(/\.__game = game;/);
+    const main = readFileSync(resolve(REPO_ROOT, "src", "skins", "pixel.ts"), "utf8");
+    expect(SKILL).toContain("src/skins/pixel.ts");
+    expect(main, "src/skins/pixel.ts no longer exposes window.__game").toMatch(/\.__game = game;/);
     const engine = readFileSync(resolve(REPO_ROOT, "src", "engine", "game.ts"), "utf8");
     for (const method of ["step(time: number, delta: number)", "snapshot(): string"]) {
       expect(engine, `the engine's Game no longer has ${method}`).toContain(method);

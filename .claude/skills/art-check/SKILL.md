@@ -98,7 +98,7 @@ capture shows a game that is not running, which reads as a movement bug.
 
 **Step the loop by hand rather than waiting for it.** Hiding the tab pauses only the
 animation-frame loop: `game.step(time, delta)` still updates the scene and renders. In
-the dev build `window.__game` is the engine's `Game` (`src/main.ts`, `src/engine/game.ts`),
+the dev build `window.__game` is the engine's `Game` (`src/skins/pixel.ts`, `src/engine/game.ts`),
 and `snapshot()` draws the current frame and returns it as a PNG data URL in the same
 call:
 
