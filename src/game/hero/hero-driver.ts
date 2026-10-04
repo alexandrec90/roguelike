@@ -56,7 +56,7 @@ export interface Whereabouts {
   readonly turn: number;
   readonly upcoming: UpcomingAnchor | undefined;
   /** Where he actually is on the planet - what decides how deep the water round him is. */
-  readonly at: PlanetPoint;
+  readonly at: PlanetPose;
   /** Tiles walked in all: where his footfalls are. */
   readonly walked: number;
 }
@@ -68,9 +68,18 @@ export class HeroDriver {
   private strikes: Strike[] = [];
   private casts: CastEvent[] = [];
 
-  constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
+  /**
+   * `blocked` is what stops him walking: the overworld's lakes and land unless
+   * the scene says otherwise - a cave's wall while he is inside one
+   * (`cave-realm-layer.ts`).
+   */
+  constructor(
+    start: PlanetPose,
+    radius: number = DEFAULT_STRAFE_RADIUS,
+    blocked: (point: PlanetPoint) => boolean = blockedGround,
+  ) {
     this.state = createPlayer(start);
-    this.world = { radius, blocked: blockedGround };
+    this.world = { radius, blocked };
   }
 
   get player(): PlayerState {

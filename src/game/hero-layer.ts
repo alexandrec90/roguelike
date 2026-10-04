@@ -48,7 +48,8 @@ import { logicalPoint } from "./integer-scale";
 import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED } from "./models";
 import { PixelSurface } from "./pixel-surface";
-import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPose } from "./planet";
+import { blockedGround } from "./lakes";
+import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPoint, type PlanetPose } from "./planet";
 import { livePose } from "./player";
 import { RANK, rowAtFoot, TILE_WIDTH } from "./projection";
 import { MAX_STEP_MS } from "./spark-emitter";
@@ -102,8 +103,17 @@ export class HeroLayer {
   /** Half his height: where on him the aim is measured from. */
   private readonly chestHeight = heroHeight() / 2;
 
-  constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
-    this.driver = new HeroDriver(start, radius);
+  /**
+   * `blocked` is what stops him walking: the overworld's lakes and land unless
+   * the scene says otherwise - and the scene does, so a cave's wall can stop
+   * him while he is inside one (`cave-realm-layer.ts`).
+   */
+  constructor(
+    start: PlanetPose,
+    radius: number = DEFAULT_STRAFE_RADIUS,
+    blocked: (point: PlanetPoint) => boolean = blockedGround,
+  ) {
+    this.driver = new HeroDriver(start, radius, blocked);
   }
 
   create(scene: Scene, groundTop: number, foot: Foot): void {

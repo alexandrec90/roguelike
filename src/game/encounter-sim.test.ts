@@ -41,6 +41,15 @@ describe("the hero as a simulation", () => {
     expect(hero.whereabouts().at.y).toBeGreaterThan(START.y + 1);
     expect(hero.whereabouts().turn).toBe(0);
   });
+
+  it("walks by the scene's idea of blocked when it is handed one - a cave wall", () => {
+    const hero = new HeroDriver(START, undefined, () => true);
+    pressKey(hero.controls, "KeyW");
+    for (let t = 0; t < 400; t += 16) {
+      hero.step(16);
+    }
+    expect(hero.whereabouts().at.y).toBeCloseTo(START.y, 5);
+  });
 });
 
 describe("the fight without pixels", () => {
