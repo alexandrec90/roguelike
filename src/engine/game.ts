@@ -10,15 +10,101 @@
  * The canvas is the render target at its logical size (320×180); `main.ts`
  * scales it up by CSS at a whole factor with `image-rendering: pixelated`, so
  * nothing here knows the window's size.
+ *
+ * Unless a scene sets a `Backdrop`. Then the world is drawn into a 320×180
+ * target of its own, cleared to transparent, and *presented*: the canvas is
+ * `presentScale` device pixels to a logical one, the backdrop is drawn across it
+ * at that resolution, and the world is laid over it, scaled up by the same whole
+ * number with nearest sampling - so every world pixel is the block it always
+ * was, and only what shows through where nothing was drawn is finer.
  */
 
-import { Batcher } from "./batcher";
+import { Batcher, type DrawTarget } from "./batcher";
 import { Camera } from "./camera";
 import { DEFAULT_TEXTURE, DisplayList, WHITE_TEXTURE, type RenderContext, type Stage } from "./display";
 import { Input } from "./input";
 import { FrameClock } from "./loop";
 import type { Scene } from "./scene";
-import { TextureStore } from "./texture";
+import { TextureStore, type Texture } from "./texture";
+
+/** Where a backdrop is drawn: the whole canvas, in device pixels. */
+export interface BackdropView {
+  readonly width: number;
+  readonly height: number;
+  /** Device pixels to one logical pixel: a whole number. */
+  readonly scale: number;
+  /** The camera's scroll, in logical pixels: the world is drawn offset by it. */
+  readonly scrollX: number;
+  readonly scrollY: number;
+}
+
+/**
+ * What is drawn behind the world at the canvas's own resolution. Drawn first,
+ * over a cleared canvas; the world covers it wherever the world drew anything.
+ */
+export interface Backdrop {
+  render(view: BackdropView): void;
+}
+
+const WORLD_TEXTURE = "__WORLD";
+
+/** The canvas's device pixels to a logical one: a whole number, and 1 with no backdrop to show finer. */
+export function backingScale(scale: number, presenting: boolean): number {
+  return presenting && Number.isFinite(scale) ? Math.max(1, Math.round(scale)) : 1;
+}
+
+/** The world's own target, and laying it over the backdrop at a whole scale. */
+class Presenter {
+  readonly target: DrawTarget;
+  private readonly texture: Texture;
+
+  constructor(
+    private readonly gl: WebGL2RenderingContext,
+    textures: TextureStore,
+    width: number,
+    height: number,
+  ) {
+    this.texture = textures.addTarget(WORLD_TEXTURE, width, height);
+    const framebuffer = gl.createFramebuffer();
+    if (framebuffer === null) {
+      throw new Error("Could not create the world's framebuffer");
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texture.glTexture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.target = { framebuffer, width, height };
+  }
+
+  /** Clear the world's target to transparent, so the backdrop shows wherever nothing is drawn. */
+  begin(batcher: Batcher): void {
+    const gl = this.gl;
+    batcher.begin(this.target);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.target.framebuffer);
+    gl.viewport(0, 0, this.target.width, this.target.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
+  /** Clear the canvas, draw the backdrop, then the world over it; leaves the batch drawing to the canvas. */
+  present(batcher: Batcher, canvas: HTMLCanvasElement, background: number, backdrop: Backdrop, view: BackdropView): void {
+    const gl = this.gl;
+    batcher.flush();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(((background >> 16) & 0xff) / 255, ((background >> 8) & 0xff) / 255, (background & 0xff) / 255, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    backdrop.render(view);
+    batcher.begin({ framebuffer: null, width: canvas.width, height: canvas.height });
+    const { width, height } = this.target;
+    batcher.draw(
+      this.texture,
+      { left: 0, top: 0, right: width * view.scale, bottom: height * view.scale, u0: 0, v0: 0, u1: width, v1: height },
+      0xffffff,
+      1,
+      "normal",
+    );
+  }
+}
 
 export type GameEvent = "ready" | "prestep" | "postrender" | "blur";
 
@@ -67,6 +153,9 @@ export class Game {
   private readonly scene: Scene;
   private frame = 0;
   private running = true;
+  private backdrop: Backdrop | undefined;
+  private presenter: Presenter | undefined;
+  private presentScale = 1;
   private readonly onBlur = () => this.emit("blur");
   private readonly onVisibility = () => {
     if (document.visibilityState === "visible") {
@@ -172,33 +261,72 @@ export class Game {
     return this.canvas.toDataURL("image/png");
   }
 
+  /**
+   * Draw behind the world at the canvas's own resolution from now on. The world
+   * moves into a target of its own and is presented over it (the header).
+   */
+  setBackdrop(backdrop: Backdrop): void {
+    this.backdrop = backdrop;
+    this.presenter ??= new Presenter(this.gl, this.textures, this.width, this.height);
+  }
+
+  /**
+   * Device pixels to a logical one, a whole number: the canvas's backing store
+   * is resized to match. Only a backdrop has anything finer to show, so without
+   * one the canvas stays at its logical size and CSS does the scaling.
+   */
+  setPresentScale(scale: number): void {
+    const whole = backingScale(scale, this.backdrop !== undefined);
+    if (whole === this.presentScale) {
+      return;
+    }
+    this.presentScale = whole;
+    this.canvas.width = this.width * whole;
+    this.canvas.height = this.height * whole;
+  }
+
   /** Draw the display list, back to front, then the fade over it. */
   render(): void {
     const gl = this.gl;
     const camera = this.camera;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, this.width, this.height);
-    const bg = camera.backgroundColor;
-    gl.clearColor(((bg >> 16) & 0xff) / 255, ((bg >> 8) & 0xff) / 255, (bg & 0xff) / 255, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    const presenter = this.backdrop === undefined ? undefined : this.presenter;
+    if (presenter === undefined) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.width, this.height);
+      const bg = camera.backgroundColor;
+      gl.clearColor(((bg >> 16) & 0xff) / 255, ((bg >> 8) & 0xff) / 255, (bg & 0xff) / 255, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this.batcher.begin({ framebuffer: null, width: this.width, height: this.height });
+    } else {
+      presenter.begin(this.batcher);
+    }
     const ctx: RenderContext = {
       batcher: this.batcher,
       textures: this.textures,
       scrollX: camera.scrollX,
       scrollY: camera.scrollY,
     };
-    this.batcher.begin({ framebuffer: null, width: this.width, height: this.height });
     for (const object of this.list.sorted()) {
       if (object.visible) {
         object.render(ctx);
       }
+    }
+    const scale = presenter === undefined ? 1 : this.presentScale;
+    if (presenter !== undefined && this.backdrop !== undefined) {
+      presenter.present(this.batcher, this.canvas, camera.backgroundColor, this.backdrop, {
+        width: this.canvas.width,
+        height: this.canvas.height,
+        scale,
+        scrollX: camera.scrollX,
+        scrollY: camera.scrollY,
+      });
     }
     const black = camera.fadeAmount();
     if (black > 0) {
       const white = this.textures.get(WHITE_TEXTURE);
       this.batcher.draw(
         white,
-        { left: 0, top: 0, right: this.width, bottom: this.height, u0: 0, v0: 0, u1: 1, v1: 1 },
+        { left: 0, top: 0, right: this.width * scale, bottom: this.height * scale, u0: 0, v0: 0, u1: 1, v1: 1 },
         0x000000,
         black,
         "normal",

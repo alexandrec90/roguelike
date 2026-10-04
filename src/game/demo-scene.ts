@@ -75,7 +75,7 @@ export class DemoScene extends Scene {
   private bounds: LocalBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
   private readonly hero: HeroLayer;
-  private readonly sky = new SkyLayer();
+  private readonly sky: SkyLayer;
   private readonly rollGround = new RollGroundLayer();
   private readonly ground = new GroundLayer();
   private readonly renderPath: RenderPath;
@@ -108,6 +108,7 @@ export class DemoScene extends Scene {
     super();
     this.skyFraction = options.skyFraction;
     this.renderPath = options.render;
+    this.sky = new SkyLayer(options.sky);
     this.hero = new HeroLayer({ ...dryGround(START), turn: 0 }, options.radius, this.caves.blocked);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
     this.overworld = new Overworld(

@@ -56,6 +56,9 @@ export const CLOUD_DECKS: readonly CloudDeck[] = [
   { base: 0.6, height: 7, width: 40, spacing: 64, cover: 0.55, drift: 1, alpha: 1, seed: 0x5ca1 },
 ];
 
+/** Clouds move this many panorama pixels per second, on their own. */
+export const SKY_DRIFT = 1.6;
+
 /** How far overcast swells the clouds: wider than their slot, so they touch. */
 const OVERCAST_WIDTH = 1.4;
 const OVERCAST_HEIGHT = 0.6;
@@ -64,7 +67,7 @@ const OVERCAST_HEIGHT = 0.6;
 const MIN_WIDTH = 5;
 
 /** A puff's height over its width: far clouds are seen nearly edge on. */
-const FLATTEN = 0.62;
+export const FLATTEN = 0.62;
 
 /** How far below its centre a puff is cut by the flat base, as a share of its height. */
 const SUNK = 0.4;

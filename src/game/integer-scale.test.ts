@@ -6,7 +6,27 @@ import {
   integerScale,
   letterbox,
   logicalPoint,
+  presentScale,
 } from "./integer-scale";
+
+describe("presentScale", () => {
+  it("is the CSS factor on a 1:1 display", () => {
+    expect(presentScale(6, 1)).toBe(6);
+  });
+
+  it("folds in the display's pixel ratio, rounded to a whole number", () => {
+    expect(presentScale(4, 1.25)).toBe(5);
+    expect(presentScale(3, 2)).toBe(6);
+    expect(presentScale(3, 1.5)).toBe(5);
+  });
+
+  it("never drops below one, and ignores a nonsense ratio", () => {
+    expect(presentScale(0, 1)).toBe(1);
+    expect(presentScale(1, 0.4)).toBe(1);
+    expect(presentScale(4, Number.NaN)).toBe(4);
+    expect(presentScale(4, 0)).toBe(4);
+  });
+});
 
 describe("logicalPoint", () => {
   const box = { left: 0, top: 0, width: 1280, height: 720 };

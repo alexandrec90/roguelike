@@ -124,6 +124,18 @@ export function logicalPoint(
   };
 }
 
+/**
+ * Device pixels to one logical pixel, a whole number: the backing store a
+ * canvas needs for what is drawn finer than the world (`?sky=hd`) to land on
+ * the screen's own pixels. The CSS factor times the display's pixel ratio,
+ * rounded - so a 125% display at a factor of 4 draws at 5 and the browser
+ * resamples by 1.25 → 1, rather than at 4 and resamples up by 1.25.
+ */
+export function presentScale(cssFactor: number, devicePixelRatio: number): number {
+  const ratio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return Math.max(1, Math.round(Math.max(cssFactor, 1) * ratio));
+}
+
 /** Centre horizontal overflow, but keep the horizon pinned to the top edge. */
 export function coverOffset(
   availableWidth: number,
