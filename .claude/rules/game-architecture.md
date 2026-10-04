@@ -77,6 +77,24 @@ step swings the sky.
 radius, read [the camera-motion reference](../camera-motion.md) and inspect
 `?map=1`. A tighter radius needs per-object arc motion during a step.
 
+## Caves, and changing what the horizon shows
+
+The band above the field says *where you are*. Outdoors it is the sky and the lip;
+anywhere else it is a `Backdrop`, and the change between two is one generic mechanism -
+a cave now, a portal, flight or deep water later, each a backdrop and a style:
+
+| Module | Owns |
+| --- | --- |
+| `src/game/horizon-transition.ts` | A change of horizon as data (`HorizonTransition`: from, to, style, start, length), its eased progress, and the per-*screen*-pixel reveal threshold for each style (`dissolve`, `iris`, `flood`, `descend`) - Bayer-dithered, so the edge is pixel art. `composeMasked` mixes two pictures by it; every surface that takes part reveals the same pixel on the same frame. |
+| `src/game/backdrop.ts`, `backdrop-layer.ts` | The `Backdrop` contract (paint the band at a panorama offset, its lights, its ambient) and the one surface over the sky and lip that draws it - hidden under the sky, mixed by the mask during a change. |
+| `src/game/caves.ts` | Where mouths are (a seeded lattice plus one beside the start) and the clearing before each (`nearCaveMouth`, which `terrain.ts` grows nothing in). |
+| `src/game/realm.ts` | Outside, inside, or changing: pure, and a mouth only fires on arrival, so standing on one never flips back and forth. It keeps the `entry` pose: the mouth, facing the way the hero went in. |
+| `src/game/cave-map.ts` | The inside: a deep winding tunnel with an end chamber, laid out in cave coordinates (`along` from the mouth ahead of `entry`, `across` to its right) and sampled once onto a grid - heights, grain, torches. `caveBlocked` is what the hero walks by inside. |
+| `src/game/cave-march.ts` | Drawing it: the landform march cut down to one map - near to far through `projectDepth`, so the floor carries over the treadmill's lip, walls shrink up the roll and sink past the horizon line, and the end grows as you walk to it. `cutAway` lowers rock nearer the camera than the hero to a ledge, or a tunnel would bury him. CPU, ~3 ms a walking frame; the first candidate for a shader port. |
+| `src/game/cave-backdrop.ts`, `cave-entrance-art.ts` | The roof above the horizon line and the torch flame; the mouth as a shape sampled at any scale. |
+| `src/game/cave-*-layer.ts` | The wiring; `cave-realm-layer.ts` is the one object the scene steps and asks. |
+| `src/game/overworld.ts`, `display-group.ts` | Everything a cave puts away, counted as one `DisplayGroup` so it hides and comes back in a call. |
+
 ## Landforms: everything tall
 
 Mountains, mesas, spires and towers are not tiles and not sprites. Each is **a height

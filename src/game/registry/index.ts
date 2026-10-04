@@ -6,6 +6,7 @@
  */
 
 import type { AssetEntry } from "../asset-types";
+import { CAVE_ASSETS } from "./caves";
 import { CREATURE_ASSETS } from "./creatures";
 import { FIRE_ASSETS } from "./fire";
 import { GROUND_ASSETS } from "./ground";
@@ -20,4 +21,5 @@ export const AREA_ASSETS: readonly AssetEntry[] = [
   ...GROUND_ASSETS,
   ...SCENERY_ASSETS,
   ...WEATHER_ASSETS,
+  ...CAVE_ASSETS,
 ];

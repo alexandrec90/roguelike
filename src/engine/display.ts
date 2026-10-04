@@ -382,6 +382,11 @@ export class DisplayList {
     this.unsorted = true;
   }
 
+  /** The serial the next object added will get: every object added since a reading has one at or above it. */
+  get issued(): number {
+    return this.next;
+  }
+
   /** Every object, in no promised order - for a layer that inspects what else is standing. */
   get list(): readonly GameObject[] {
     return this.objects;
