@@ -4,7 +4,8 @@
  * - **Where:** the shared puddle field (`water/puddle-field.ts`) uploaded as a
  *   texture and read at the pixel's planet point against the level the rain has
  *   raised - the same bytes and the same bilinear read the simulation uses, so a
- *   footstep ripple lands in water the picture shows.
+ *   footstep ripple lands in water the picture shows. The lakes ride in the
+ *   texture's second channel (`water-texels.ts`), so the ground draws them too.
  * - **What it shows:** the world mirrored. This projection is parallel, so the
  *   reflection of a point `(x, y, z)` in still water at `z = 0` is just
  *   `(x, y, -z)`; the skin draws the world once with height flipped into a half-
@@ -18,6 +19,14 @@
  */
 
 import { PLANET_TILES } from "../../game/planet";
+import { LAKE_RANGE_TILES } from "./water-texels";
+
+/**
+ * A lake's tiles inside its shore, in the basin field's depth units: how
+ * steeply its water comes in from the shore line - over a sixteenth of a tile,
+ * with a damp rim a little wider outside, so its edge is as crisp as a puddle's.
+ */
+export const LAKE_DEPTH_PER_TILE = 0.2;
 
 /** Rings from footsteps and landings the shader is handed at once. */
 export const MAX_RIPPLES = 16;
@@ -36,6 +45,8 @@ uniform vec4 u_water;          // level, wetness, rain, time (seconds)
 uniform vec4 u_ripples[${MAX_RIPPLES}]; // planet x, y, birth (seconds), strength
 
 const float LAP = ${float(PLANET_TILES)};
+const float LAKE_RANGE = ${float(LAKE_RANGE_TILES)};
+const float LAKE_DEPTH = ${float(LAKE_DEPTH_PER_TILE)};
 const float RIPPLE_LIFE = ${float(RIPPLE_LIFE_S)};
 
 /** The shortest way from b to a round the planet. */
@@ -136,8 +147,15 @@ vec3 waterColour(vec2 planet, vec3 bed, vec3 lightDir) {
   return mix(bed, mirrored, 0.72) + glint + min(g_crest, 1.0) * 0.16;
 }
 
-/** How deep the field's water is at a planet point: < 0 dry, > 0 standing water. */
-float puddleAt(vec2 planet) {
-  return texture(u_puddles, planet / LAP).r - u_water.x;
+/**
+ * Standing water at a planet point: x how deep, in the basin field's units
+ * (< 0 dry, > 0 water), y how many tiles inside a lake's shore (< 0 outside).
+ * A lake is the deeper of the two wherever it lies, so it is drawn exactly as a
+ * puddle is, out of the same ground and the same mirror.
+ */
+vec2 waterAt(vec2 planet) {
+  vec2 mask = texture(u_puddles, planet / LAP).rg;
+  float lake = (mask.g - 0.5) * LAKE_RANGE;
+  return vec2(max(mask.r - u_water.x, lake * LAKE_DEPTH), lake);
 }
 `;
