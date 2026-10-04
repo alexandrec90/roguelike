@@ -13,7 +13,8 @@ import {
 } from "./landform-frame";
 import { CLOUD_FADE_ROWS, cloudPoint, cloudReach, landformFog, marchSchedule } from "./landform-march";
 import { FAR_ROWS, isFarView, mergeLandforms, outlineLandforms, renderLandforms, viewsInSight } from "./landform-render";
-import { landformField, type Landform } from "./landforms";
+import { landformField, planetLandforms, type Landform } from "./landforms";
+import { toLocal } from "./planet";
 import { rowAtFoot, TILE_DEPTH, TILE_WIDTH } from "./projection";
 
 const FRAME: CameraFrame = { groundTop: 40, rollHeight: 24, footX: 160, footY: 113, phaseX: 0, phaseY: 0 };
@@ -216,6 +217,33 @@ describe("the far land", () => {
     const views = viewsInSight(FRAME, { x: 128, y: 128, turn: 0 }, { width: WIDTH, height: HEIGHT });
     for (const seen of views) {
       expect(seen.centreY).toBeGreaterThan(-seen.field.half - 40);
+    }
+  });
+
+  // Walking north past a landform carries it down the screen. Its foot leaves
+  // the bottom long before its top does - a mesa's flat top reaches back to its
+  // far edge, two radii up the screen - and the whole of it once vanished at
+  // the moment the near edge fell too far below, top and all.
+  it("keeps a landform in sight while any of it still shows, though its foot is off the bottom", () => {
+    const kinds = new Set<Landform["kind"]>();
+    const sample = planetLandforms().filter((each) => {
+      const fresh = !kinds.has(each.kind) && (each.kind === "mesa" || each.kind === "mountain");
+      kinds.add(each.kind);
+      return fresh;
+    });
+    expect(sample.map((each) => each.kind).sort()).toEqual(["mesa", "mountain"]);
+    for (const land of sample) {
+      // Beside the hero, so he never stands inside it and it is not cut away round him.
+      const x = land.x + land.radius + 2;
+      for (let behind = 0; behind <= land.radius * 2 + 30; behind += 1) {
+        const pose = { x, y: land.y + behind, turn: 0 };
+        const local = toLocal(pose, land);
+        const shown = painted(render([view(land, local.x, local.y)])).length;
+        const found = viewsInSight(FRAME, pose, { width: WIDTH, height: HEIGHT }).some(
+          (seen) => seen.field.landform.id === land.id,
+        );
+        expect({ id: land.id, behind, found: found || shown === 0 }).toEqual({ id: land.id, behind, found: true });
+      }
     }
   });
 });
