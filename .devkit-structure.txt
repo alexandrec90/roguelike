@@ -15,7 +15,7 @@
 # Module size -- `file_lines`, `imports`, `definitions` -- is advisory and never here.
 #
 # Regenerate only when adopting the gate: python scripts/hooks/structure_check.py --seed
-complexity::scripts/lint-all.py::main = 19
+complexity::scripts/lint-all.py::main = 17
 dependency::package.json::@types/node = 1
 dependency::package.json::typescript = 1
 dependency::package.json::vite = 1
@@ -26,7 +26,7 @@ dependency::pyproject.toml::pydantic-settings = 1
 dependency::pyproject.toml::pytest = 1
 dependency::pyproject.toml::pytest-cov = 1
 dependency::pyproject.toml::ruff = 1
-function_lines::scripts/lint-all.py::main = 99
+function_lines::scripts/lint-all.py::main = 83
 suppressions::scripts/notify-wrap.py = 1
 swallowed_errors::scripts/notify.py = 1
 

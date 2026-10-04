@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT = REPO_ROOT / "logs" / "lint-errors.log"
@@ -125,6 +127,85 @@ def env_files(limit_to: list[str] | None = None) -> list[str]:
     return found if limit_to is None else [p for p in found if p in set(limit_to)]
 
 
+# What the frontend typecheck answers for: a change to any of these, under the
+# `[frontend] dir` of `.devkit.toml`, is what a `--changed` run hands it. Without the
+# pass, a TypeScript-only change printed "nothing to do" and a fixer's lint step
+# checked nothing at all -- in a project whose logic is nearly all TypeScript.
+FRONTEND_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".vue")
+FRONTEND_CONFIGS = ("package.json", "tsconfig.json")
+
+
+def frontend_tier() -> Any | None:
+    """`.devkit.toml`'s `[frontend]` tier when it is on, else None.
+
+    Read through the vendored `harness_config.py`, the same reader `stop.py` uses for
+    its typecheck, so the two can never disagree about where the frontend is. Loaded by
+    path, which mypy does not follow into the vendored tree, and registered before it
+    runs: `@dataclass` looks its defining module up by name.
+    """
+    path = REPO_ROOT / "scripts" / "hooks" / "harness_config.py"
+    spec = importlib.util.spec_from_file_location("lint_all_harness_config", path)
+    if not path.is_file() or spec is None or spec.loader is None:
+        return None
+    config = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = config
+    try:
+        spec.loader.exec_module(config)
+        tier = config.load(REPO_ROOT).frontend
+    except (ImportError, AttributeError):
+        return None
+    return tier if tier.enabled else None
+
+
+def frontend_targets(paths: list[str], tier: Any | None) -> list[str]:
+    """The paths among `paths` the frontend typecheck answers for; none with no tier."""
+    if tier is None:
+        return []
+    root = tier.dir.strip("/")
+    prefix = "" if root in ("", ".") else f"{root}/"
+    return [
+        n
+        for n in paths
+        if n.startswith(prefix)
+        and (n.endswith(FRONTEND_SUFFIXES) or n.rsplit("/", 1)[-1] in FRONTEND_CONFIGS)
+    ]
+
+
+def frontend_section(tier: Any | None, scripts: list[str], scoped: bool) -> str:
+    """The typecheck's artifact section. A whole-project command: tsc takes no file list.
+
+    It runs when the tier is on: over the whole frontend on a whole-repo run, and on a
+    narrowed one only when `scripts` -- what changed under it -- is not empty. No
+    `node_modules` is a missing tool, not a finding -- the same note `run_tool` gives
+    an absent linter -- since `npm run` would put "tsc is not recognized" in the artifact.
+    """
+    if tier is None or (scoped and not scripts):
+        return ""
+    if not (REPO_ROOT / tier.dir / "node_modules").is_dir():
+        print(f"  typecheck: no node_modules in {tier.dir} — skipped (run `npm ci` there)")
+        return ""
+    npm = shutil.which("npm") or "npm"
+    cmd = [npm, *tier.typecheck_cmd]
+    hint = f"cd {tier.dir} && npm {' '.join(tier.typecheck_cmd)}"
+    return run_tool("typecheck", cmd, hint, cwd=REPO_ROOT / tier.dir)
+
+
+def nothing_to_do(selected: list[str]) -> int:
+    """Report a narrowed run with nothing to lint, naming what went unlinted.
+
+    The names are the point: "nothing to do" alone cannot be told apart from a diff
+    the run never saw, and an agent spent a turn finding out which it was.
+    """
+    if selected:
+        shown = ", ".join(selected[:5]) + (", ..." if len(selected) > 5 else "")
+        print(f"lint-all: no linter here covers the {len(selected)} file(s) ({shown});")
+        print("  nothing to do.")
+    else:
+        print("lint-all: no changed files; nothing to do.")
+    _write_artifact("")
+    return 0
+
+
 def _git(*args: str) -> list[str]:
     result = subprocess.run(["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True)
     return result.stdout.splitlines() if result.returncode == 0 else []
@@ -149,7 +230,7 @@ def _missing_module(cmd: list[str]) -> bool:
         return True
 
 
-def run_tool(name: str, cmd: list[str], fix_hint: str) -> str:
+def run_tool(name: str, cmd: list[str], fix_hint: str, cwd: Path = REPO_ROOT) -> str:
     """Run one linter; return its artifact section, or "" when it passed or was absent.
 
     A missing tool is NOT a failure. Writing "command not found" into the artifact
@@ -160,7 +241,7 @@ def run_tool(name: str, cmd: list[str], fix_hint: str) -> str:
         print(f"  {name}: not installed — skipped")
         return ""
     try:
-        result = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     except FileNotFoundError:
         print(f"  {name}: not installed — skipped")
         return ""
@@ -212,10 +293,10 @@ def main(argv: list[str] | None = None) -> int:
     targets = python_targets(selected)
     workflows = workflow_files(changed)
     envs = env_files(changed)
-    if scoped and not (targets or workflows or envs):
-        print("lint-all: no changed files this run lints; nothing to do.")
-        _write_artifact("")
-        return 0
+    tier = frontend_tier()
+    scripts = frontend_targets(selected, tier)
+    if scoped and not (targets or workflows or envs or scripts):
+        return nothing_to_do(selected)
     scope = targets or ["."]
 
     label = f"{len(selected)} file(s)" if scoped else "whole repo"
@@ -252,10 +333,20 @@ def main(argv: list[str] | None = None) -> int:
             f"mypy {' '.join(MYPY_SCOPE)} --show-error-codes",
         )
 
-    # `.claude/hooks/session-start.sh` installs both of these into every session, so
-    # a provisioned checkout has them. They are real executables rather than `-m`
-    # modules, so run_tool's FileNotFoundError branch is what degrades a missing one
-    # to a terminal note instead of an unfixable artifact entry.
+    sections += _other_passes(workflows, envs)
+    sections += frontend_section(tier, scripts, scoped)
+    return _finish(sections)
+
+
+def _other_passes(workflows: list[str], envs: list[str]) -> str:
+    """The actionlint and dotenv-linter sections, for whichever files each was given.
+
+    `.claude/hooks/session-start.sh` installs both of these into every session, so a
+    provisioned checkout has them. They are real executables rather than `-m`
+    modules, so run_tool's FileNotFoundError branch is what degrades a missing one
+    to a terminal note instead of an unfixable artifact entry.
+    """
+    sections = ""
     if workflows:
         sections += run_tool(
             "actionlint",
@@ -264,7 +355,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     if envs:
         sections += run_tool("dotenv-linter", [*DOTENV_CMD, *envs], " ".join([*DOTENV_CMD, *envs]))
+    return sections
 
+
+def _finish(sections: str) -> int:
+    """Write the artifact, report where it is, and return the run's exit code."""
     _write_artifact(sections)
     if sections:
         print(f"\nlint-all: FAILED — details in {ARTIFACT.relative_to(REPO_ROOT)}")
