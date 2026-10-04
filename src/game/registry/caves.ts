@@ -5,60 +5,70 @@
  * `asset-registry.ts` spreads them all into `ASSET_REGISTRY`.
  *
  * Nothing here is drawn: the mouth is `caveEntranceCloud` at the scales the
- * horizon roll asks for, the wall is a window of `CAVE_BACKDROP`'s lap with
- * its torches at fixed instants, and the floor is `floorTileCloud` laid out the
- * way the chamber lays it.
+ * horizon roll asks for, the roof is a window of `CAVE_BACKDROP`'s lap, and the
+ * inside is `caveClouds` - the very march the game draws - from fixed points
+ * down one cave, from the mouth to its end.
  */
 
 import { AUTHORED, type AssetEntry } from "../asset-types";
-import { caveWallInk, torchCloud, torchColumn, torchRow } from "../cave-backdrop";
+import { caveCeilingInk } from "../cave-backdrop";
 import { caveEntranceCloud, ENTRANCE_HALF_WIDTH, ENTRANCE_HEIGHT } from "../cave-entrance-art";
-import { floorTileCloud, FLOOR_VARIANTS, type FloorKey } from "../cave-floor";
+import { buildMap, tunnelCentre } from "../cave-map";
+import { caveClouds } from "../cave-march";
+import { horizonLayout } from "../horizon";
 import { cloudToSprite, type InkId, type PixelCloud } from "../ink";
 import type { PixelSpriteSource } from "../pixel-art";
-import { TILE_DEPTH, TILE_WIDTH } from "../projection";
+import { fromLocal } from "../planet";
 import { inkSwap } from "./fire";
 
 const NOON = { light: { x: -0.6, y: -0.8 }, elevation: 0.8 };
 
 /** The mouth on the field, then on the roll at the sizes a walk toward the horizon passes through. */
 const MOUTH_SCALES = [1, 0.7, 0.45, 0.25];
-const MOUTH_FRAME = { width: ENTRANCE_HALF_WIDTH * 2 + 3, height: ENTRANCE_HEIGHT + 5, originX: ENTRANCE_HALF_WIDTH + 1, originY: ENTRANCE_HEIGHT + 1 };
+const MOUTH_FRAME = {
+  width: ENTRANCE_HALF_WIDTH * 2 + 3,
+  height: ENTRANCE_HEIGHT + 5,
+  originX: ENTRANCE_HALF_WIDTH + 1,
+  originY: ENTRANCE_HEIGHT + 1,
+};
 const MOUTH_FRAMES = MOUTH_SCALES.map((scale) => cloudToSprite(caveEntranceCloud(scale, NOON), MOUTH_FRAME));
 
-/** A band as tall as the default layout's, and a screen of it wide around the first torch. */
-const WALL = { width: 160, height: 40 };
-const WALL_START = torchColumn(0) - 60;
+/** The default layout's band above the horizon line, a screen wide. */
+const LAYOUT = horizonLayout(180, 0.22);
+const ROOF = { width: 320, height: LAYOUT.horizonY };
 
-function wallCloud(elapsedMs: number): PixelCloud {
+function roofCloud(start: number): PixelCloud {
   const cloud: PixelCloud = [];
-  for (let y = 0; y < WALL.height; y += 1) {
-    for (let x = 0; x < WALL.width; x += 1) {
-      cloud.push({ x, y, ink: caveWallInk(WALL_START + x, y, WALL.height) });
+  for (let y = 0; y < ROOF.height; y += 1) {
+    for (let x = 0; x < ROOF.width; x += 1) {
+      cloud.push({ x, y, ink: caveCeilingInk(start + x, y, ROOF.height) });
     }
   }
-  const torch = torchCloud(elapsedMs, 0xc0a7);
-  return [...cloud, ...torch.map((pixel) => ({ ...pixel, x: pixel.x + 60, y: pixel.y + torchRow(WALL.height) }))];
+  return cloud;
 }
 
-const WALL_FRAMES = [0, 180, 360, 540, 720, 900].map((ms) =>
-  cloudToSprite(wallCloud(ms), { width: WALL.width, height: WALL.height, originX: 0, originY: 0 }),
+const ROOF_FRAMES = [0, 320, 640, 960].map((start) =>
+  cloudToSprite(roofCloud(start), { width: ROOF.width, height: ROOF.height, originX: 0, originY: 0 }),
 );
 
-/** Five tiles by four: every stone variant, the lit stone at the mouth, and rock past the wall. */
-function floorCloud(): PixelCloud {
-  const rows: FloorKey[][] = [
-    [0, 1, 2, 3, 0].map((variant) => ({ kind: "stone", variant: variant % FLOOR_VARIANTS })),
-    [{ kind: "stone", variant: 2 }, { kind: "lit", variant: 0 }, { kind: "lit", variant: 0 }, { kind: "stone", variant: 1 }, { kind: "stone", variant: 3 }],
-    [{ kind: "stone", variant: 3 }, { kind: "lit", variant: 0 }, { kind: "stone", variant: 0 }, { kind: "stone", variant: 2 }, { kind: "rock", variant: 0 }],
-    [{ kind: "rock", variant: 0 }, { kind: "stone", variant: 1 }, { kind: "rock", variant: 0 }, { kind: "rock", variant: 0 }, { kind: "rock", variant: 0 }],
-  ];
-  return rows.flatMap((row, ty) =>
-    row.flatMap((key, tx) => floorTileCloud(key).map((pixel) => ({ ...pixel, x: pixel.x + tx * TILE_WIDTH, y: pixel.y + ty * TILE_DEPTH }))),
-  );
+/** One cave, walked into: at the mouth, a third in, near the end, at the end. */
+const SEED = 6607;
+const MAP = buildMap(SEED);
+const ENTRY = { x: 128, y: 128, turn: 0 };
+// Half a screen wide: the lab lays every frame out twice across its 320 columns, dark ground and light.
+const INSIDE = { width: 160, height: 180 };
+const FRAME = { groundTop: LAYOUT.groundTop, rollHeight: LAYOUT.rollHeight, footX: 80, footY: 120, phaseX: 0, phaseY: 0 };
+
+function insideCloud(along: number): PixelCloud {
+  const at = fromLocal(ENTRY, { x: Math.round(tunnelCentre(SEED, along)), y: along });
+  const view = { frame: FRAME, pose: { ...at, turn: 0 }, entry: ENTRY, map: MAP, elapsedMs: 0 };
+  const { back, front } = caveClouds(view, INSIDE.width, INSIDE.height);
+  return [...back, ...front];
 }
 
-const FLOOR_FRAMES = [cloudToSprite(floorCloud(), { width: TILE_WIDTH * 5, height: TILE_DEPTH * 4, originX: 0, originY: 0 })];
+const INSIDE_FRAMES = [0, Math.round(MAP.length / 3), MAP.length - 14, MAP.length - 2].map((along) =>
+  cloudToSprite(insideCloud(along), { width: INSIDE.width, height: INSIDE.height, originX: 0, originY: 0 }),
+);
 
 /** Stone re-inked as sandstone: what a desert's caves would be cut from. */
 const SANDSTONE: Partial<Record<InkId, InkId>> = {
@@ -66,7 +76,6 @@ const SANDSTONE: Partial<Record<InkId, InkId>> = {
   "stone-2": "earth-2",
   "stone-3": "earth-3",
   "stone-4": "earth-4",
-  "stone-5": "earth-5",
 };
 
 function variants(frames: readonly PixelSpriteSource[]) {
@@ -87,23 +96,24 @@ export const CAVE_ASSETS: readonly AssetEntry[] = [
       "reads as an opening at every size and the contact shadow sits under the foot.",
   },
   {
-    id: "cave-wall",
-    label: "Cave — the wall the horizon shows inside",
+    id: "cave-roof",
+    label: "Cave — the roof above the horizon line",
     category: "prop",
-    frames: WALL_FRAMES,
-    frameDurationMs: 90,
-    variants: variants(WALL_FRAMES),
-    notes:
-      "A window of the backdrop's lap round its first torch, the flame sampled every 180 ms. In the game the " +
-      "cave's dim ambient and each torch's pool light it; here it is in its own colours.",
+    frames: ROOF_FRAMES,
+    frameDurationMs: 600,
+    variants: variants(ROOF_FRAMES),
+    notes: "A quarter of the lap a frame. Stalactites hang from the rock; below them the cave's far dark.",
   },
   {
-    id: "cave-floor",
-    label: "Cave — chamber floor tiles",
+    id: "cave-inside",
+    label: "Cave — inside, from the mouth to the end",
     category: "prop",
-    frames: FLOOR_FRAMES,
-    frameDurationMs: 1000,
-    variants: variants(FLOOR_FRAMES),
-    notes: "Every stone variant, the lit stone round the way out, and the rock past the chamber's wall. No seam should be findable between stones.",
+    frames: INSIDE_FRAMES,
+    frameDurationMs: 800,
+    variants: variants(INSIDE_FRAMES),
+    notes:
+      "The game's own march from four points down one cave, in its own colours (the game lights it dimly, with " +
+      "a pool round each torch). The floor carries over the horizon's lip, the walls shrink up it, and the last " +
+      "two frames show the end chamber coming down off the horizon onto the field.",
   },
 ];

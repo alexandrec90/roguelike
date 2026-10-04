@@ -94,7 +94,7 @@ export interface Whereabouts {
   readonly turn: number;
   readonly upcoming: UpcomingAnchor | undefined;
   /** Where he actually is on the planet - what decides how deep the water round him is. */
-  readonly at: PlanetPoint;
+  readonly at: PlanetPose;
   /** Tiles walked in all: where his footfalls are. */
   readonly walked: number;
 }

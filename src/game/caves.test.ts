@@ -7,10 +7,9 @@ import {
   caveIn,
   caveMouthAt,
   cavesNear,
-  CHAMBER_RADIUS,
-  chamberBlocked,
   inMouth,
   MOUTH_CLEARING,
+  MOUTH_SPACING,
   nearCaveMouth,
   openForMouth,
   planetCaves,
@@ -46,11 +45,11 @@ describe("planetCaves", () => {
     }
   });
 
-  it("keeps chambers from overlapping, and ids unique", () => {
+  it("keeps mouths apart, and ids unique", () => {
     for (const a of CAVES) {
       for (const b of CAVES) {
         if (a !== b) {
-          expect(caveDistance(a, b)).toBeGreaterThan(CHAMBER_RADIUS * 2);
+          expect(caveDistance(a, b)).toBeGreaterThan(MOUTH_SPACING);
           expect(a.id).not.toBe(b.id);
         }
       }
@@ -91,14 +90,5 @@ describe("the clearing before a mouth", () => {
         expect(caveDistance(cave, feature)).toBeGreaterThanOrEqual(MOUTH_CLEARING);
       }
     }
-  });
-});
-
-describe("chamberBlocked", () => {
-  it("walls the chamber at its radius, round the mouth", () => {
-    const cave = CAVES[0]!;
-    expect(chamberBlocked(cave, cave)).toBe(false);
-    expect(chamberBlocked(cave, { x: wrapTile(cave.x + CHAMBER_RADIUS - 0.5), y: cave.y })).toBe(false);
-    expect(chamberBlocked(cave, { x: cave.x, y: wrapTile(cave.y - CHAMBER_RADIUS - 0.5) })).toBe(true);
   });
 });

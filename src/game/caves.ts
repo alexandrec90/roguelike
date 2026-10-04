@@ -1,17 +1,16 @@
 /**
- * Caves: where their mouths are on the planet, and the chamber behind each.
+ * Caves: where their mouths are on the planet.
  *
  * A mouth is a point feature like a lake or a landform - a seeded lattice of
  * planet cells, one candidate per cell, dropped where land or water is in the
  * way - plus one placed by hand beside where a session opens, so the first
  * walk finds one. Walk onto a mouth and you are inside (`realm.ts`).
  *
- * The inside is a pocket, not more planet. The hero keeps his planet point -
- * which is what lets him walk out where he walked in - but while he is in the
- * cave the overworld is not what he walks on: the chamber is a disc of
- * `CHAMBER_RADIUS` tiles round the mouth, and its wall is the one thing that
- * stops him (`chamberBlocked`). The mouth is also the way out: stand on it
- * again, from inside, and you are back under the sky.
+ * The inside is its own place, not more overworld (`cave-map.ts`): a deep,
+ * winding tunnel with an end. The hero keeps his planet point - which is what
+ * lets him walk out where he walked in - but while he is in the cave its walls
+ * are what he walks by, not the overworld's lakes and land. The mouth is also
+ * the way out: stand on it again, from inside, and you are back under the sky.
  *
  * The mouth's *art* never turns (`cave-entrance-art.ts`): it is a flat 2.5D
  * prop facing the camera from every heading, so whichever way the hero came
@@ -39,11 +38,8 @@ const CAVE_SEED = 0xca7e;
 /** Tiles from a mouth's foot within which a walker goes in (or, from inside, out). */
 export const CAVE_MOUTH = 0.6;
 
-/** Tiles from the mouth to the chamber's wall. */
-export const CHAMBER_RADIUS = 6.5;
-
-/** Tiles round the way out lit by the day behind it. */
-export const EXIT_GLOW = 1.25;
+/** Fewest tiles between two mouths, so two clearings never run together. */
+export const MOUTH_SPACING = 12;
 
 /** Tiles a mouth keeps clear of a lake's water. */
 const LAKE_BANK = 2;
@@ -71,7 +67,7 @@ export function planetCaves(): readonly Cave[] {
     for (let cellY = 0; cellY < cells; cellY += 1) {
       for (let cellX = 0; cellX < cells; cellX += 1) {
         const cave = caveIn(cellX, cellY);
-        if (cave !== undefined && found.every((other) => caveDistance(other, cave) > CHAMBER_RADIUS * 2)) {
+        if (cave !== undefined && found.every((other) => caveDistance(other, cave) > MOUTH_SPACING)) {
           found.push(cave);
         }
       }
@@ -150,9 +146,4 @@ export function nearCaveMouth(point: PlanetPoint): boolean {
 /** Whether a point stands in this cave's mouth: the way in from outside, and out from inside. */
 export function inMouth(cave: PlanetPoint, point: PlanetPoint): boolean {
   return caveDistance(cave, point) < CAVE_MOUTH;
-}
-
-/** Whether a point is past the chamber's wall: what stops a walker inside. */
-export function chamberBlocked(cave: PlanetPoint, point: PlanetPoint): boolean {
-  return caveDistance(cave, point) > CHAMBER_RADIUS;
 }

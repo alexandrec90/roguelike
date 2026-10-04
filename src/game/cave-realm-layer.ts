@@ -4,14 +4,15 @@
  * It holds the realm (`realm.ts`) - outside, inside, or changing - and turns
  * it into what the frame needs:
  *
- * - **what the hero walks by**: the chamber's wall inside, the overworld's
- *   lakes and landforms outside (`blocked`);
+ * - **what the hero walks by**: the cave's walls inside (`cave-map.ts`), the
+ *   overworld's lakes and landforms outside (`blocked`);
  * - **what the world is lit by**: the backdrop's ambient eased in, the sun's
  *   shadows and the cloud shadows eased out (`atmosphere`);
  * - **which of the scene's layers draw**: the overworld while less than half
  *   inside, the sky, lip and ground until wholly inside (`share`);
- * - **the cave itself**: the mouths on the overworld, and inside, the floor
- *   and the band (`backdrop-layer.ts`), swept in by one mask.
+ * - **the cave itself**: the mouths on the overworld; inside, the cave's world
+ *   through the treadmill (`cave-interior-layer.ts`) and its roof above the
+ *   horizon line (`backdrop-layer.ts`), swept in by one mask.
  */
 
 import type { Scene } from "../engine";
@@ -19,41 +20,51 @@ import type { Scene } from "../engine";
 import type { Atmosphere } from "./atmosphere";
 import { OUTDOORS } from "./backdrop";
 import { BackdropLayer, type HorizonState } from "./backdrop-layer";
-import type { CameraFrame, LocalBounds } from "./camera";
+import type { LocalBounds } from "./camera";
 import { CAVE_BACKDROP } from "./cave-backdrop";
 import { CaveEntranceLayer } from "./cave-entrance-layer";
-import { CaveFloorLayer } from "./cave-floor-layer";
-import { chamberBlocked, type Cave } from "./caves";
+import { CaveInteriorLayer } from "./cave-interior-layer";
+import { caveBlocked, caveMap, type CaveMap } from "./cave-map";
+import type { Cave } from "./caves";
 import type { FrameContext } from "./frame-context";
 import { blockedGround } from "./lakes";
-import type { PlanetPoint } from "./planet";
+import type { PlanetPoint, PlanetPose } from "./planet";
 import { CAVE, caveShare, OUTSIDE, stepRealm, type RealmState } from "./realm";
+
+/** The render target, and the band above the horizon line the roof fills. */
+export interface CaveScreen {
+  readonly width: number;
+  readonly height: number;
+  readonly horizonY: number;
+}
 
 export class CaveRealm {
   private state: RealmState = OUTSIDE;
-  /** The cave last stood in: still drawn while its floor fades out on the way back to the sky. */
-  private chamber: Cave | undefined;
+  /** The cave last stood in and its map: still drawn while it fades out on the way back to the sky. */
+  private shown: { readonly cave: Cave; readonly map: CaveMap } | undefined;
   private readonly entrances = new CaveEntranceLayer();
-  private readonly floor = new CaveFloorLayer();
+  private readonly interior = new CaveInteriorLayer();
   private readonly backdrop = new BackdropLayer([CAVE_BACKDROP]);
   private nowMs = 0;
 
-  create(scene: Scene, frame: CameraFrame, bounds: LocalBounds, band: { width: number; height: number }): void {
+  create(scene: Scene, bounds: LocalBounds, screen: CaveScreen): void {
     this.entrances.create(scene, bounds);
-    this.floor.create(scene, frame, bounds);
-    this.backdrop.create(scene, band.width, band.height);
+    this.interior.create(scene, screen.width, screen.height);
+    this.backdrop.create(scene, screen.width, screen.horizonY);
   }
 
-  layout(frame: CameraFrame, bounds: LocalBounds): void {
+  layout(bounds: LocalBounds): void {
     this.entrances.layout(bounds);
-    this.floor.layout(frame, bounds);
   }
 
-  /** Go in or out if the hero has just stepped into a mouth. */
-  step(at: PlanetPoint, nowMs: number): void {
+  /** Go in or out if the hero, at his live pose, has just stepped into a mouth. */
+  step(at: PlanetPose, nowMs: number): void {
     this.nowMs = nowMs;
     this.state = stepRealm(this.state, at, nowMs);
-    this.chamber = this.state.cave ?? this.chamber;
+    const cave = this.state.cave;
+    if (cave !== undefined && this.shown?.cave !== cave) {
+      this.shown = { cave, map: caveMap(cave) };
+    }
   }
 
   /** 0 under the sky .. 1 in the cave. */
@@ -67,8 +78,13 @@ export class CaveRealm {
   }
 
   /** What stops the hero walking, wherever he is. Read at the call, so it follows him in and out. */
-  readonly blocked = (point: PlanetPoint): boolean =>
-    this.state.cave === undefined ? blockedGround(point) : chamberBlocked(this.state.cave, point);
+  readonly blocked = (point: PlanetPoint): boolean => {
+    const entry = this.state.entry;
+    if (this.state.cave === undefined || this.shown === undefined || entry === undefined) {
+      return blockedGround(point);
+    }
+    return caveBlocked(this.shown.map, entry, point);
+  };
 
   /** The hour's atmosphere, as it falls on the place he is in. */
   atmosphere(base: Atmosphere): Atmosphere {
@@ -86,7 +102,7 @@ export class CaveRealm {
     };
   }
 
-  /** Draw the mouths (outside), the floor and the band (inside, or changing). */
+  /** Draw the mouths (outside), the cave's world and its roof (inside, or changing). */
   update(ctx: FrameContext, turn: number): void {
     const share = this.share();
     if (share < 0.5) {
@@ -94,10 +110,11 @@ export class CaveRealm {
     } else {
       this.entrances.hide();
     }
-    if (share > 0 && this.chamber !== undefined) {
-      this.floor.update(ctx, this.chamber, this.state.transition);
+    const entry = this.state.entry;
+    if (share > 0 && this.shown !== undefined && entry !== undefined) {
+      this.interior.update(ctx, this.shown.map, entry, this.state.transition);
     } else {
-      this.floor.hide();
+      this.interior.hide();
     }
     this.backdrop.update(ctx, turn, this.horizon());
   }

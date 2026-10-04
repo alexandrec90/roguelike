@@ -131,7 +131,7 @@ export class DemoScene extends Scene {
     this.outdoors.track(() => this.ground.create(this, this.frame(), this.bounds));
     const at = { frame: this.frame(), bounds: this.bounds, width: WIDTH, height: HEIGHT, horizonY: this.layout.horizonY };
     this.overworld.create(this, at, gpu, CAMPFIRE_AT);
-    this.caves.create(this, this.frame(), this.bounds, { width: WIDTH, height: this.layout.groundTop });
+    this.caves.create(this, this.bounds, { width: WIDTH, height: HEIGHT, horizonY: this.layout.horizonY });
     this.lighting.create(this, WIDTH, HEIGHT);
     this.cameras.main.fadeOut(0);
     this.built = true;
@@ -354,7 +354,7 @@ export class DemoScene extends Scene {
       this.rollGround.layout(flat, this.bounds);
     });
     this.overworld.layout(flat, this.bounds, WIDTH);
-    this.caves.layout(flat, this.bounds);
+    this.caves.layout(this.bounds);
   }
 }
 

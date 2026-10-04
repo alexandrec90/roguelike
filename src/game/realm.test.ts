@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { OUTDOORS } from "./backdrop";
-import { CHAMBER_RADIUS, planetCaves } from "./caves";
+import { planetCaves } from "./caves";
 import { DEFAULT_TRANSITION_MS } from "./horizon-transition";
 import { wrapTile } from "./planet";
 import { CAVE, caveShare, OUTSIDE, stepRealm } from "./realm";
 
-const CAVE_AT = planetCaves()[0]!;
-const AWAY = { x: wrapTile(CAVE_AT.x + 3), y: CAVE_AT.y };
+const MOUTH = planetCaves()[0]!;
+/** The hero standing in the mouth, facing a little east of north. */
+const CAVE_AT = { x: MOUTH.x, y: MOUTH.y, turn: 0.3 };
+const AWAY = { x: wrapTile(MOUTH.x + 3), y: MOUTH.y, turn: 0.3 };
 const LATER = DEFAULT_TRANSITION_MS + 1;
 
 describe("stepRealm", () => {
@@ -17,16 +19,18 @@ describe("stepRealm", () => {
 
   it("takes him in when he steps into a mouth, and starts the horizon changing", () => {
     const inside = stepRealm(OUTSIDE, CAVE_AT, 100);
-    expect(inside.cave).toBe(CAVE_AT);
+    expect(inside.cave).toBe(MOUTH);
     expect(inside.armed).toBe(false);
     expect(inside.transition).toMatchObject({ from: OUTDOORS, to: CAVE, startMs: 100 });
+    // The cave opens ahead of the way he faced going in.
+    expect(inside.entry).toEqual({ x: MOUTH.x, y: MOUTH.y, turn: 0.3 });
   });
 
   it("does not throw him straight back out while he stands on the mouth", () => {
     let state = stepRealm(OUTSIDE, CAVE_AT, 0);
     for (const now of [16, 500, LATER, LATER + 500]) {
       state = stepRealm(state, CAVE_AT, now);
-      expect(state.cave).toBe(CAVE_AT);
+      expect(state.cave).toBe(MOUTH);
     }
     expect(state.transition).toBeUndefined();
   });
@@ -35,24 +39,26 @@ describe("stepRealm", () => {
     let state = stepRealm(OUTSIDE, CAVE_AT, 0);
     state = stepRealm(state, AWAY, LATER);
     expect(state.armed).toBe(true);
-    expect(state.cave).toBe(CAVE_AT);
+    expect(state.cave).toBe(MOUTH);
     state = stepRealm(state, CAVE_AT, LATER + 100);
     expect(state.cave).toBeUndefined();
     expect(state.transition).toMatchObject({ from: CAVE, to: OUTDOORS });
+    // Kept for the fade back out, though he is no longer inside.
+    expect(state.entry?.turn).toBe(0.3);
   });
 
   it("ignores the mouth while a change is in flight", () => {
     let state = stepRealm(OUTSIDE, CAVE_AT, 0);
     state = stepRealm(state, AWAY, 100);
     state = stepRealm(state, CAVE_AT, 200);
-    expect(state.cave).toBe(CAVE_AT);
+    expect(state.cave).toBe(MOUTH);
     expect(state.transition?.startMs).toBe(0);
   });
 
-  it("keeps him in the cave anywhere in the chamber", () => {
+  it("keeps him in the cave however deep he walks", () => {
     let state = stepRealm(OUTSIDE, CAVE_AT, 0);
-    state = stepRealm(state, { x: CAVE_AT.x, y: wrapTile(CAVE_AT.y + CHAMBER_RADIUS - 1) }, LATER);
-    expect(state.cave).toBe(CAVE_AT);
+    state = stepRealm(state, { x: MOUTH.x, y: wrapTile(MOUTH.y + 60), turn: 0 }, LATER);
+    expect(state.cave).toBe(MOUTH);
   });
 });
 
