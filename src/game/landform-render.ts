@@ -115,9 +115,9 @@ export function outlineLandforms(pixels: LandformPixels): void {
 
 /**
  * The landforms any part of which can show this frame, with their centres in
- * local tiles: in front of the screen's bottom edge or tall enough to rise
- * into it, within the screen's width at their distance, and not sunk wholly
- * behind the horizon. Their grids are built here the first time each is seen.
+ * local tiles: any of the footprint in front of the screen's bottom edge or
+ * tall enough to rise into it, within the screen's width at their distance,
+ * and not sunk wholly behind the horizon. Their grids are built here the first time each is seen.
  */
 export function viewsInSight(
   frame: CameraFrame,
@@ -130,7 +130,10 @@ export function viewsInSight(
     const reach = landform.radius + 1.5;
     const near = projectDepth(frame, local.y - reach);
     const centre = projectDepth(frame, local.y);
-    if (near.ground - landform.height * near.scale * 1.4 > size.height) {
+    // Its highest pixel stands over its far edge, not its foot: a mesa's top
+    // runs back there, two radii up the screen from the near edge.
+    const far = projectDepth(frame, local.y + reach);
+    if (Math.min(near.ground, far.ground) - landform.height * Math.max(near.scale, far.scale) * 1.4 > size.height) {
       continue;
     }
     if (centre.sink > landform.height * 1.4) {
