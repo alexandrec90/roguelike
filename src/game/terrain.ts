@@ -36,6 +36,7 @@
  * than snapped to the grid, which is exactly why it may be.
  */
 
+import { nearCaveMouth } from "./caves";
 import { nearLake } from "./lakes";
 import { blockedByLand } from "./landforms";
 import { PLANET_TILES, wrapTile, type PlanetPoint } from "./planet";
@@ -174,7 +175,7 @@ function featureIn(cellX: number, cellY: number, spec: FeatureSpec): Feature | u
     x: wrapTile(cellX + hashUnit(cellX, cellY, spec.seed ^ 0x11)),
     y: wrapTile(cellY + hashUnit(cellX, cellY, spec.seed ^ 0x22)),
   };
-  if (!spec.grows(terrainAt(point)) || blockedByLand(point) || nearLake(point, FEATURE_BANK)) {
+  if (!spec.grows(terrainAt(point)) || blockedByLand(point) || nearLake(point, FEATURE_BANK) || nearCaveMouth(point)) {
     return undefined;
   }
   const shape = hashUnit(cellX, cellY, spec.seed ^ 0x33);

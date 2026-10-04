@@ -1,35 +1,30 @@
 import { Scene } from "../engine";
-import { AmbientLayer } from "./ambient-layer";
+import type { Atmosphere } from "./atmosphere";
 import type { FrameProfiler } from "./bench";
 import { visibleLocal, type CameraFrame, type LocalBounds } from "./camera";
+import { CaveRealm } from "./cave-realm-layer";
 import { cloudShade, cloudShadowsAt } from "./cloud-shadow";
-import { Encounter } from "./encounter";
+import { DisplayGroup } from "./display-group";
 import { beginFrame, type FrameContext } from "./frame-context";
 import { GroundLayer } from "./ground-layer";
 import { HeroLayer, heroHeight } from "./hero-layer";
 import { horizonLayout, type HorizonLayout } from "./horizon";
 import { MAX_SHAKE } from "./impulse";
 import { hasWebGL2 } from "./gpu/float-texture";
-import { LandformGpuLayer } from "./landform-gpu-layer";
-import { LandformLayer } from "./landform-layer";
 import { LightingLayer } from "./lighting-layer";
 import type { MapOverlay } from "./map-overlay";
 import { createOdometer, trackScroll } from "./odometer";
+import { Overworld } from "./overworld";
 import { Prefetcher } from "./prefetcher";
 import type { PlanetPoint, PlanetPose } from "./planet";
 import type { ScreenPoint } from "./projection";
 import { RollGroundLayer } from "./roll-ground-layer";
 import { DEFAULT_SCENE_OPTIONS, type RenderPath, type SceneOptions } from "./scene-options";
-import { SceneryLayer } from "./scenery-layer";
 import { SkyLayer } from "./sky-layer";
 import { dryGround } from "./lakes";
-import { VegetationLayer } from "./vegetation-layer";
 import { anchorFoot, walkableBand } from "./viewport";
-import { sinkRows, WadeLayer } from "./wade-layer";
-import { warmNextLake, WaterLayer, type Reflectable } from "./water-layer";
+import { warmNextLake } from "./water-layer";
 import { WEATHER_PRESETS } from "./weather";
-import { WeatherLayer } from "./weather-layer";
-import { scorchAt } from "./wildfire";
 import { WorldClock } from "./world-clock";
 
 const WIDTH = 320;
@@ -83,16 +78,16 @@ export class DemoScene extends Scene {
   private readonly sky = new SkyLayer();
   private readonly rollGround = new RollGroundLayer();
   private readonly ground = new GroundLayer();
-  private readonly vegetation = new VegetationLayer();
-  private readonly scenery = new SceneryLayer();
-  private landforms!: LandformLayer | LandformGpuLayer;
   private readonly renderPath: RenderPath;
-  private readonly encounter = new Encounter();
-  private readonly water = new WaterLayer();
-  private readonly wade = new WadeLayer(STORM_SEED ^ 0x3a7e);
-  private readonly weather: WeatherLayer;
-  private readonly ambient = new AmbientLayer();
+  /** Everything put away underground: what stands, grows, flows and falls on the overworld. */
+  private readonly overworld: Overworld;
   private readonly lighting = new LightingLayer();
+  /** The caves: their mouths, and the inside of whichever one the hero is in. */
+  private readonly caves = new CaveRealm();
+  /** The sky, the lip and the ground: put away once the cave has wholly replaced them. */
+  private outdoors!: DisplayGroup;
+  /** This frame's hour, before any cave dims it - what the sky is painted for. */
+  private hours!: Atmosphere;
   private readonly clock: WorldClock;
   private readonly odometer = createOdometer();
   /** Scanlines of the render target the window is showing; the rest is clipped. */
@@ -113,9 +108,9 @@ export class DemoScene extends Scene {
     super();
     this.skyFraction = options.skyFraction;
     this.renderPath = options.render;
-    this.hero = new HeroLayer({ ...dryGround(START), turn: 0 }, options.radius);
+    this.hero = new HeroLayer({ ...dryGround(START), turn: 0 }, options.radius, this.caves.blocked);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
-    this.weather = new WeatherLayer(
+    this.overworld = new Overworld(
       STORM_SEED,
       options.weather === undefined ? undefined : WEATHER_PRESETS[options.weather],
     );
@@ -127,22 +122,16 @@ export class DemoScene extends Scene {
 
     // Per-pixel layers run on the GPU where WebGL2 is there, on the CPU otherwise.
     const gpu = this.renderPath === "gpu" && hasWebGL2(this);
-    this.sky.create(this, this.layout, WIDTH);
-    this.rollGround.create(this, this.frame(), WIDTH, this.bounds, gpu);
+    this.outdoors = new DisplayGroup(this.children);
+    this.outdoors.track(() => {
+      this.sky.create(this, this.layout, WIDTH);
+      this.rollGround.create(this, this.frame(), WIDTH, this.bounds, gpu);
+    });
     this.hero.create(this, this.layout.groundTop, this.anchor);
-    this.ground.create(this, this.frame(), this.bounds);
-    this.vegetation.create(this, this.frame(), this.bounds);
-    this.scenery.create(this, this.bounds, WIDTH);
-    this.landforms = gpu ? new LandformGpuLayer() : new LandformLayer();
-    this.landforms.create(this, WIDTH, HEIGHT, heroHeight());
-    this.encounter.create(this, WIDTH, HEIGHT, dryGround(CAMPFIRE_AT));
-    // Burnt ground has no grass on it until it greens over again.
-    const fire = this.encounter.wildfire.fire;
-    this.vegetation.setBare((point) => scorchAt(fire, point) > 0.15);
-    this.water.create(this, WIDTH, HEIGHT);
-    this.wade.create(this, WIDTH, HEIGHT);
-    this.weather.create(this, WIDTH, HEIGHT, this.layout.horizonY);
-    this.ambient.create(this);
+    this.outdoors.track(() => this.ground.create(this, this.frame(), this.bounds));
+    const at = { frame: this.frame(), bounds: this.bounds, width: WIDTH, height: HEIGHT, horizonY: this.layout.horizonY };
+    this.overworld.create(this, at, gpu, CAMPFIRE_AT);
+    this.caves.create(this, this.frame(), this.bounds, { width: WIDTH, height: this.layout.groundTop });
     this.lighting.create(this, WIDTH, HEIGHT);
     this.cameras.main.fadeOut(0);
     this.built = true;
@@ -183,42 +172,53 @@ export class DemoScene extends Scene {
     this.hero.animate(worldDelta, this.clock.elapsedMs);
 
     const where = this.hero.whereabouts();
+    this.caves.step(where.at, this.clock.elapsedMs);
     const frame = this.frame(where.phase);
     const pose = where.ground;
     const ctx = this.context(frame, pose);
     trackScroll(this.odometer, where.phase, pose);
     lap?.lap("frame");
 
-    this.ground.update(ctx);
-    lap?.lap("ground");
-    this.rollGround.update(ctx, this.water.sizeScale());
-    lap?.lap("lip");
-    this.vegetation.update(ctx, this.grassPushers(ctx));
-    lap?.lap("grass");
-    this.scenery.update(ctx);
-    lap?.lap("scenery");
-    this.landforms.update(ctx, ctx.shade);
-    lap?.lap("landforms");
-    // How deep he stands is this frame's water, not the last anchor's slid by this frame's scroll.
-    this.water.prepare(ctx);
-    this.hero.wade(sinkRows(this.water.holdsWater(this.hero.footNow(), frame), where.at));
-    this.hero.update(ctx);
-    lap?.lap("hero");
-    this.encounter.update(ctx, this.hero);
-    lap?.lap("encounter");
-    this.drawWater(ctx, where.walked);
-    lap?.lap("water");
-    // After everything standing has been placed: the slices are cut round it.
-    this.landforms.arrange();
-    lap?.lap("landforms");
-    this.prefetch(ctx, where.upcoming?.pose);
-    lap?.lap("prefetch");
-    this.sky.update(where.turn, ctx.atmosphere, ctx.elapsedMs);
-    this.ambient.update(ctx, this.odometer);
-    lap?.lap("sky");
+    // Underground, the overworld goes once the cave covers half the frame, the sky once it covers all.
+    const underground = this.caves.share();
+    if (underground < 1) {
+      this.outdoors.show();
+      this.ground.update(ctx);
+      lap?.lap("ground");
+      this.rollGround.update(ctx, this.overworld.water.sizeScale());
+      lap?.lap("lip");
+    } else {
+      this.outdoors.hide();
+    }
+    this.overworld.showWhile(underground < 0.5);
+    if (underground < 0.5) {
+      this.overworld.draw(ctx, this.hero, where, this.odometer, lap);
+      this.prefetch(ctx, where.upcoming?.pose);
+      lap?.lap("prefetch");
+    } else {
+      this.drawUnderground(ctx);
+    }
+    this.caves.update(ctx, where.turn);
+    lap?.lap("caves");
+    if (underground < 1) {
+      this.sky.update(where.turn, this.hours, ctx.elapsedMs);
+      lap?.lap("sky");
+    }
     this.light(ctx);
     lap?.lap("lighting");
     this.drawMap(frame, pose, delta);
+  }
+
+  /**
+   * The hero alone in a cave. Combat is the overworld's - its slimes, spells
+   * and fires are put away with it - so his blows and casts land on nothing.
+   */
+  private drawUnderground(ctx: FrameContext): void {
+    this.hero.wade(0);
+    this.hero.update(ctx);
+    this.hero.drainStrikes();
+    this.hero.drainCasts();
+    this.profiler?.lap("hero");
   }
 
   /** Time this scene's layers, a lap each, for `?bench=1`; null stops timing. */
@@ -244,7 +244,7 @@ export class DemoScene extends Scene {
       return true;
     }
     this.holdSince ??= time;
-    if (!this.scenery.ready() && time - this.holdSince < REVEAL_CAP_MS) {
+    if (!this.overworld.scenery.ready() && time - this.holdSince < REVEAL_CAP_MS) {
       return false;
     }
     this.shown = true;
@@ -264,30 +264,14 @@ export class DemoScene extends Scene {
         ? []
         : [
             () => this.ground.prefetch(pose),
-            () => this.vegetation.prefetch(pose),
-            () => this.water.prefetchFor(ctx, pose),
-            ...this.rollGround.prefetchTasks(ctx, pose, this.water.sizeScale()),
+            () => this.overworld.vegetation.prefetch(pose),
+            () => this.overworld.water.prefetchFor(ctx, pose),
+            ...this.rollGround.prefetchTasks(ctx, pose, this.overworld.water.sizeScale()),
           ],
     );
     if (!crossed) {
       this.prefetcher.run(PREFETCH_BUDGET_MS);
     }
-  }
-
-  /** Whatever walks through the grass and bends it aside: the hero, and the slimes. */
-  private grassPushers(ctx: FrameContext): { x: number; y: number; weight?: number }[] {
-    const feet = this.encounter.slimes.reflectables().map((slime) => ({ x: slime.x, y: slime.y, weight: 0.7 }));
-    return [{ x: ctx.frame.footX, y: ctx.frame.footY }, ...feet];
-  }
-
-  /**
-   * Rain, the hero's wake, then the water both land in — so a drop or a
-   * footfall that lands this frame rings this frame.
-   */
-  private drawWater(ctx: FrameContext, walked: number): void {
-    this.weather.update(ctx, this.water);
-    this.wade.update(ctx, this.water, [{ id: "hero", foot: this.hero.footNow(), travelled: walked }]);
-    this.water.update(ctx, { hero: this.hero.reflection(), reflectables: standingOver(this.encounter) });
   }
 
   /** The lighting pass, and the camera's shake — the last things a frame does. */
@@ -306,8 +290,9 @@ export class DemoScene extends Scene {
 
   /** The one description of this frame every layer reads. */
   private context(frame: CameraFrame, pose: PlanetPose): FrameContext {
-    const sky = this.weather.weatherState(this.clock.elapsedMs);
-    const atmosphere = this.clock.atmosphere(sky.overcast);
+    const sky = this.overworld.weather.weatherState(this.clock.elapsedMs);
+    this.hours = this.clock.atmosphere(sky.overcast);
+    const atmosphere = this.caves.atmosphere(this.hours);
     return beginFrame({
       frame,
       pose,
@@ -315,7 +300,8 @@ export class DemoScene extends Scene {
       deltaMs: this.clock.deltaMs,
       atmosphere,
       wind: { strength: sky.wind, gustiness: 0.6 },
-      rain: sky.rain,
+      // No rain falls in a cave.
+      rain: this.caves.share() < 0.5 ? sky.rain : 0,
       // The lighting pass is offset by its shake margin; the sampler reads the same pixel.
       shade: cloudShade(cloudShadowsAt(this.odometer, this.clock.elapsedMs, atmosphere), MAX_SHAKE),
       width: WIDTH,
@@ -363,23 +349,16 @@ export class DemoScene extends Scene {
       return;
     }
     this.hero.setAnchor(this.anchor);
-    this.ground.layout(flat, this.bounds);
-    this.rollGround.layout(flat, this.bounds);
-    this.vegetation.layout(flat, this.bounds);
-    this.scenery.layout(this.bounds, WIDTH);
+    this.outdoors.track(() => {
+      this.ground.layout(flat, this.bounds);
+      this.rollGround.layout(flat, this.bounds);
+    });
+    this.overworld.layout(flat, this.bounds, WIDTH);
+    this.caves.layout(flat, this.bounds);
   }
 }
 
 export const GAME_SIZE = { width: WIDTH, height: HEIGHT } as const;
-
-/** Everything of the encounter's the water gives back: each slime, and the campfire's flame while it burns. */
-function standingOver(encounter: Encounter): Reflectable[] {
-  const campfire = encounter.campfire;
-  return [
-    ...encounter.slimes.reflectables().map((slime) => ({ cloud: slime.cloud, foot: { x: slime.x, y: slime.y } })),
-    ...(campfire.visible ? [{ cloud: campfire.flameCloud(), foot: campfire.foot, glow: true }] : []),
-  ];
-}
 
 /** One frame's facts for the `?map=1` instrument. */
 interface MapFrame {
