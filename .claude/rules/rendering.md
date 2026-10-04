@@ -232,7 +232,7 @@ frame is 16.7 ms; the JS half of it should stay near 8.
 | Drawing the frame | ~0.4 ms; ~20 draw calls | the engine's depth-sorted batch, up to 16 textures a call (`src/engine/`) |
 
 A change that adds a per-frame cost names it in the budget, and is measured in the running
-page — not guessed. `?bench=1&sync=1` is the measurement: a fixed route (stand, the three
+page — not guessed. `?skin=pixel&bench=1&sync=1` is the measurement: a fixed route (stand, the three
 gaits, a fight), each layer timed by the scene's own laps, frame work as p50/p95/max,
 hitches and garbage per segment (`bench.ts`, `bench-runner.ts`; `window.__bench` holds the
 result). Run it foregrounded and alone - a background tab is throttled. `window.__game`

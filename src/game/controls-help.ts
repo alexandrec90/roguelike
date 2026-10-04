@@ -11,6 +11,7 @@ import {
   DEFAULT_KEYBINDINGS,
   DIRECTIONS,
   HELP_KEYS,
+  SKIN_KEYS,
   type Command,
   type Keybindings,
   type MouseButton,
@@ -63,10 +64,16 @@ export function buttonLabel(button: MouseButton): string {
 /**
  * Every row of the reminder: movement first (each set of four direction keys
  * as one "W A S D" group), then each command in play order, then how to close
- * the reminder itself.
+ * the reminder itself - after the skin switch, the one other key that is not a
+ * game action.
  */
 export function helpRows(bindings: Keybindings = DEFAULT_KEYBINDINGS): HelpRow[] {
-  return [movementRow(bindings), ...ORDER.map((command) => commandRow(bindings, command)), helpRow()];
+  return [
+    movementRow(bindings),
+    ...ORDER.map((command) => commandRow(bindings, command)),
+    { label: "Switch the look (skin)", inputs: SKIN_KEYS.map(keyLabel) },
+    helpRow(),
+  ];
 }
 
 /**

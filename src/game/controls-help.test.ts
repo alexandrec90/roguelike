@@ -23,12 +23,17 @@ describe("the controls reminder", () => {
   });
 
   it("lists every command, with its keys and buttons, then how to close it", () => {
-    expect(rows).toHaveLength(COMMANDS.length + 2);
+    expect(rows).toHaveLength(COMMANDS.length + 3);
     const fireball = rows.find((row) => row.label.includes("fireball"))!;
     expect(fireball.inputs).toEqual(["Q", "Right click"]);
     const swing = rows.find((row) => row.label.includes("Swing"))!;
     expect(swing.inputs).toEqual(["Space", "Left click"]);
     expect(rows[rows.length - 1]!.inputs).toEqual(["H", "?", "F1"]);
+  });
+
+  it("names the skin switch, which is a key but not a game action", () => {
+    const skin = rows.find((row) => row.label.includes("skin"))!;
+    expect(skin.inputs).toEqual(["F2"]);
   });
 
   it("follows the binding table, so a rebinding changes the reminder", () => {

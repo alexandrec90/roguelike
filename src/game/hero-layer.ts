@@ -30,27 +30,16 @@ import { scrollRows } from "./camera";
 import type { Strike } from "./combat";
 import {
   aimAt,
-  createControls,
-  currentAim,
-  nextHeading,
   pressButton,
   pressKey,
   releaseAll,
   releaseButton,
   releaseKey,
-  spendAttack,
-  spendCast,
-  spendFrost,
-  spendEnchant,
-  spendHeading,
-  wantsAttack,
-  wantsCast,
-  wantsFrost,
-  wantsEnchant,
   type ControlState,
 } from "./controls";
 import type { FrameContext } from "./frame-context";
-import { castEvent, swingStrike, type CastEvent } from "./hero/hero-actions";
+import type { CastEvent } from "./hero/hero-actions";
+import { HeroDriver, type Whereabouts } from "./hero/hero-driver";
 import { heroFigure } from "./hero/hero-figure";
 import { HeroLook } from "./hero/hero-look";
 import type { ShadowLight } from "./hero/hero-shadow";
@@ -59,44 +48,19 @@ import { logicalPoint } from "./integer-scale";
 import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED } from "./models";
 import { PixelSurface } from "./pixel-surface";
+import { blockedGround } from "./lakes";
 import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPoint, type PlanetPose } from "./planet";
-import {
-  advancePlayer,
-  createPlayer,
-  groundPose,
-  livePose,
-  scrollPhase,
-  upcomingAnchor,
-  type PlayerState,
-  type UpcomingAnchor,
-  type World,
-} from "./player";
+import { livePose } from "./player";
 import { RANK, rowAtFoot, TILE_WIDTH } from "./projection";
 import { MAX_STEP_MS } from "./spark-emitter";
-import { blockedGround } from "./lakes";
 import { aboveWater, waterlineReflection } from "./water/wake";
 import type { WindOptions } from "./wind";
+
+export type { Whereabouts } from "./hero/hero-driver";
 
 export interface Foot {
   readonly x: number;
   readonly y: number;
-}
-
-/**
- * The views of the hero's pose `camera.ts` and the scene need: the pose the
- * world is sampled from (it moves a whole tile at a time), how far the world
- * has slid out from under him in tiles, the continuous heading only the
- * horizon is far enough away to show, and the anchor he is walking into.
- */
-export interface Whereabouts {
-  readonly ground: PlanetPose;
-  readonly phase: { readonly x: number; readonly y: number };
-  readonly turn: number;
-  readonly upcoming: UpcomingAnchor | undefined;
-  /** Where he actually is on the planet - what decides how deep the water round him is. */
-  readonly at: PlanetPose;
-  /** Tiles walked in all: where his footfalls are. */
-  readonly walked: number;
 }
 
 /**
@@ -120,10 +84,8 @@ const SHADOW = { width: 80, height: 18, footX: 40, footY: 6 } as const;
 const DEFAULT_SUN: ShadowLight = { light: { x: -0.6, y: -0.8 }, elevation: 0.7 };
 
 export class HeroLayer {
-  private readonly controls = createControls();
+  private readonly driver: HeroDriver;
   private readonly look = new HeroLook();
-  private player: PlayerState;
-  private world: World;
   private groundTop = 0;
   private foot: Foot = { x: 0, y: 0 };
   /** How far the ground's depths have slid this frame (`scrollRows`), in depth units. */
@@ -131,8 +93,6 @@ export class HeroLayer {
   private body!: PixelSurface;
   private shade!: PixelSurface;
   private cloud: PixelCloud = [];
-  private strikes: Strike[] = [];
-  private casts: CastEvent[] = [];
   private hits = 0;
   /** Set once a scene calls `update`; from then on `animate` leaves drawing to it. */
   private driven = false;
@@ -153,8 +113,7 @@ export class HeroLayer {
     radius: number = DEFAULT_STRAFE_RADIUS,
     blocked: (point: PlanetPoint) => boolean = blockedGround,
   ) {
-    this.player = createPlayer(start);
-    this.world = { radius, blocked };
+    this.driver = new HeroDriver(start, radius, blocked);
   }
 
   create(scene: Scene, groundTop: number, foot: Foot): void {
@@ -189,29 +148,7 @@ export class HeroLayer {
    */
   animate(delta: number, elapsedMs: number): void {
     const step = Math.min(Math.max(delta, 0), MAX_STEP_MS);
-    const tick = advancePlayer(
-      this.player,
-      {
-        heading: nextHeading(this.controls),
-        aim: currentAim(this.controls),
-        attack: wantsAttack(this.controls),
-        cast: wantsCast(this.controls),
-        frost: wantsFrost(this.controls),
-        enchant: wantsEnchant(this.controls),
-      },
-      step,
-      this.world,
-    );
-    this.player = tick.player;
-    this.spend(tick);
-    const at = scrollPhase(this.player);
-    // A blow or a spell goes where he points, not where he walks: twin-stick.
-    if (tick.struck) {
-      this.strikes.push(swingStrike(this.player.facing, at, this.player.enchanted));
-    }
-    if (tick.released) {
-      this.casts.push(castEvent(this.player.facing, at, this.player.school));
-    }
+    this.driver.step(step);
     this.lastElapsedMs = elapsedMs;
     this.lastDeltaMs = step;
     if (!this.driven) {
@@ -233,7 +170,7 @@ export class HeroLayer {
     this.draw(sun, ctx.atmosphere.shadowStrength, ctx.wind);
     // He stands, so the cloud shadow reaches him as a tint, not through the ground's pass.
     this.body.image.setTint(ctx.shade.tint(this.foot.x, this.foot.y));
-    const light = this.look.light(this.player, this.foot.x, this.foot.y, ctx.elapsedMs);
+    const light = this.look.light(this.driver.player, this.foot.x, this.foot.y, ctx.elapsedMs);
     if (light !== undefined) {
       ctx.lights.push(light);
     }
@@ -241,16 +178,12 @@ export class HeroLayer {
 
   /** Blows landed at the swing's contact beat since the last call, local tiles. */
   drainStrikes(): Strike[] {
-    const strikes = this.strikes;
-    this.strikes = [];
-    return strikes;
+    return this.driver.drainStrikes();
   }
 
   /** Spells released at the cast's release beat since the last call. */
   drainCasts(): CastEvent[] {
-    const casts = this.casts;
-    this.casts = [];
-    return casts;
+    return this.driver.drainCasts();
   }
 
   /**
@@ -260,7 +193,7 @@ export class HeroLayer {
    */
   reportHit(): void {
     this.hits += 1;
-    this.look.hit(this.player.enchanted);
+    this.look.hit(this.driver.player.enchanted);
   }
 
   /** How many hits have been reported — a counter a scene or a test can diff. */
@@ -269,20 +202,12 @@ export class HeroLayer {
   }
 
   isEnchanted(): boolean {
-    return this.player.enchanted;
+    return this.driver.player.enchanted;
   }
 
   /** Where the world has got to under him: the views of the pose the scene hands on. */
   whereabouts(): Whereabouts {
-    const live = livePose(this.player, this.world.radius);
-    return {
-      ground: groundPose(this.player),
-      phase: scrollPhase(this.player),
-      turn: live.turn,
-      upcoming: upcomingAnchor(this.player, this.world.radius),
-      at: live,
-      walked: this.player.walked,
-    };
+    return this.driver.whereabouts();
   }
 
   /**
@@ -312,12 +237,13 @@ export class HeroLayer {
     readonly progress: number;
     readonly radius: number;
   } {
+    const radius = this.driver.world.radius;
     return {
-      live: livePose(this.player, this.world.radius),
-      gait: this.player.gait,
+      live: livePose(this.driver.player, radius),
+      gait: this.driver.player.gait,
       // How far into the tile he is walking out of: the anchor moves at 1.
-      progress: Math.max(Math.abs(this.player.offset.x), Math.abs(this.player.offset.y)),
-      radius: this.world.radius,
+      progress: Math.max(Math.abs(this.driver.player.offset.x), Math.abs(this.driver.player.offset.y)),
+      radius,
     };
   }
 
@@ -331,25 +257,9 @@ export class HeroLayer {
     return this.foot;
   }
 
-  private spend(tick: ReturnType<typeof advancePlayer>): void {
-    if (tick.attacked) {
-      spendAttack(this.controls);
-    }
-    if (tick.cast) {
-      spendCast(this.controls);
-      spendFrost(this.controls);
-    }
-    if (tick.toggled) {
-      spendEnchant(this.controls);
-    }
-    if (tick.usedHeading) {
-      spendHeading(this.controls);
-    }
-  }
-
   private draw(sun: ShadowLight, shadowStrength: number, wind: WindOptions | undefined): void {
     const frame = this.look.frame({
-      player: this.player,
+      player: this.driver.player,
       elapsedMs: this.lastElapsedMs,
       deltaMs: this.lastDeltaMs,
       sun,
@@ -387,12 +297,12 @@ export class HeroLayer {
    */
   private bindInput(scene: Scene): void {
     scene.input.keyboard.on("keydown", (event: KeyboardEvent) => {
-      if (pressKey(this.controls, event.code)) {
+      if (pressKey(this.driver.controls, event.code)) {
         event.preventDefault();
       }
     });
     scene.input.keyboard.on("keyup", (event: KeyboardEvent) => {
-      if (releaseKey(this.controls, event.code)) {
+      if (releaseKey(this.driver.controls, event.code)) {
         event.preventDefault();
       }
     });
@@ -402,18 +312,18 @@ export class HeroLayer {
     // Aim is taken from his chest, not his feet, so the cursor on his body is on centre.
     const chest = (): Foot => ({ x: this.foot.x, y: this.foot.y - this.chestHeight });
     scene.input.on("pointermove", (pointer: Pointer) => {
-      aimFrom(this.controls, pointer, scene, chest());
+      aimFrom(this.driver.controls, pointer, scene, chest());
     });
     scene.input.on("pointerdown", (pointer: Pointer) => {
-      aimFrom(this.controls, pointer, scene, chest());
-      pressButton(this.controls, mouseButtonOf(pointer.button));
+      aimFrom(this.driver.controls, pointer, scene, chest());
+      pressButton(this.driver.controls, mouseButtonOf(pointer.button));
     });
     scene.input.on("pointerup", (pointer: Pointer) => {
-      releaseButton(this.controls, mouseButtonOf(pointer.button));
+      releaseButton(this.driver.controls, mouseButtonOf(pointer.button));
     });
 
     // A key released while the tab is in the background never sends its keyup.
-    scene.game.on("blur", () => releaseAll(this.controls));
+    scene.game.on("blur", () => releaseAll(this.driver.controls));
   }
 
 }

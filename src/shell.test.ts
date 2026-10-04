@@ -12,7 +12,11 @@ import { describe, expect, it } from "vitest";
 const root = resolve(import.meta.dirname, "..");
 const html = readFileSync(resolve(root, "index.html"), "utf8");
 const css = readFileSync(resolve(root, "src/style.css"), "utf8");
-const main = readFileSync(resolve(root, "src/main.ts"), "utf8");
+// The page entry only picks a skin; each skin mounts the canvas its own way.
+// The pixel skin carries the integer-scale contract, so its mount is what the
+// cover assertions read.
+const main = readFileSync(resolve(root, "src/skins/pixel.ts"), "utf8");
+const lowpoly = readFileSync(resolve(root, "src/skins/lowpoly/index.ts"), "utf8");
 const scene = readFileSync(resolve(root, "src/game/demo-scene.ts"), "utf8");
 
 /** The block of a CSS rule, so a property is matched against its own selector. */
@@ -73,6 +77,7 @@ describe("the page shell", () => {
     // hidden. Both are DOM over the canvas, never pixels in the world.
     const overlay = readFileSync(resolve(root, "src/game/help-overlay.ts"), "utf8");
     expect(main).toContain("HelpOverlay.attach(");
+    expect(lowpoly).toContain("HelpOverlay.attach(");
     expect(overlay).toContain("this.panel.hidden = true");
     expect(overlay).toContain("help-hint--faded");
     expect(ruleBody(css, ".help-hint--faded")).toContain("opacity: 0");
