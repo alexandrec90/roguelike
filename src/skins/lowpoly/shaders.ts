@@ -16,6 +16,7 @@
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
 import { Kind } from "./mesh";
+import { WATER_GLSL } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
 
@@ -33,10 +34,13 @@ uniform vec4 u_view;     // logical width, height, foot x, foot y
 uniform vec4 u_roll;     // ground top, roll height, knee, atan(ROLL_ROWS / knee)
 uniform vec2 u_depth;    // nearest and farthest depth key
 uniform vec2 u_shake;    // logical pixels
+uniform vec2 u_hero;     // the hero's planet point
+uniform float u_mirror;  // 1, or -1 to draw the world reflected in still water at z = 0
 
 out vec4 v_colour;
 out vec3 v_normal;
 out float v_rows;
+out vec2 v_planet;
 flat out int v_kind;
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
@@ -86,7 +90,7 @@ void main() {
     ground = groundTop - u_roll.y * lift + sink * scale;
   }
   float x = u_view.z + (foot.x + off.x) * TILE_WIDTH * scale + u_shake.x;
-  float y = ground - (off.y * TILE_DEPTH + a_pos.z * WALL_RISE) * scale + u_shake.y;
+  float y = ground - (off.y * TILE_DEPTH + a_pos.z * u_mirror * WALL_RISE) * scale + u_shake.y;
 
   // Things lying on the ground sit a hair behind anything standing on the same row.
   float bias = kind == ${Kind.ground} ? 0.06 : (kind == ${Kind.shadow} ? 0.04 : (kind == ${Kind.water} ? 0.03 : 0.0));
@@ -97,6 +101,7 @@ void main() {
   v_colour = a_colour;
   v_normal = vec3(turned(a_normal.xy), a_normal.z);
   v_rows = rows;
+  v_planet = a_pos.xy + u_offset + u_hero;
   v_kind = kind;
 }
 `;
@@ -107,32 +112,52 @@ precision highp float;
 in vec4 v_colour;
 in vec3 v_normal;
 in float v_rows;
+in vec2 v_planet;
 flat in int v_kind;
 
 uniform vec3 u_lightDir;  // toward the light, local frame
 uniform vec3 u_ambient;   // the hour's colour, multiplied over everything lit
 uniform vec3 u_haze;      // the air at the far edge of the world
 uniform vec3 u_shading;   // sun strength, shadow strength, daylight
+uniform float u_mirror;   // -1 while drawing the reflection
 
 out vec4 outColour;
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
 
+${WATER_GLSL}
+
+/** A face lit by the sun and the sky, under the hour's colour. */
+vec3 lit(vec3 colour) {
+  vec3 n = normalize(v_normal);
+  float lambert = max(dot(n, u_lightDir), 0.0);
+  float sky = 0.5 + 0.5 * n.z;
+  return colour * (0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x) * u_ambient;
+}
+
 void main() {
   bool lies = v_kind == ${Kind.ground} || v_kind == ${Kind.shadow} || v_kind == ${Kind.water};
-  if (lies && v_rows > ROLL_ROWS) {
+  // The reflection is of what stands; the ground it would lie on is the water itself.
+  if (lies && (v_rows > ROLL_ROWS || u_mirror < 0.0)) {
     discard;
   }
   vec3 colour = v_colour.rgb;
   float alpha = v_colour.a;
+  float wet = u_water.y;
   if (v_kind == ${Kind.shadow}) {
     alpha *= u_shading.y;
+  } else if (v_kind == ${Kind.water}) {
+    colour = waterColour(v_planet, lit(colour) * 0.6, u_lightDir);
+    alpha = 0.94;
+  } else if (v_kind == ${Kind.ground}) {
+    // Soaked ground is darker; standing water is a mirror over it, with a damp rim.
+    vec3 ground = lit(colour) * (1.0 - 0.18 * wet);
+    float depth = puddleAt(v_planet);
+    float rim = smoothstep(-0.03, 0.0, depth);
+    ground *= 1.0 - 0.22 * rim;
+    colour = depth > 0.0 ? mix(ground, waterColour(v_planet, ground * 0.7, u_lightDir), smoothstep(0.0, 0.012, depth)) : ground;
   } else if (v_kind != ${Kind.glow}) {
-    vec3 n = normalize(v_normal);
-    float lambert = max(dot(n, u_lightDir), 0.0);
-    float sky = 0.5 + 0.5 * n.z;
-    colour *= 0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x;
-    colour *= u_ambient;
+    colour = lit(colour);
   }
   float far = clamp(v_rows / ROLL_ROWS, 0.0, 1.0);
   float haze = v_rows > ROLL_ROWS ? 0.82 : far * far * (3.0 - 2.0 * far) * 0.78;
