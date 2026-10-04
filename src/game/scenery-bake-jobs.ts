@@ -50,31 +50,40 @@ export function speciesSways(species: string, seed: number): boolean {
 }
 
 /**
- * Bakes jobs, keeping one live instance per body.
+ * Bakes jobs, keeping two live instances per body: one that leans, and one
+ * only ever held at rest.
  *
- * The instance is kept so a body's leans are settled one from the next, as
+ * The leaning one is kept so a body's leans are settled one from the next, as
  * `settleAt` expects: a species with state (ropes, a leaf swarm) carries it
  * across, so every job for one body must reach the same bench, in order.
+ *
+ * The rest lean and the horizon ladder are baked on the other. A spring does
+ * not come all the way back in `SETTLE_MS`, so on the leaning instance the
+ * rest picture depended on which lean was baked before it - and the ladder's
+ * full-size rung has to be that picture exactly, because a body walking off
+ * the roll swaps one for the other at the seam.
  */
 export class BakeBench {
   private readonly instances = new Map<string, SceneryInstance>();
 
   /** The job's pixels, or null for a species the catalogue does not know. */
   run(job: BakeJob): BakeResult | null {
-    const instance = this.instance(job.species, job.seed);
+    const wind = job.kind === "ladder" ? 0 : (WIND_LEVELS[job.lean] ?? 0);
+    const instance = this.instance(job.species, job.seed, wind === 0);
     if (instance === undefined) {
       return null;
     }
     if (job.kind === "ladder") {
+      settleAt(instance, 0, job.light);
       return { kind: "ladder", frames: bakeLadder(instance, job.light, job.scales) };
     }
-    const wind = instance.step === undefined ? 0 : (WIND_LEVELS[job.lean] ?? 0);
-    settleAt(instance, wind, job.light);
-    return { kind: "lean", ...bakePose(instance, job.light, wind) };
+    const held = instance.step === undefined ? 0 : wind;
+    settleAt(instance, held, job.light);
+    return { kind: "lean", ...bakePose(instance, job.light, held) };
   }
 
-  private instance(species: string, seed: number): SceneryInstance | undefined {
-    const id = `${species}:${seed}`;
+  private instance(species: string, seed: number, atRest: boolean): SceneryInstance | undefined {
+    const id = `${species}:${seed}${atRest ? ":rest" : ""}`;
     let instance = this.instances.get(id);
     if (instance === undefined) {
       instance = findSpecies(species)?.create(seed);

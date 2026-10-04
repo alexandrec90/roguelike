@@ -239,6 +239,20 @@ export function rollPlacement(
   };
 }
 
+/**
+ * How far into the flat field a foot at scanline `footY` stands: 0 at the
+ * seam and anywhere on the roll, rising to 1 one row in.
+ *
+ * What a body does only on the field - lean with the wind, cast a shadow - is
+ * scaled by this, so it has faded out by the time the body reaches the roll.
+ * A body there is drawn from its horizon ladder, upright and shadowless, and
+ * without the fade it would snap between the two pictures on the frame it
+ * crossed the seam.
+ */
+export function fieldDepth(footY: number, groundTop: number): number {
+  return Math.min(Math.max((footY - groundTop) / TILE_DEPTH, 0), 1);
+}
+
 export interface HorizonLayout {
   /** Logical height of the whole render target. */
   readonly height: number;

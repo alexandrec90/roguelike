@@ -134,14 +134,22 @@ class MushroomRing implements SceneryInstance {
         cloud.push(pixel);
       }
     }
-    if (!this.fairy) {
-      this.flecks(cloud);
+    for (const pixel of this.overlay()) {
+      cloud.push(pixel);
     }
     return cloud;
   }
 
-  /** The white flecks of a fly agaric: two or three, on the upper cap. */
-  private flecks(cloud: PixelCloud): void {
+  /**
+   * The white flecks of a fly agaric: two or three, on the upper cap. Single
+   * pixels over the volume rather than part of it, so they are the overlay -
+   * and so the horizon's re-sampled ring has them too.
+   */
+  overlay(): PixelCloud {
+    const cloud: PixelCloud = [];
+    if (this.fairy) {
+      return cloud;
+    }
     this.caps.forEach((cap, index) => {
       const capY = Math.round(cap.y - cap.stem - cap.radius * 0.2);
       const count = 2 + Math.floor(pixelHash(index, 3, this.seed, 11) * 2);
@@ -151,6 +159,7 @@ class MushroomRing implements SceneryInstance {
         cloud.push({ x: cap.x + dx, y: capY + dy, ink: "petal-2" });
       }
     });
+    return cloud;
   }
 }
 
