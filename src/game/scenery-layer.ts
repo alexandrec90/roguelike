@@ -30,7 +30,7 @@
  */
 
 import type { Image, Scene } from "../engine";
-import { localPlacement, localReach, localRow, type LocalBounds } from "./camera";
+import { groundRow, localPlacement, localReach, type LocalBounds } from "./camera";
 import type { FrameContext } from "./frame-context";
 import { rowsToSink } from "./horizon";
 import { toLocal, type PlanetPose } from "./planet";
@@ -122,7 +122,9 @@ export class SceneryLayer {
     // The affine row, even on the roll: it keeps decreasing with distance where
     // the roll's few scanlines would tie, so far bodies still sort - among
     // themselves and with the landforms, which take their depth the same way.
-    const row = Math.round(localRow(ctx.frame, local));
+    // Slid with the grass rather than rounded after the scroll, or the tufts at
+    // a boulder's foot blink over and under it as the hero walks (`groundRow`).
+    const row = groundRow(ctx.frame, local);
 
     if (placed.scale < 0.999) {
       const far = this.cache.scaled(feature, placed.scale);

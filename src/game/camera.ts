@@ -183,9 +183,37 @@ export function localOrigin(frame: CameraFrame, local: LocalPoint): ScreenPoint 
  * Fractional because the scroll leaves things between rows, and the scene sorts
  * on `row * TILE_WIDTH + rank`: a tree half a row nearer than a rock has to sort
  * in front of it during the half-step where that is true, not snap past it.
+ * A layer setting a depth wants `groundRow`, which keeps that true *and* keeps
+ * everything on the ground in one order while it scrolls.
  */
 export function localRow(frame: CameraFrame, local: LocalPoint): number {
   return rowAtFoot(localFoot(frame, local).y, frame.groundTop);
+}
+
+/** The scroll down the screen, in rows: `scrollOffset`'s whole pixels, so it slides what that slides. */
+export function scrollRows(frame: CameraFrame): number {
+  return Math.round(frame.phaseY * TILE_DEPTH) / TILE_DEPTH;
+}
+
+/** The whole row a local point sorts on before the scroll: `localRow` on the zero-phase grid, rounded there. */
+export function latticeRow(frame: CameraFrame, local: LocalPoint): number {
+  return Math.round(rowAtFoot(Math.round(frame.footY - local.y * TILE_DEPTH), frame.groundTop));
+}
+
+/**
+ * The row a thing on the ground sorts on: its lattice row, slid by the scroll.
+ *
+ * Everything on the ground scrolls as one rigid picture, so its order among
+ * itself must not change while the picture slides - only its order against
+ * the hero, who stays put. Rounding `localRow` after the scroll broke that: a
+ * boulder's row and the grass row at its foot rounded at different points in
+ * the stride, and the tufts blinked over and under it as the hero walked. So
+ * the row is rounded on the zero-phase grid, and the slide is added after,
+ * whole and the same for every layer. The grass sorts by the same pair
+ * (`vegetation-layer.ts`).
+ */
+export function groundRow(frame: CameraFrame, local: LocalPoint): number {
+  return latticeRow(frame, local) + scrollRows(frame);
 }
 
 /**

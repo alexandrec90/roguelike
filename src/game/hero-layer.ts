@@ -26,6 +26,7 @@
  */
 
 import type { Pointer, Scene } from "../engine";
+import { scrollRows } from "./camera";
 import type { Strike } from "./combat";
 import {
   aimAt,
@@ -120,6 +121,8 @@ export class HeroLayer {
   private world: World;
   private groundTop = 0;
   private foot: Foot = { x: 0, y: 0 };
+  /** How far the ground's depths have slid this frame (`scrollRows`), in depth units. */
+  private slid = 0;
   private body!: PixelSurface;
   private shade!: PixelSurface;
   private cloud: PixelCloud = [];
@@ -209,6 +212,7 @@ export class HeroLayer {
     this.driven = true;
     this.lastElapsedMs = ctx.elapsedMs;
     this.lastDeltaMs = ctx.deltaMs;
+    this.slid = scrollRows(ctx.frame) * TILE_WIDTH;
     const sun: ShadowLight = { light: ctx.atmosphere.light, elevation: ctx.atmosphere.elevation };
     this.draw(sun, ctx.atmosphere.shadowStrength, ctx.wind);
     // He stands, so the cloud shadow reaches him as a tint, not through the ground's pass.
@@ -331,7 +335,10 @@ export class HeroLayer {
     this.body.image.setDepth(row * TILE_WIDTH + RANK.actor);
     this.shade.image.setPosition(this.foot.x - SHADOW.footX, this.foot.y - SHADOW.footY);
     // Over the grass of his own row, not under it: a shadow darkens the blades it falls on.
-    this.shade.image.setDepth(row * TILE_WIDTH + RANK.grass + 0.5);
+    // The grass slides in depth with the scroll (`groundRow`), so the shadow follows it -
+    // never past his own body, though: once that row has slid over him, it is over both.
+    const ground = row * TILE_WIDTH + RANK.grass + 0.5 + this.slid;
+    this.shade.image.setDepth(Math.min(ground, row * TILE_WIDTH + RANK.actor - 0.5));
   }
 
   /**
