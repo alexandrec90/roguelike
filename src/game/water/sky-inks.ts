@@ -134,6 +134,18 @@ export function pairInk(pair: InkPair, x: number, y: number): InkId {
 export interface SkyReflection {
   /** The reflection from the far edge (index 0) to the near edge (last). */
   readonly rows: readonly InkPair[];
+  /**
+   * The same reflection over deep water, far to near: the sky still, but no
+   * mud under it - the dark of the water itself, which is what tells a player
+   * where the lake stops being wadeable.
+   */
+  readonly deep: readonly InkPair[];
+  /**
+   * A lake's shallows, far to near: the sky over a pale shelf the eye sees the
+   * bottom of, where a puddle's near edge goes to mud. Paler than the deep
+   * water at every row, so the drop-off reads all the way round.
+   */
+  readonly shelf: readonly InkPair[];
   /** The brightest thing on the water: the sun or moon's glint. */
   readonly glint: InkId;
   /** A rain ring: brighter than the water it breaks, dimmer than a glint. */
@@ -149,6 +161,10 @@ export const REFLECTION_BANDS = 8;
 const MUD_TINT = INK_COLORS["water-1"];
 const GLINT_WHITE = INK_COLORS.foam;
 const WATER_TINT = INK_COLORS["water-3"];
+/** What deep water darkens its reflection toward: the lake's own body, seen into. */
+const DEEP_TINT = INK_COLORS["water-1"];
+/** What a lake's shallows show through: a pale shelf of sand and weed. */
+const SHELF_TINT = INK_COLORS["water-4"];
 
 /**
  * A sky colour divided by the ambient light, so that after the scene's
@@ -177,6 +193,8 @@ export function skyReflection(
   atmosphere: Pick<Atmosphere, "skyTop" | "skyHorizon" | "daylight"> & { readonly ambient?: string | undefined },
 ): SkyReflection {
   const rows: InkPair[] = [];
+  const deep: InkPair[] = [];
+  const shelf: InkPair[] = [];
   const skyTop = undoAmbient(atmosphere.skyTop, atmosphere.ambient);
   const skyHorizon = undoAmbient(atmosphere.skyHorizon, atmosphere.ambient);
   for (let band = 0; band < REFLECTION_BANDS; band += 1) {
@@ -188,12 +206,18 @@ export function skyReflection(
     // a puddle, which is what stops it reading as a flat stone.
     const tinted = mixHex(sky, WATER_TINT, 0.3);
     rows.push(inkPair(mixHex(tinted, MUD_TINT, 0.15 + 0.55 * t)));
+    // Deep water has no bottom to show: the near edge looks down into the
+    // lake's own dark instead of onto mud, and the far edge still skips the sky.
+    deep.push(inkPair(mixHex(tinted, DEEP_TINT, 0.5 + 0.25 * t)));
+    shelf.push(inkPair(mixHex(tinted, SHELF_TINT, 0.3 + 0.25 * t)));
   }
   const glintHex = mixHex(skyHorizon, GLINT_WHITE, 0.3 + 0.35 * atmosphere.daylight);
   const middle = mixHex(mixHex(skyHorizon, skyTop, 0.5), WATER_TINT, 0.3);
   const ringHex = mixHex(middle, GLINT_WHITE, 0.15 + 0.15 * atmosphere.daylight);
   return {
     rows,
+    deep,
+    shelf,
     glint: nearestInk(glintHex),
     ring: nearestInk(ringHex),
     // The far bank, mirrored: the dark underside of the grass beyond the water.
@@ -215,6 +239,7 @@ export function skyKey(atmosphere: Pick<Atmosphere, "hours" | "overcast">): stri
  * same pixels, so a body is only re-baked when the water would look different.
  */
 export function reflectionKey(sky: SkyReflection): string {
-  const rows = sky.rows.map((pair) => `${pair.a}/${pair.b}/${Math.round(pair.t * 16)}`);
-  return `${rows.join(",")}|${sky.glint}|${sky.ring}|${sky.lip}`;
+  const key = (pair: InkPair): string => `${pair.a}/${pair.b}/${Math.round(pair.t * 16)}`;
+  const ramps = [sky.rows, sky.deep, sky.shelf].map((pairs) => pairs.map(key).join(","));
+  return `${ramps.join("|")}|${sky.glint}|${sky.ring}|${sky.lip}`;
 }

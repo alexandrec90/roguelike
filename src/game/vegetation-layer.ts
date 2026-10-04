@@ -51,6 +51,7 @@ import {
   type WindGrid,
 } from "./ground/tuft-placement";
 import { bendFrame, BEND_FRAMES, FLAT_LEFT, FLAT_RIGHT, TUFT_FRAME, TUFT_SHAPES, tuftBuffers, tuftFrame } from "./ground/tufts";
+import { LAKE_MAX_REACH, LAKE_SPREAD, lakesNear } from "./lakes";
 import { installStrip } from "./pixel-surface";
 import { toLocal, type PlanetPoint, type PlanetPose } from "./planet";
 import { RANK, rootedDepth, TILE_DEPTH, TILE_WIDTH, type ScreenPoint } from "./projection";
@@ -244,16 +245,23 @@ export class VegetationLayer {
     }
   }
 
-  /** The puddles on screen, in grid pixels - grass does not root in water. */
+  /** The puddles and lakes on screen, in grid pixels - grass does not root in water. */
   private waterPatches(pose: PlanetPose): WaterPatch[] {
     const flat = this.flat;
     if (flat === undefined) {
       return [];
     }
-    return puddlesNear(pose, localReach(this.bounds)).map((site) => {
+    const reach = localReach(this.bounds);
+    const at = (site: PlanetPoint): { x: number; y: number } => {
       const foot = localFoot(flat, toLocal(pose, site));
-      return { x: foot.x - this.origin.x, y: foot.y - this.origin.y, radius: site.size };
-    });
+      return { x: foot.x - this.origin.x, y: foot.y - this.origin.y };
+    };
+    const lakes = lakesNear(pose, reach + LAKE_MAX_REACH).map((lake) => ({
+      ...at(lake),
+      radius: lake.size,
+      outline: { seed: lake.seed, spread: LAKE_SPREAD },
+    }));
+    return [...lakes, ...puddlesNear(pose, reach).map((site) => ({ ...at(site), radius: site.size }))];
   }
 
   /** This frame's wind at every grid node. */

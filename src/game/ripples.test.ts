@@ -63,6 +63,17 @@ describe("rippleCloud", () => {
     lifeMs: RIPPLE_LIFE_MS,
   });
 
+  it("opens a footstep's ring as wide as it was spawned, a drop's to the default", () => {
+    const field = createRippleField(2);
+    spawnRipple(field, 0, 0);
+    spawnRipple(field, 0, 0, 1000, 10);
+    stepRipples(field, 890);
+    const widths = field.ripples.map((ripple) => Math.max(...rippleCloud(ripple).map((pixel) => pixel.x)));
+    expect(widths[0]).toBe(RIPPLE_MAX_RADIUS);
+    expect(widths[1]).toBe(10);
+    expect(field.ripples[1]?.lifeMs).toBe(1000);
+  });
+
   it("draws nothing for an idle slot", () => {
     expect(rippleCloud({ active: false, x: 0, y: 0, ageMs: 0, lifeMs: RIPPLE_LIFE_MS })).toEqual([]);
     expect(rippleAlpha({ active: false, x: 0, y: 0, ageMs: 0, lifeMs: RIPPLE_LIFE_MS })).toBe(0);

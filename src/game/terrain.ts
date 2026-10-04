@@ -22,6 +22,9 @@
  * | path      | two octaves; the contour at 0.5 is trodden dirt, and meanders |
  * | features  | a jittered lattice of point things - trees, puddles           |
  *
+ * Lakes are point things too, but big ones on a coarse lattice of their own
+ * (`lakes.ts`); nothing here grows in or beside one.
+ *
  * The ground is flat. It used to stand up in blocks wherever an elevation field
  * crossed a threshold, which put a grid on a planet that has none; anything
  * with height is now a landform (`landforms.ts`), a shape at a planet point, and
@@ -33,6 +36,7 @@
  * than snapped to the grid, which is exactly why it may be.
  */
 
+import { nearLake } from "./lakes";
 import { blockedByLand } from "./landforms";
 import { PLANET_TILES, wrapTile, type PlanetPoint } from "./planet";
 
@@ -158,6 +162,9 @@ export function featuresNear(centre: PlanetPoint, reach: number, spec: FeatureSp
   return found;
 }
 
+/** How far from a lake's water a point feature keeps, tiles: a trunk or a puddle's rim, clear of the shore. */
+const FEATURE_BANK = 0.75;
+
 /** The feature one planet cell holds, if any: its hash, its jitter, and the ground it would stand on. */
 function featureIn(cellX: number, cellY: number, spec: FeatureSpec): Feature | undefined {
   if (hashUnit(cellX, cellY, spec.seed) >= spec.density) {
@@ -167,7 +174,7 @@ function featureIn(cellX: number, cellY: number, spec: FeatureSpec): Feature | u
     x: wrapTile(cellX + hashUnit(cellX, cellY, spec.seed ^ 0x11)),
     y: wrapTile(cellY + hashUnit(cellX, cellY, spec.seed ^ 0x22)),
   };
-  if (!spec.grows(terrainAt(point)) || blockedByLand(point)) {
+  if (!spec.grows(terrainAt(point)) || blockedByLand(point) || nearLake(point, FEATURE_BANK)) {
     return undefined;
   }
   const shape = hashUnit(cellX, cellY, spec.seed ^ 0x33);

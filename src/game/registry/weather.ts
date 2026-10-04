@@ -8,7 +8,7 @@
 import { AUTHORED, type AssetEntry, type PaletteVariant } from "../asset-types";
 import { INK_TOKENS, type InkId } from "../ink";
 import type { PixelSpriteSource } from "../pixel-art";
-import { sampleBoltFrames, sampleRainFrames, sampleSplashFrames, sampleWaterScene } from "../water/lab";
+import { sampleBoltFrames, sampleLakeScene, sampleRainFrames, sampleSplashFrames, sampleWaterScene } from "../water/lab";
 
 /**
  * A palette swap on `ink` — or, if some frame never uses that ink, on the
@@ -41,6 +41,22 @@ function puddleAt(id: string, label: string, hours: number): AssetEntry {
   };
 }
 
+function lakeAt(id: string, label: string, hours: number): AssetEntry {
+  const frames = sampleLakeScene(hours, 8);
+  return {
+    id,
+    label,
+    category: "prop",
+    frames,
+    frameDurationMs: 140,
+    notes:
+      "A lake: the puddle's mechanism at lake size, round on the ground and with a ragged shore. " +
+      "The dark core is deep water nothing can wade into; the hero stands in the shallows sunk " +
+      "to the shins, reflected about the waterline, a footstep's ring and spray round him.",
+    variants: [AUTHORED, swap(frames, "water-1", "bog", "Bog", "#2b3a1c")],
+  };
+}
+
 const RAIN = sampleRainFrames(10);
 const SPLASH = sampleSplashFrames(6);
 const BOLT = sampleBoltFrames(6);
@@ -50,6 +66,8 @@ export const WEATHER_ASSETS: readonly AssetEntry[] = [
   puddleAt("puddle-noon", "Puddle — noon", 13),
   puddleAt("puddle-dusk", "Puddle — dusk", 18.6),
   puddleAt("puddle-night", "Puddle — night", 23),
+  lakeAt("lake-noon", "Lake — noon, wading", 13),
+  lakeAt("lake-dusk", "Lake — dusk, wading", 18.6),
   {
     id: "rain-sheets",
     label: "Rain — three sheets",

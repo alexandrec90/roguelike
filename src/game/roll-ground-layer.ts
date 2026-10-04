@@ -309,7 +309,7 @@ export class RollGroundLayer {
     const around = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
     const reach = Math.ceil(Math.hypot((maxX - minX) / 2, (maxY - minY) / 2)) + 1;
     return growPuddles(flat, pose, reach, scale, {
-      keep: (local) => puddleOnLip(flat, this.width, local),
+      keep: (local, extent) => puddleOnLip(flat, this.width, local, extent),
       around,
     });
   }

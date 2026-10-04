@@ -220,7 +220,7 @@ frame is 16.7 ms; the JS half of it should stay near 8.
 | Horizon lip (CPU, `?render=cpu`) | ~2.2 ms | one surface; the lattice read on demand, and never under a far pixel (far looks, counted once at load - tens of ms - and one hash a far pixel); tufts kept in an overlay an anchor, only the swaying rows re-stamped |
 | Landforms (GPU) | ~1–2 ms CPU walking beside a mountain; nothing idle | the march in five shader passes (below); the CPU only schedules and places slices, measuring only what sorts between them |
 | Landforms (CPU, `?render=cpu`) | ~0.1 ms in open land; ~5 ms median beside a mountain | a planet-fixed grid per landform, built once; the march visits only the columns each covers; far views kept between strides; one atlas upload of only the rows in use |
-| Water | ~0.5 ms | the surface cleared, painted and uploaded only over the rows the puddles span |
+| Water | ~0.5 ms; ~2.5 ms on a crossing by a lake | the surface cleared, painted and uploaded only over the rows the puddles span; a lake's outline and body plan made once, behind the opening fade (`warmNextLake`), so a crossing or a change of light only re-inks it (`water/body-plan.ts`) and the lip looks its texels up per body rather than copying them |
 | Next anchor, ahead | ≤ 2.5 ms a frame after the first task; tasks of ≤ ~1 ms | `Prefetcher` tasks, never on the frame that crossed |
 | Each actor | ≤ 0.5 ms | small surfaces, caches keyed by quantised pose |
 | Lighting | ~0.1 ms | one render target, a stamp per light |

@@ -32,11 +32,15 @@ import { cloudToSprite, type CloudFrame } from "./ink";
 import type { PixelSpriteSource } from "./pixel-art";
 import { quantizedWave } from "./pixel-art";
 import { atmosphereAt } from "./atmosphere";
-import { DEPTH_RATIO } from "./projection";
+import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import { pixelHash } from "./transforms";
 import { puddleBody } from "./water/body";
+import { EDGE_GAIN, PUDDLE_SPREAD, traceOutline, type WaterOffset } from "./water/outline";
 import { reflectionCloud } from "./water/reflect";
 import { skyReflection, type SkyReflection } from "./water/sky-inks";
+
+// The outline is traced in `water/outline.ts`; these are re-exported so a puddle's callers need one import.
+export { outlineExtent, outlineHolds, PUDDLE_SPREAD, type WaterOffset } from "./water/outline";
 
 export interface PuddleOptions {
   readonly id: string;
@@ -46,6 +50,20 @@ export interface PuddleOptions {
   /** Half-width in logical pixels; the depth half-axis is foreshortened from it. */
   readonly radius: number;
   readonly seed: number;
+  /** How deep it is compared to how wide, in the world; `PUDDLE_SPREAD` if left out. */
+  readonly spread?: number;
+  /**
+   * Half-width in logical pixels of a deep core - a disc on the ground, so a
+   * foreshortened ellipse here - drawn darker; 0 or left out for water that is
+   * shallow all the way across. A lake's is the water nothing can wade into.
+   */
+  readonly deep?: number;
+  /**
+   * Standing water rather than a rain puddle: its shallows show a pale shelf
+   * instead of mud (`SkyReflection.shelf`), and its sky gradient is dithered
+   * band into band, since a lake is tall enough for eight bands to read as stripes.
+   */
+  readonly lake?: boolean;
 }
 
 export interface ScreenPixel {
@@ -60,106 +78,27 @@ export interface Puddle {
   readonly radiusX: number;
   readonly radiusY: number;
   readonly seed: number;
+  /** Half-axes of the deep core, logical pixels; both 0 for shallow water. */
+  readonly deepX: number;
+  readonly deepY: number;
+  /** A lake's water, not a puddle's: see `PuddleOptions.lake`. */
+  readonly lake: boolean;
   /** Every water pixel, absolute, far row first. */
   readonly water: readonly ScreenPixel[];
   /** The subset of `water` on the outline. */
   readonly rim: readonly ScreenPixel[];
-  /** Membership keys backing `puddleHolds`; see `surfaceKey`. */
-  readonly keys: ReadonlySet<number>;
-}
-
-/**
- * Screen y is never more than a few hundred, so one key per pixel packs into a
- * single number and the membership test costs no string building in the render
- * loop.
- */
-const KEY_SPAN = 4096;
-
-function surfaceKey(x: number, y: number): number {
-  return Math.round(x) * KEY_SPAN + Math.round(y);
-}
-
-/** Widest the seeded lobes can push the outline past the base ellipse. */
-const EDGE_GAIN = 1.3;
-
-/**
- * How deep a puddle is compared to how wide it is, **in the world** — before
- * the camera foreshortens it.
- *
- * Water spreads to the shallowest ground it can find, so a puddle is a broad
- * lens rather than a disc, and this is the difference between reading as water
- * lying on a field and reading as a rock seen from above. It is a separate
- * number from `DEPTH_RATIO` on purpose: that one is the camera and is not the
- * water's business to have an opinion about.
- */
-const PUDDLE_SPREAD = 0.8;
-
-/**
- * The outline's radius at one angle, as a multiple of the base ellipse.
- *
- * Two seeded harmonics, both periodic in theta, so the boundary closes on
- * itself instead of showing a seam where the angle wraps.
- */
-function edgeScale(theta: number, seed: number): number {
-  const phaseTwo = pixelHash(1, 0, seed, 21) * Math.PI * 2;
-  const phaseThree = pixelHash(2, 0, seed, 22) * Math.PI * 2;
-  return 1 + 0.17 * Math.sin(theta * 2 + phaseTwo) + 0.1 * Math.sin(theta * 3 + phaseThree);
-}
-
-/** A puddle's outline about its own centre: every water pixel, and whether it is on the rim. */
-interface PuddleShape {
-  readonly radiusY: number;
-  readonly offsets: readonly { readonly dx: number; readonly dy: number; readonly edge: boolean }[];
-}
-
-/**
- * Outlines already traced, by radius and seed. A puddle's shape does not depend
- * on where it lies, and the field re-grows every puddle in reach on every step -
- * the horizon lip several dozen of them - so tracing each outline once and
- * moving it is the difference between a step that costs a millisecond and one
- * that costs fifty.
- */
-const SHAPES = new Map<string, PuddleShape>();
-const SHAPE_LIMIT = 512;
-
-function puddleShape(radiusX: number, seed: number): PuddleShape {
-  const key = `${radiusX}:${seed}`;
-  const known = SHAPES.get(key);
-  if (known !== undefined) {
-    return known;
-  }
-  // Lying on the ground, so authored already foreshortened by the camera pitch
-  // — never drawn round and squashed at draw time. The spread is the puddle's
-  // own shape; the ratio is the camera's.
-  const radiusY = Math.max(1, Math.round(radiusX * PUDDLE_SPREAD * DEPTH_RATIO));
-
-  const inside = (dx: number, dy: number): boolean => {
-    const u = dx / radiusX;
-    const v = dy / radiusY;
-    const distance = Math.hypot(u, v);
-    if (distance === 0) {
-      return true;
-    }
-    return distance <= edgeScale(Math.atan2(v, u), seed);
-  };
-
-  const offsets: { dx: number; dy: number; edge: boolean }[] = [];
-  const spanX = Math.ceil(radiusX * EDGE_GAIN);
-  const spanY = Math.ceil(radiusY * EDGE_GAIN);
-  for (let dy = -spanY; dy <= spanY; dy += 1) {
-    for (let dx = -spanX; dx <= spanX; dx += 1) {
-      if (inside(dx, dy)) {
-        const edge = !inside(dx - 1, dy) || !inside(dx + 1, dy) || !inside(dx, dy - 1) || !inside(dx, dy + 1);
-        offsets.push({ dx, dy, edge });
-      }
-    }
-  }
-  if (SHAPES.size >= SHAPE_LIMIT) {
-    SHAPES.clear();
-  }
-  const shape = { radiusY, offsets };
-  SHAPES.set(key, shape);
-  return shape;
+  /**
+   * The same water about the centre, rim marked: the traced outline every
+   * puddle of this shape shares, so a caller that places the pixels itself -
+   * the mask, the body bake - allocates nothing per pixel.
+   */
+  readonly offsets: readonly WaterOffset[];
+  /**
+   * Whether an offset from the centre is water - what backs `puddleHolds`.
+   * Read off the grid the outline was traced into, and shared by every puddle
+   * of one outline, so a lake re-grown each step builds nothing of its own.
+   */
+  readonly inside: (dx: number, dy: number) => boolean;
 }
 
 export function createPuddle(options: PuddleOptions): Puddle {
@@ -168,34 +107,59 @@ export function createPuddle(options: PuddleOptions): Puddle {
   }
 
   const radiusX = Math.round(options.radius);
-  const { radiusY, offsets } = puddleShape(radiusX, options.seed);
-  const water: ScreenPixel[] = [];
-  const rim: ScreenPixel[] = [];
-  const keys = new Set<number>();
-  for (const { dx, dy, edge } of offsets) {
-    const pixel = { x: options.centerX + dx, y: options.centerY + dy };
-    water.push(pixel);
-    keys.add(surfaceKey(pixel.x, pixel.y));
-    if (edge) {
-      rim.push(pixel);
+  const spread = options.spread ?? PUDDLE_SPREAD;
+  const { centerX, centerY, seed } = options;
+  const { radiusY, offsets, inside } = traceOutline(radiusX, seed, spread);
+  // A disc on the ground: as wide as asked, foreshortened like a tile.
+  const deepX = Math.max(0, Math.round(options.deep ?? 0));
+  const deepY = Math.round((deepX * TILE_DEPTH) / TILE_WIDTH);
+
+  // The pixels are laid out only when asked for: the field re-grows every lake
+  // in reach each step, and most of what it does with one - membership, the
+  // mask, a cached body - reads the shared outline instead (`offsets`).
+  let water: ScreenPixel[] | undefined;
+  let rim: ScreenPixel[] | undefined;
+  const lay = (): void => {
+    water = [];
+    rim = [];
+    for (const { dx, dy, edge } of offsets) {
+      const pixel = { x: centerX + dx, y: centerY + dy };
+      water.push(pixel);
+      if (edge) {
+        rim.push(pixel);
+      }
     }
-  }
+  };
 
   return {
     id: options.id,
-    centerX: options.centerX,
-    centerY: options.centerY,
+    centerX,
+    centerY,
     radiusX,
     radiusY,
-    seed: options.seed,
-    water,
-    rim,
-    keys,
+    seed,
+    deepX,
+    deepY,
+    lake: options.lake ?? false,
+    get water(): readonly ScreenPixel[] {
+      if (water === undefined) {
+        lay();
+      }
+      return water ?? [];
+    },
+    get rim(): readonly ScreenPixel[] {
+      if (rim === undefined) {
+        lay();
+      }
+      return rim ?? [];
+    },
+    offsets,
+    inside,
   };
 }
 
 export function puddleHolds(puddle: Puddle, x: number, y: number): boolean {
-  return puddle.keys.has(surfaceKey(x, y));
+  return puddle.inside(Math.round(x) - Math.round(puddle.centerX), Math.round(y) - Math.round(puddle.centerY));
 }
 
 /** Drop everything that is not over water — the clip every water layer needs. */
@@ -218,8 +182,16 @@ export function puddleSurface(puddle: Puddle, sky: SkyReflection = NOON_SKY): Pi
   return puddleBody(puddle, sky);
 }
 
-/** How many highlights the sky lays on one puddle. */
-const GLINT_COUNT = 3;
+/**
+ * How many highlights the sky lays on water this wide: three on a puddle, and
+ * more as it widens, so a lake shimmers all over rather than in one corner.
+ */
+export function glintCount(radiusX: number): number {
+  return Math.max(3, Math.min(10, Math.round(radiusX / 8)));
+}
+
+/** The longest one glint band is drawn, logical pixels: light on a lake breaks into short runs. */
+const GLINT_MAX_LENGTH = 8;
 
 /**
  * The sky's shimmer: long horizontal bands sliding sideways at seeded rates.
@@ -235,22 +207,28 @@ const GLINT_COUNT = 3;
  */
 export function puddleGlints(puddle: Puddle, elapsedMs: number, ink: InkId = "ice"): PixelCloud {
   const cloud: PixelCloud = [];
+  const count = glintCount(puddle.radiusX);
+  // A lake's glints wander its whole width; a puddle's keep to its middle.
+  const spread = count > 3 ? 0.6 : 0.35;
 
-  for (let index = 0; index < GLINT_COUNT; index += 1) {
+  for (let index = 0; index < count; index += 1) {
     const acrossUnit = pixelHash(index, 0, puddle.seed, 31) * 2 - 1;
     const reach = 0.35 + pixelHash(index, 2, puddle.seed, 33) * 0.45;
     const periodMs = 2600 + Math.floor(pixelHash(index, 3, puddle.seed, 34) * 2200);
     const sway = quantizedWave(elapsedMs, periodMs, 2, index);
 
-    const length = Math.max(2, Math.round(puddle.radiusX * reach));
+    const longest = puddle.lake ? GLINT_MAX_LENGTH : Number.POSITIVE_INFINITY;
+    const length = Math.max(2, Math.min(longest, Math.round(puddle.radiusX * reach)));
     const startX =
       puddle.centerX +
-      Math.round(acrossUnit * puddle.radiusX * 0.35) -
+      Math.round(acrossUnit * puddle.radiusX * spread) -
       Math.floor(length / 2) +
       sway;
     // Kept to the far half and just past it: the back of the water is seen at
     // a grazing angle, and that is where the sky's light skips off it.
-    const downUnit = ((index + 0.5) / GLINT_COUNT) * 1.2 - 0.85;
+    // Evenly dealt, then nudged off the lattice on a lake, so many bands do not stack into a ladder.
+    const jitter = count > 3 ? (pixelHash(index, 4, puddle.seed, 35) - 0.5) / count : 0;
+    const downUnit = ((index + 0.5) / count + jitter) * 1.2 - 0.85;
     const y = puddle.centerY + Math.round(downUnit * puddle.radiusY * 0.8);
     // A shimmer rather than a bar: the band breathes a pixel shorter and longer.
     const breathe = quantizedWave(elapsedMs, periodMs * 0.37, 1, index * 2.1);

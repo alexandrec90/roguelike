@@ -10,7 +10,7 @@
  */
 
 import { atmosphereAt } from "../atmosphere";
-import { createPool, particleCloud, stepParticles } from "../fx/particles";
+import { createPool, emit, particleCloud, stepParticles } from "../fx/particles";
 import { cloudToSprite, type CloudFrame, type InkId, type PixelCloud } from "../ink";
 import { HERO_EQUIPPED } from "../models";
 import { familyRamp } from "../palette";
@@ -27,6 +27,7 @@ import { createRainField, rainCloud, stepRainField, type RainEnv } from "./rain"
 import { darkenInk, reflectionCloud } from "./reflect";
 import { skyReflection } from "./sky-inks";
 import { emitSplash } from "./splash";
+import { aboveWater, SPRAY_COUNT, SPRAY_SPEC, STEP_RING, waterlineReflection } from "./wake";
 
 function checkCount(count: number): void {
   if (!Number.isInteger(count) || count < 1) {
@@ -107,6 +108,50 @@ export function sampleWaterScene(hours: number, count: number): PixelSpriteSourc
       ...hero.map((pixel) => ({ x: pixel.x + foot.x, y: pixel.y + foot.y, ink: pixel.ink })),
     ];
     return cloudToSprite(cloud, WATER_SCENE_FRAME);
+  });
+}
+
+export const LAKE_SCENE_FRAME: CloudFrame = { width: 128, height: 84, originX: 64, originY: 42 };
+
+/**
+ * A lake at one hour of the day: its ragged shore, the dark deep core nothing
+ * can wade into, and the hero standing in the shallows sunk to the shins, his
+ * reflection mirrored about the waterline, with a footstep's ring opening
+ * round him and spray thrown up off it - sampled across one step.
+ */
+export function sampleLakeScene(hours: number, count: number): PixelSpriteSource[] {
+  checkCount(count);
+  const atmosphere = atmosphereAt(hours);
+  const sky = skyReflection({ ...atmosphere, ambient: undefined });
+  const lake = createPuddle({ id: "lab-lake", centerX: 0, centerY: 0, radius: 48, seed: 0x1a4e, spread: 1, deep: 24, lake: true });
+  const field = fieldPatch(LAKE_SCENE_FRAME, atmosphere.daylight);
+  const ground = [...field, ...seeThrough(field, puddleSurface(lake, sky))];
+  const sunk = 3;
+  const hero = aboveWater(renderModel(HERO_EQUIPPED, HERO_EQUIPPED.basePose), sunk);
+  const foot = { x: -14, y: 26 };
+  const mirror = waterlineReflection(hero, foot, sunk);
+  const holds = new Set(lake.water.map((pixel) => `${pixel.x},${pixel.y}`));
+  const wet = (cloud: PixelCloud): PixelCloud => cloud.filter((pixel) => holds.has(`${pixel.x},${pixel.y}`));
+
+  return Array.from({ length: count }, (_unused, index) => {
+    const elapsedMs = (index / count) * STEP_RING.lifeMs;
+    const spray = createPool(8, 0x3a7e);
+    emit(spray, SPRAY_SPEC, SPRAY_COUNT, foot.x + 2, foot.y - 1);
+    stepParticles(spray, elapsedMs);
+    const ring = rippleCloud(
+      { active: true, x: foot.x + 2, y: foot.y, ageMs: elapsedMs, lifeMs: STEP_RING.lifeMs, radius: STEP_RING.radius },
+      sky.ring,
+      sky.glint,
+    );
+    const cloud = [
+      ...ground,
+      ...puddleGlints(lake, elapsedMs * 3, sky.glint),
+      ...wet(reflectionCloud(mirror.cloud, mirror.foot.x, mirror.foot.y, elapsedMs)),
+      ...wet(ring),
+      ...hero.map((pixel) => ({ x: pixel.x + foot.x, y: pixel.y + foot.y, ink: pixel.ink })),
+      ...particleCloud(spray),
+    ];
+    return cloudToSprite(cloud, LAKE_SCENE_FRAME);
   });
 }
 
