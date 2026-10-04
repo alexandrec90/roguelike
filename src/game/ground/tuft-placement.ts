@@ -15,6 +15,7 @@
 
 import { valueNoise2 } from "../procgen/noise";
 import { TILE_DEPTH, TILE_WIDTH } from "../projection";
+import { outlineHolds } from "../puddles";
 import { pixelHash } from "../transforms";
 import { dirtOf } from "./ground-plan";
 import { cellLattice, latticeIndex, type GroundSample } from "./ground-sample";
@@ -148,7 +149,16 @@ export interface WaterPatch {
   readonly x: number;
   readonly y: number;
   readonly radius: number;
+  /**
+   * A lake's own outline, for water too big for the bounding oval: the seed
+   * and spread `createPuddle` traced it from. Grass then roots right up to
+   * the shore instead of leaving a bald ring round every cove.
+   */
+  readonly outline?: { readonly seed: number; readonly spread: number };
 }
+
+/** Pixels of bare bank kept between a lake's shore and the nearest tuft: its damp ring. */
+const SHORE_GAP = 2;
 
 /**
  * The widest a puddle of this nominal radius is ever drawn, across and deep:
@@ -164,6 +174,16 @@ const WATER_DEPTH = 0.8 * 0.75;
  */
 export function inWater(tuft: TuftPlacement, patches: readonly WaterPatch[]): boolean {
   for (const patch of patches) {
+    if (patch.outline !== undefined) {
+      const { seed, spread } = patch.outline;
+      const dx = tuft.x - patch.x;
+      const dy = tuft.y - patch.y;
+      const bound = (patch.radius + SHORE_GAP) * 1.4;
+      if (Math.abs(dx) < bound && Math.abs(dy) < bound && outlineHolds(patch.radius + SHORE_GAP, seed, dx, dy, spread)) {
+        return true;
+      }
+      continue;
+    }
     const across = patch.radius * WATER_REACH + 2;
     const deep = patch.radius * WATER_REACH * WATER_DEPTH + 1;
     const u = (tuft.x - patch.x) / across;

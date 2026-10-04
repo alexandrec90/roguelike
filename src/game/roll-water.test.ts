@@ -51,6 +51,28 @@ describe("LipWater", () => {
     expect(water.size).toBe(puddleBody(STRADDLING, NOON).length);
   });
 
+  it("inks a lake wholly out on the lip at one dither phase, and one at the seam at the field's", () => {
+    const lakeAt = (x: number, y: number) =>
+      createPuddle({ id: "lake", centerX: x, centerY: y, radius: 40, seed: 0x1a4e, spread: 1, deep: 16, lake: true });
+    /** The lake's colours about its own centre, as the lip lays them. */
+    const colours = (lake: ReturnType<typeof lakeAt>): string => {
+      const lip = new LipWater(FRAME, [lake], NOON);
+      const { gx, gy } = screenToTexel(FRAME, lake.centerX, lake.centerY);
+      const out: number[] = [];
+      for (let dy = -20; dy <= 20; dy += 3) {
+        for (let dx = -30; dx <= 30; dx += 3) {
+          const rgba = new Uint8ClampedArray(4);
+          lip.blendInto(gx + dx, gy + dy, rgba, 0);
+          out.push(rgba[0] ?? 0, rgba[1] ?? 0, rgba[2] ?? 0);
+        }
+      }
+      return out.join(",");
+    };
+    const far = FRAME.groundTop - 200;
+    expect(colours(lakeAt(10, far))).toBe(colours(lakeAt(11, far)));
+    expect(colours(lakeAt(10, FRAME.groundTop))).not.toBe(colours(lakeAt(11, FRAME.groundTop)));
+  });
+
   it("says which cells are wet, so a dry cell costs one lookup", () => {
     const { gx, gy } = screenToTexel(FRAME, STRADDLING.centerX, STRADDLING.centerY);
     expect(water.wetCell(Math.floor(gx / TILE_WIDTH), Math.floor(gy / TILE_DEPTH))).toBe(true);
@@ -136,5 +158,16 @@ describe("puddleOnLip", () => {
     const aside = { x: 8, y: seam + 0.5 };
     expect(puddleOnLip(FRAME, WIDTH, aside)).toBe(false);
     expect(puddleOnLip(FRAME, WIDTH, { ...aside, y: seam + 20 })).toBe(true);
+  });
+
+  it("takes a lake whose centre is still on the field, so its far shore is not cut at the seam", () => {
+    const lake = { x: 6, y: 6 };
+    const short = { x: 0, y: seam - 5 };
+    expect(puddleOnLip(FRAME, WIDTH, short)).toBe(false);
+    expect(puddleOnLip(FRAME, WIDTH, short, lake)).toBe(true);
+    // And one whose near shore is still short of the horizon, or whose side is in the cone.
+    expect(puddleOnLip(FRAME, WIDTH, { x: 0, y: seam + ROLL_ROWS + 5 }, lake)).toBe(true);
+    expect(puddleOnLip(FRAME, WIDTH, { x: 0, y: seam + ROLL_ROWS + 9 }, lake)).toBe(false);
+    expect(puddleOnLip(FRAME, WIDTH, { x: 9, y: seam + 0.5 }, lake)).toBe(true);
   });
 });

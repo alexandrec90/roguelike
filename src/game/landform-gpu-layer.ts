@@ -31,6 +31,7 @@ import {
   LANDFORM_PACK_SHADER,
   LANDFORM_PROBE_SHADER,
 } from "./gpu/landform-shader";
+import { heroCutaway } from "./landform-cutaway";
 import type { LandformView } from "./landform-frame";
 import {
   BLOCK_STEPS,
@@ -60,7 +61,7 @@ import { wholePixelFrame } from "./landform-layer";
 import { marchSchedule } from "./landform-march";
 import { isFarView, viewsInSight } from "./landform-render";
 import { uniqueKey } from "./pixel-surface";
-import { RANK, rowAtFoot, standingDepth } from "./projection";
+import { RANK, standingDepth } from "./projection";
 import { unlitHaze } from "./sky-paint";
 
 /** Slices made up front; the pool grows if a frame wants more. */
@@ -276,13 +277,7 @@ export class LandformGpuLayer {
     const lift = Math.min(Math.max(atmosphere.elevation, 0.1), 1);
     const across = Math.sqrt(1 - lift * lift);
     const haze = unlitHaze(atmosphere);
-    const cut = {
-      x: ctx.frame.footX,
-      y: ctx.frame.footY - this.heroHeight / 2,
-      radiusX: this.heroHeight * 0.75,
-      radiusY: this.heroHeight * 0.9,
-      row: Math.round(rowAtFoot(ctx.frame.footY, ctx.frame.groundTop)),
-    };
+    const cut = heroCutaway(frame, views, steps, ctx.pose.turn, this.heroHeight);
     const clouds = shade.params;
     return {
       u_size: [this.width, this.height],
@@ -297,10 +292,11 @@ export class LandformGpuLayer {
       u_turn: [Math.cos(ctx.pose.turn), Math.sin(ctx.pose.turn)],
       u_light: [atmosphere.light.x * across, -atmosphere.light.y * across, lift],
       u_haze: [haze.r, haze.g, haze.b],
-      u_cut: [cut.x, cut.y, cut.radiusX, cut.radiusY],
-      u_cutRow: [cut.row, 1],
+      u_cut: cut === undefined ? [0, 0, 1, 1] : [cut.x, cut.y, cut.radiusX, cut.radiusY],
+      u_cutRow: cut === undefined ? [0, 0] : [cut.row, 1],
       u_shade: clouds === undefined ? [0, 0, 0, 0] : [clouds.x, clouds.y, clouds.strength, clouds.margin],
       u_cloudSize: [CLOUD_TILE_WIDTH, CLOUD_TILE_HEIGHT],
+      u_groundTop: frame.groundTop,
       u_rowBase: base,
       "u_ramp[0]": RAMP_COLOURS,
       "u_rampSpan[0]": RAMP_SPANS,

@@ -64,6 +64,7 @@ other module; the API table below covers the calls.
 | Rain, snow, lightning, wind | an emitter or a seeded polyline | `src/game/weather.ts` |
 | Smoke, fog, a swarm, spreading fire | a field over particles — see `procedural-effects.md` | `src/game/spark-emitter.ts` |
 | A puddle, a pool, water on the ground | a seeded outline plus its surface layers | `src/game/puddles.ts` |
+| A lake or a pond — where, how deep, what it blocks | a seeded lattice of planet discs, drawn as a puddle at lake size | `src/game/lakes.ts` |
 | A ring spreading from an impact | a pooled `Ripple`, aged by a clock | `src/game/ripples.ts` |
 | Where the water and trees *are* | a seeded field over planet coordinates | `src/game/terrain.ts` |
 | A mountain, a mesa, a tower — anything tall | a height function per kind, drawn by the march | `src/game/landforms.ts` |

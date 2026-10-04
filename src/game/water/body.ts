@@ -12,64 +12,24 @@
  *    over is mirrored as a dark band. It is the cue that says "depression".
  * 3. **The sky** — the `SkyReflection` gradient from `sky-inks.ts`, horizon
  *    colour at the back, overhead colour at the front, Bayer-dithered between
- *    pairs of real inks.
+ *    pairs of real inks: over mud in a puddle, over a pale shelf in a lake's
+ *    shallows, and darker over a lake's deep core.
  * 4. **The shallow edge** — the front rim in the legacy `water` ink, which is
  *    sheer by declaration: the eye looks steeply down into the water there and
  *    sees the mud through it.
  *
  * Static for a given sky, so a layer bakes it once per pose (and again when the
- * sky has visibly moved on) rather than every frame.
+ * sky has visibly moved on) rather than every frame. How a body is worked out
+ * is `body-plan.ts`; this file is the two caches over it - plans per outline,
+ * inked bodies per sky and dither phase.
  */
 
-import type { InkId, PixelCloud } from "../ink";
-import { ditherThreshold } from "../shading";
+import type { PixelCloud } from "../ink";
 import type { Puddle } from "../puddles";
-import { pairInk, reflectionKey, REFLECTION_BANDS, type SkyReflection } from "./sky-inks";
+import { inkPlan, planBody, type BodyPlan } from "./body-plan";
+import { reflectionKey, type SkyReflection } from "./sky-inks";
 
-/** Damp ground around the water. Sheer, so it darkens the grass rather than hiding it. */
-export const WET_INK: InkId = "shadow-soft";
-
-/** The sheer front edge, where the water is shallow enough to see into. */
-export const SHALLOW_INK: InkId = "water";
-
-/** One number per pixel: a string key here was most of the cost of a body. */
-function pixelKey(x: number, y: number): number {
-  return (x + 0x8000) * 0x10000 + (y + 0x8000);
-}
-
-/** Membership over a puddle's pixels, for the neighbour tests below. */
-function holder(puddle: Puddle): (x: number, y: number) => boolean {
-  const keys = new Set(puddle.water.map((pixel) => pixelKey(pixel.x, pixel.y)));
-  return (x, y) => keys.has(pixelKey(x, y));
-}
-
-/** One and two pixels out from the water, on every side. */
-function wetRing(puddle: Puddle, holds: (x: number, y: number) => boolean): PixelCloud {
-  const cloud: PixelCloud = [];
-  const seen = new Set<number>();
-  for (const pixel of puddle.rim) {
-    for (let dy = -2; dy <= 2; dy += 1) {
-      for (let dx = -2; dx <= 2; dx += 1) {
-        const x = pixel.x + dx;
-        const y = pixel.y + dy;
-        const key = pixelKey(x, y);
-        if (seen.has(key) || holds(x, y)) {
-          continue;
-        }
-        const reach = Math.max(Math.abs(dx), Math.abs(dy));
-        const near = reach === 1 && Math.abs(dx) + Math.abs(dy) === 1;
-        // The far side's damp band is foreshortened like everything else on the
-        // ground, so it only reaches one row up the screen.
-        if (!near && (dy < -1 || ditherThreshold(x, y) > 0.4)) {
-          continue;
-        }
-        seen.add(key);
-        cloud.push({ x, y, ink: WET_INK });
-      }
-    }
-  }
-  return cloud;
-}
+export { deepShare, SHALLOW_INK, WET_INK } from "./body-plan";
 
 /**
  * Bodies already painted, about their centres, per sky. A body is a function of
@@ -120,29 +80,71 @@ const BODY_LIMIT = 1024;
 const BODY_EVICT = 256;
 
 /**
+ * Plans kept, one per outline whatever its phase or sky; the oldest go first,
+ * and one asked for again is the newest. The lip churns through hundreds of
+ * puddle outlines a walk, and a lake's plan must not be the price of that.
+ */
+const PLANS = new Map<string, BodyPlan>();
+const PLAN_LIMIT = 1024;
+
+/** What a body is without its sky or its dither phase: an outline, a core, a kind of water. */
+function outlineKey(puddle: Puddle): string {
+  return `${puddle.radiusX}:${puddle.seed}:${puddle.offsets.length}:${puddle.deepX}:${puddle.lake ? 1 : 0}`;
+}
+
+/** The plan for a puddle's outline, worked out once (`body-plan.ts`). */
+export function bodyPlan(puddle: Puddle): BodyPlan {
+  const key = outlineKey(puddle);
+  let plan = PLANS.get(key);
+  if (plan === undefined) {
+    plan = planBody(puddle);
+    if (PLANS.size >= PLAN_LIMIT) {
+      const oldest = PLANS.keys().next();
+      if (oldest.done !== true) {
+        PLANS.delete(oldest.value);
+      }
+    }
+  } else {
+    PLANS.delete(key);
+  }
+  PLANS.set(key, plan);
+  return plan;
+}
+
+/**
  * The whole still surface, absolute screen pixels, wet ring first so the water
  * paints over it.
  */
 export function puddleBody(puddle: Puddle, sky: SkyReflection): PixelCloud {
   const { centerX, centerY } = puddle;
-  if (!Number.isInteger(centerX) || !Number.isInteger(centerY)) {
-    return paintBody(puddle, sky);
-  }
-  return relativeBody(puddle, sky).map((pixel) => ({ ...pixel, x: pixel.x + centerX, y: pixel.y + centerY }));
+  const relative =
+    Number.isInteger(centerX) && Number.isInteger(centerY)
+      ? relativeBody(puddle, sky)
+      : inkPlan(bodyPlan(puddle), sky, centerX, centerY);
+  return relative.map((pixel) => ({ ...pixel, x: pixel.x + centerX, y: pixel.y + centerY }));
 }
 
 /**
  * `puddleBody` about the puddle's centre rather than on the screen - shared and
  * kept, so a caller that places it itself copies nothing. The centre must be a
  * whole pixel, as every grown puddle's is.
+ *
+ * `dither` is where on the screen's 4x4 dither the centre is taken to land - its
+ * own centre unless given. The horizon lip passes a fixed one for water wholly
+ * past the seam, where texels are resampled and no phase can be seen: a lake
+ * out there slid onto a new phase every step the world turned, and each one
+ * was a re-inking.
  */
-export function relativeBody(puddle: Puddle, sky: SkyReflection): PixelCloud {
-  const { centerX, centerY } = puddle;
+export function relativeBody(
+  puddle: Puddle,
+  sky: SkyReflection,
+  dither: { readonly x: number; readonly y: number } = { x: puddle.centerX, y: puddle.centerY },
+): PixelCloud {
   const bodies = bodiesFor(sky);
-  const key = `${puddle.radiusX}:${puddle.seed}:${centerX & 3}:${centerY & 3}:${puddle.water.length}`;
+  const key = `${outlineKey(puddle)}:${dither.x & 3}:${dither.y & 3}`;
   let relative = bodies.get(key);
   if (relative === undefined) {
-    relative = paintBody(puddle, sky).map((pixel) => ({ ...pixel, x: pixel.x - centerX, y: pixel.y - centerY }));
+    relative = inkPlan(bodyPlan(puddle), sky, dither.x, dither.y);
     if (bodies.size >= BODY_LIMIT) {
       const oldest = [...bodies.keys()].slice(0, BODY_EVICT);
       for (const stale of oldest) {
@@ -152,32 +154,4 @@ export function relativeBody(puddle: Puddle, sky: SkyReflection): PixelCloud {
     bodies.set(key, relative);
   }
   return relative;
-}
-
-function paintBody(puddle: Puddle, sky: SkyReflection): PixelCloud {
-  const holds = holder(puddle);
-  const cloud = wetRing(puddle, holds);
-  let top = Number.POSITIVE_INFINITY;
-  let bottom = Number.NEGATIVE_INFINITY;
-  for (const pixel of puddle.water) {
-    top = Math.min(top, pixel.y);
-    bottom = Math.max(bottom, pixel.y);
-  }
-  const depth = Math.max(bottom - top, 1);
-
-  for (const { x, y } of puddle.water) {
-    const band = Math.round(((y - top) / depth) * (REFLECTION_BANDS - 1));
-    const pair = sky.rows[band] ?? sky.rows[0];
-    let ink: InkId = pair === undefined ? SHALLOW_INK : pairInk(pair, x, y);
-    const farSide = y < puddle.centerY;
-    if (!holds(x, y - 1) && farSide) {
-      ink = sky.lip;
-    } else if (!holds(x, y - 2) && farSide && ditherThreshold(x, y) < 0.5) {
-      ink = sky.lip;
-    } else if (!holds(x, y + 1) || (!farSide && (!holds(x - 1, y) || !holds(x + 1, y)))) {
-      ink = SHALLOW_INK;
-    }
-    cloud.push({ x, y, ink });
-  }
-  return cloud;
 }

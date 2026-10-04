@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { bufferPixel } from "./pixel-buffer";
 import {
+  bakeLadder,
   bakePose,
   bakeScaled,
   lightKey,
@@ -132,6 +133,20 @@ describe("baking for the horizon", () => {
     const far = bakeScaled(instance, NOON, 0.4);
     expect(far.buffer.width).toBeLessThan(full.buffer.width * 0.6);
     expect(far.buffer.height).toBeLessThan(full.buffer.height * 0.6);
+  });
+
+  it("makes the full-size rung the body it hands over to at the seam, pixel for pixel", () => {
+    // A tree comes off the roll by swapping its top rung for its rest lean:
+    // any pixel the two do not share is a snap on that frame.
+    for (const id of PLACED_SPECIES) {
+      const instance = findSpecies(id)!.create(1234);
+      settleAt(instance, 0, NOON);
+      const body = bakePose(instance, NOON, 0).body;
+      const [rung] = bakeLadder(instance, NOON, [1]);
+      expect(rung?.originX, id).toBe(body.originX);
+      expect(rung?.originY, id).toBe(body.originY);
+      expect(rung?.buffer.data, id).toEqual(body.buffer.data);
+    }
   });
 
   it("point-samples a cloud about its foot", () => {

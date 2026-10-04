@@ -15,7 +15,7 @@
 
 import type { Scene } from "../engine";
 
-import { localFoot, localRow, scrollOffset, type CameraFrame } from "./camera";
+import { groundRow, localFoot, scrollOffset, type CameraFrame } from "./camera";
 import { groundFoot, onField } from "./fire/anchor";
 import type { FrameContext } from "./frame-context";
 import { createPool, emit, particleCloud, stepParticles, type ParticleSpec } from "./fx/particles";
@@ -161,7 +161,7 @@ export class WildfireLayer {
       surface.clear().paint(grassFlameCloud(cell.seed, ctx.elapsedMs, strength), FLAME_W / 2, FLAME_H - 1).commit();
       surface.image
         .setPosition(foot.x - FLAME_W / 2, foot.y - FLAME_H + 1)
-        .setDepth(Math.round(localRow(ctx.frame, local)) * TILE_WIDTH + RANK.body - 1)
+        .setDepth(groundRow(ctx.frame, local) * TILE_WIDTH + RANK.body - 1)
         .setVisible(true);
       lit.push({ x: foot.x, y: foot.y - 4, strength });
     }

@@ -16,7 +16,7 @@
 
 import type { Scene } from "../../engine";
 
-import { localRow } from "../camera";
+import { groundRow } from "../camera";
 import type { FrameContext } from "../frame-context";
 import type { PixelCloud } from "../ink";
 import { PixelSurface } from "../pixel-surface";
@@ -82,7 +82,7 @@ export class CampfireLayer {
     this.body.clear().paint(campfireCloud(this.state, ctx.elapsedMs), BODY_FOOT_X, BODY_FOOT_Y).commit();
     this.body.image
       .setPosition(this.footNow.x - BODY_FOOT_X, this.footNow.y - BODY_FOOT_Y)
-      .setDepth(Math.round(localRow(ctx.frame, local)) * TILE_WIDTH + RANK.body);
+      .setDepth(groundRow(ctx.frame, local) * TILE_WIDTH + RANK.body);
     this.ground.clear().paint(campfireGround(this.state, ctx.elapsedMs), GROUND_FOOT_X, GROUND_FOOT_Y).commit();
     this.ground.image.setPosition(this.footNow.x - GROUND_FOOT_X, this.footNow.y - GROUND_FOOT_Y);
     ctx.lights.push(campfireLight(this.state, ctx.elapsedMs, this.footNow.x, this.footNow.y));

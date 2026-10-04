@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { nearLake, planetLakes } from "../lakes";
 import { PLANET_TILES } from "../planet";
 import { SLIME_VARIANTS } from "./slime-palette";
 import {
@@ -27,6 +28,14 @@ describe("slime dens", () => {
     expect(den).toBeDefined();
     if (den !== undefined) {
       expect(denAt(den.cellX + PLANET_TILES, den.cellY - PLANET_TILES, OPEN)).toEqual(den);
+    }
+  });
+
+  it("keep out of lakes and off their shores, whatever counts as blocked", () => {
+    for (const lake of planetLakes().slice(0, 6)) {
+      for (const den of densNear(lake, lake.reach + 2, OPEN)) {
+        expect(nearLake(den.point, 1)).toBe(false);
+      }
     }
   });
 

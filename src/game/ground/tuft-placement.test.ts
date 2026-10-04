@@ -14,6 +14,7 @@ import {
   WIND_SPACING,
 } from "./tuft-placement";
 import { TUFT_SHAPES } from "./tufts";
+import { outlineHolds } from "../puddles";
 
 const sample = syntheticSample(14, 9, demoTerrain);
 const tufts = placeTufts(sample);
@@ -106,6 +107,23 @@ describe("tufts and standing water", () => {
   it("allows for the puddle being foreshortened: deep reaches less far than across", () => {
     expect(inWater(tuft, [{ x: tuft.x + 9, y: tuft.y, radius: 6 }])).toBe(true);
     expect(inWater(tuft, [{ x: tuft.x, y: tuft.y + 9, radius: 6 }])).toBe(false);
+  });
+
+  it("roots right up to a lake's own shore, rather than its bounding oval", () => {
+    const lake = { radius: 64, outline: { seed: 0x1a4e, spread: 1 } };
+    const shore = (dx: number, dy: number) => outlineHolds(lake.radius, lake.outline.seed, dx, dy, 1);
+    // A point the oval would swallow but the lake's own outline leaves dry, a few pixels clear.
+    let dry: { dx: number; dy: number } | undefined;
+    for (let dx = 40; dx < 110 && dry === undefined; dx += 1) {
+      if (!shore(dx, 0) && !shore(dx - 3, 0) && dx < lake.radius * 1.4) {
+        dry = { dx, dy: 0 };
+      }
+    }
+    expect(dry).toBeDefined();
+    const at = dry ?? { dx: 0, dy: 0 };
+    expect(inWater(tuft, [{ x: tuft.x - at.dx, y: tuft.y, ...lake }])).toBe(false);
+    expect(inWater(tuft, [{ x: tuft.x - at.dx, y: tuft.y, radius: 64 }])).toBe(true);
+    expect(inWater(tuft, [{ x: tuft.x, y: tuft.y, ...lake }])).toBe(true);
   });
 
   it("names the cell's planet point, for a bare-ground test", () => {

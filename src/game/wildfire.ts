@@ -20,6 +20,7 @@
  */
 
 import { wrapTile, type PlanetPoint } from "./planet";
+import { nearLake } from "./lakes";
 import { terrainAt } from "./terrain";
 import { pixelHash } from "./transforms";
 
@@ -71,7 +72,8 @@ function flammable(fire: Wildfire, x: number, y: number): boolean {
   if (fire.cells.has(keyOf(x, y))) {
     return false;
   }
-  return terrainAt({ x: x + 0.5, y: y + 0.5 }) === "grass";
+  const centre = { x: x + 0.5, y: y + 0.5 };
+  return terrainAt(centre) === "grass" && !nearLake(centre);
 }
 
 function light(fire: Wildfire, x: number, y: number, generation: number): void {

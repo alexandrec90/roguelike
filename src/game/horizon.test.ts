@@ -4,6 +4,7 @@ import { TILE_DEPTH } from "./projection";
 
 import {
   DEFAULT_SKY_FRACTION,
+  fieldDepth,
   HORIZON_SCALE,
   HORIZON_SINK_RATE,
   horizonLayout,
@@ -49,6 +50,21 @@ describe("past the horizon line", () => {
     }
     expect(rowsToSink(380)).toBeGreaterThan(rowsToSink(96));
     expect(rowsToSink(0)).toBe(ROLL_ROWS);
+  });
+});
+
+describe("fieldDepth", () => {
+  const TOP = 40;
+
+  it("is nothing at the seam and on the roll above it", () => {
+    expect(fieldDepth(TOP, TOP)).toBe(0);
+    expect(fieldDepth(TOP - 5, TOP)).toBe(0);
+  });
+
+  it("rises across the field's last row and holds at one past it", () => {
+    expect(fieldDepth(TOP + TILE_DEPTH / 2, TOP)).toBeCloseTo(0.5, 12);
+    expect(fieldDepth(TOP + TILE_DEPTH, TOP)).toBe(1);
+    expect(fieldDepth(TOP + TILE_DEPTH * 6, TOP)).toBe(1);
   });
 });
 

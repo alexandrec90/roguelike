@@ -37,6 +37,8 @@ export interface Ripple {
   y: number;
   ageMs: number;
   lifeMs: number;
+  /** How wide this ring gets before it dies; a drop's (`RIPPLE_MAX_RADIUS`) when left out, a footstep's wider. */
+  radius?: number;
 }
 
 export interface RippleField {
@@ -66,6 +68,7 @@ export function createRippleField(capacity = 48): RippleField {
       y: 0,
       ageMs: 0,
       lifeMs: 0,
+      radius: RIPPLE_MAX_RADIUS,
     })),
   };
 }
@@ -76,6 +79,7 @@ export function spawnRipple(
   x: number,
   y: number,
   lifeMs: number = RIPPLE_LIFE_MS,
+  radius: number = RIPPLE_MAX_RADIUS,
 ): boolean {
   const slot = field.ripples.find((ripple) => !ripple.active);
   if (slot === undefined) {
@@ -86,6 +90,7 @@ export function spawnRipple(
   slot.y = Math.round(y);
   slot.ageMs = 0;
   slot.lifeMs = lifeMs;
+  slot.radius = Math.max(1, radius);
   return true;
 }
 
@@ -109,6 +114,7 @@ export function resetRipples(field: RippleField): void {
     ripple.y = 0;
     ripple.ageMs = 0;
     ripple.lifeMs = 0;
+    ripple.radius = RIPPLE_MAX_RADIUS;
   }
 }
 
@@ -140,7 +146,7 @@ export function rippleCloud(ripple: Ripple, ink: InkId = "ice", splash: InkId = 
   }
   const progress = rippleProgress(ripple);
   const eased = 1 - (1 - progress) ** 2;
-  const radiusX = Math.round(1 + eased * (RIPPLE_MAX_RADIUS - 1));
+  const radiusX = Math.round(1 + eased * ((ripple.radius ?? RIPPLE_MAX_RADIUS) - 1));
   const radiusY = Math.max(1, Math.round(radiusX * DEPTH_RATIO));
 
   const cloud: PixelCloud = [];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { planetLakes } from "./lakes";
 import { terrainAt } from "./terrain";
 import {
   BURN_MS,
@@ -50,6 +51,15 @@ describe("wildfire", () => {
     expect(burningCells(fire).length).toBeGreaterThan(0);
     for (const cell of burningCells(fire)) {
       expect(terrainAt({ x: cell.x + 0.5, y: cell.y + 0.5 })).toBe("grass");
+    }
+  });
+
+  it("never catches on a lake, whatever grass the path field says lies under it", () => {
+    for (const lake of planetLakes().slice(0, 6)) {
+      const fire = createWildfire();
+      // A spark wide enough to reach every cell whose centre is in the water, and no farther.
+      ignite(fire, lake, Math.max(lake.shore - 1, 0));
+      expect(burningCells(fire)).toEqual([]);
     }
   });
 

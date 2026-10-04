@@ -52,6 +52,25 @@ describe("the bake bench", () => {
     }
   });
 
+  it("bakes the rest lean and the ladder at rest, whichever lean the bench settled last", () => {
+    const rest = { kind: "lean", species: "sdf-crown", seed: 5, light: LIGHT, lean: REST } as const;
+    const far = { kind: "ladder", species: "sdf-crown", seed: 5, light: LIGHT, scales: [1] } as const;
+    const calm = new BakeBench();
+    const blown = new BakeBench();
+    blown.run({ ...rest, lean: WIND_LEVELS.length - 1 });
+    expect(lean(blown.run(rest)).body.buffer.data).toEqual(lean(calm.run(rest)).body.buffer.data);
+    blown.run({ ...rest, lean: 0 });
+    expect(ladder(blown.run(far)).frames[0]?.buffer.data).toEqual(ladder(calm.run(far)).frames[0]?.buffer.data);
+  });
+
+  it("makes the ladder's full-size rung the rest lean's body", () => {
+    const bench = new BakeBench();
+    bench.run({ kind: "lean", species: "oak-recursive", seed: 3, light: LIGHT, lean: 0 });
+    const body = lean(bench.run({ kind: "lean", species: "oak-recursive", seed: 3, light: LIGHT, lean: REST })).body;
+    const rung = ladder(bench.run({ kind: "ladder", species: "oak-recursive", seed: 3, light: LIGHT, scales: [1] })).frames[0];
+    expect(rung?.buffer.data).toEqual(body.buffer.data);
+  });
+
   it("answers null for a species the catalogue does not know", () => {
     expect(new BakeBench().run({ kind: "ladder", species: "nope", seed: 1, light: LIGHT, scales: [0.5] })).toBeNull();
   });

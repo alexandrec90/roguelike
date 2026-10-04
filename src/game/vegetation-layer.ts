@@ -14,9 +14,10 @@
  *
  * A `Blitter` per row is the cheap way to draw a few hundred small frames from
  * one texture, and it keeps the depth rule the old `Graphics` rows had: tufts
- * sort as `rootedDepth(row, RANK.grass)`, so a tuft one row nearer than the
- * hero covers his feet, and the far rows go under the horizon band with the
- * ground they grow from.
+ * sort as `rootedDepth(row, RANK.grass)`, slid by the scroll as everything
+ * else on the ground is (`groundRow`), so a tuft one row nearer than the hero
+ * covers his feet, a boulder among the tufts keeps its place in the order, and
+ * the far rows go under the horizon band with the ground they grow from.
  *
  * **The wind is the showpiece.** It is sampled from the one wind field
  * (`windAt`) at each tuft's *planet* position, in pixels, so a gust is a wave
@@ -29,11 +30,12 @@
 
 import type { Blitter, Bob, Scene } from "../engine";
 import {
+  latticeRow,
   localFoot,
   localOrigin,
   localReach,
-  localRow,
   scrollOffset,
+  scrollRows,
   type CameraFrame,
   type LocalBounds,
 } from "./camera";
@@ -51,6 +53,7 @@ import {
   type WindGrid,
 } from "./ground/tuft-placement";
 import { bendFrame, BEND_FRAMES, FLAT_LEFT, FLAT_RIGHT, TUFT_FRAME, TUFT_SHAPES, tuftBuffers, tuftFrame } from "./ground/tufts";
+import { LAKE_MAX_REACH, LAKE_SPREAD, lakesNear } from "./lakes";
 import { installStrip } from "./pixel-surface";
 import { toLocal, type PlanetPoint, type PlanetPose } from "./planet";
 import { RANK, rootedDepth, TILE_DEPTH, TILE_WIDTH, type ScreenPoint } from "./projection";
@@ -92,6 +95,10 @@ const FRAME_NAMES = Array.from({ length: TUFT_SHAPES.length * BEND_FRAMES }, (_u
 export class VegetationLayer {
   private scene!: Scene;
   private rows: Blitter[] = [];
+  /** Each row's depth at rest; the scroll's slide is added per frame. */
+  private rowDepths: number[] = [];
+  /** The slide the rows' depths carry now. */
+  private slid = 0;
   private pools: Bob[][] = [];
   private tufts: LiveTuft[] = [];
   private wind: WindGrid | undefined;
@@ -124,11 +131,11 @@ export class VegetationLayer {
     this.flat = flat;
     this.origin = localOrigin(flat, { x: bounds.minX, y: bounds.maxY });
     const count = bounds.maxY - bounds.minY + 1;
-    this.rows = Array.from({ length: count }, (_unused, index) =>
-      this.scene.add
-        .blitter(0, 0, TUFT_TEXTURE)
-        .setDepth(rootedDepth(Math.round(localRow(flat, { x: 0, y: bounds.minY + index })), RANK.grass)),
+    this.rowDepths = Array.from({ length: count }, (_unused, index) =>
+      rootedDepth(latticeRow(flat, { x: 0, y: bounds.minY + index }), RANK.grass),
     );
+    this.rows = this.rowDepths.map((depth) => this.scene.add.blitter(0, 0, TUFT_TEXTURE).setDepth(depth));
+    this.slid = 0;
     this.pools = this.rows.map(() => []);
     this.tufts = [];
     this.sampled = undefined;
@@ -200,9 +207,16 @@ export class VegetationLayer {
     const offset = scrollOffset(frame);
     const left = this.origin.x + offset.x;
     const top = this.origin.y + offset.y;
-    for (const row of this.rows) {
+    // The rows slide in depth as they slide on screen (`groundRow`), so a
+    // boulder rooted among them keeps its place in the order all stride long.
+    const slid = scrollRows(frame) * TILE_WIDTH;
+    this.rows.forEach((row, index) => {
       row.setPosition(left, top);
-    }
+      if (slid !== this.slid) {
+        row.setDepth((this.rowDepths[index] ?? 0) + slid);
+      }
+    });
+    this.slid = slid;
     this.blow(elapsedMs, wind);
     for (const tuft of this.tufts) {
       if (tuft.bare) {
@@ -244,16 +258,23 @@ export class VegetationLayer {
     }
   }
 
-  /** The puddles on screen, in grid pixels - grass does not root in water. */
+  /** The puddles and lakes on screen, in grid pixels - grass does not root in water. */
   private waterPatches(pose: PlanetPose): WaterPatch[] {
     const flat = this.flat;
     if (flat === undefined) {
       return [];
     }
-    return puddlesNear(pose, localReach(this.bounds)).map((site) => {
+    const reach = localReach(this.bounds);
+    const at = (site: PlanetPoint): { x: number; y: number } => {
       const foot = localFoot(flat, toLocal(pose, site));
-      return { x: foot.x - this.origin.x, y: foot.y - this.origin.y, radius: site.size };
-    });
+      return { x: foot.x - this.origin.x, y: foot.y - this.origin.y };
+    };
+    const lakes = lakesNear(pose, reach + LAKE_MAX_REACH).map((lake) => ({
+      ...at(lake),
+      radius: lake.size,
+      outline: { seed: lake.seed, spread: LAKE_SPREAD },
+    }));
+    return [...lakes, ...puddlesNear(pose, reach).map((site) => ({ ...at(site), radius: site.size }))];
   }
 
   /** This frame's wind at every grid node. */
