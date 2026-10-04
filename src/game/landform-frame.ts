@@ -43,7 +43,9 @@ export interface LandformLight {
  * correctly, in front of him on the screen. Correct and useless: he vanishes.
  * Every overhead game makes the same trade, and this one makes it in pixels:
  * landform pixels nearer than his row, inside an oval round him, are left out,
- * the oval's rim dithered so it reads as a window rather than a hole.
+ * the oval's rim dithered so it reads as a window rather than a hole. It is
+ * only made when that land stands over him (`landform-cutaway.ts`), or it
+ * opens a window in a flank beside him that hides nothing.
  */
 export interface Cutaway {
   readonly x: number;

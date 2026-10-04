@@ -89,6 +89,7 @@ over the sky when rock was grid-quantised cells.
 | --- | --- |
 | `src/game/landforms.ts` | Where they are (`planetLandforms`, a seeded lattice of `LANDFORM_CELL` cells), their shapes (`landformShape`), the per-landform `LandformField` (heights, normals, materials, detail, block maxima), and the gameplay half: `landHeightAt`, `blockedByLand` (taller than `BLOCK_HEIGHT`) and `openGround`. |
 | `src/game/landform-frame.ts` | What a frame is: `LandformView`, `LandformLight` (sun, haze, cloud shade, the hero's `Cutaway`), and `LandformPixels` — colour plus the affine row each pixel shows. |
+| `src/game/landform-cutaway.ts` | Whether the hero gets a window at all: `heroCutaway` builds the oval only when land nearer than him rises over his body, probed on the march's own steps. Both layers ask it, so the CPU and GPU pictures agree. |
 | `src/game/landform-march.ts` | The march: `marchSchedule` (depths near to far, each asking `projectDepth`), and `LandformPainter`, which keeps the highest scanline painted per column — a nearer slope hides a farther peak because it was reached first. |
 | `src/game/landform-colour.ts` | The look: posterised ramps per material, wrap light, a narrow dithered seam, and planet-fixed grain on standing faces (courses, ledges, strata, windows). Inks only. |
 | `src/game/landform-render.ts` | The frame-level passes: `viewsInSight`, near over far (`isFarView`, `mergeLandforms`), the outline. |
