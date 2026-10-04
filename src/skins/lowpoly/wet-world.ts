@@ -14,7 +14,7 @@ import { wadeDepth } from "../../game/lakes";
 import { createWake, stepWake } from "../../game/water/wake";
 import { puddleDepth, waterLevel } from "../../game/water/puddle-field";
 import { stepWetness, weatherAt, type WeatherState } from "../../game/water/schedule";
-import type { WaterState } from "./renderer";
+import type { WaterState } from "./backend";
 import { RippleRing } from "./ripples";
 
 /** The shader's clock wraps at this, seconds, so a float keeps its precision all session. */

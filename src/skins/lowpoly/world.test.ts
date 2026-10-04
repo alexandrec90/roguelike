@@ -11,7 +11,7 @@ import { ACTOR_MESH_KEYS, ActorMeshes } from "./actor-frame";
 import { nearestFirst } from "./lowpoly-game";
 import { heroHeightPx, heroMesh } from "./hero-mesh";
 import { MeshBuilder, VERTEX_BYTES } from "./mesh";
-import { lightDirection } from "./renderer";
+import { lightDirection } from "./sky-light";
 import { MESHED_SPECIES } from "./scenery-mesh";
 import { WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
 import { landformStep } from "./terrain-mesh";
@@ -22,7 +22,9 @@ describe("the planet in chunks", () => {
     const one = buildChunk(3, 5);
     const two = buildChunk(3, 5);
     expect(one.solid).toEqual(two.solid);
-    expect(one.solid.byteLength / VERTEX_BYTES).toBeGreaterThanOrEqual(CHUNK_TILES * CHUNK_TILES * 2 * 3);
+    expect(one.ground).toEqual(two.ground);
+    // Two flat triangles a tile, kept apart from what stands so the mirror never draws them.
+    expect(one.ground.byteLength / VERTEX_BYTES).toBe(CHUNK_TILES * CHUNK_TILES * 2 * 3);
   });
 
   it("draws each chunk at its image nearest the hero, round the wrap", () => {

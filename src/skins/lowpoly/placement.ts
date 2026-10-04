@@ -55,6 +55,30 @@ export function lowpolyView(aspect: number, skyFraction: number, heroHeightPx: n
   return { width, height, layout, footX: foot.x, footY: foot.y, knee, atanRows: knee > 0 ? Math.atan(ROLL_ROWS / knee) : 1 };
 }
 
+/**
+ * Most pixels the drawing buffer may have. The frame's cost is mostly per
+ * pixel, so a large or high-DPI window would otherwise multiply it: a 4K screen
+ * at 2× device pixels is nine times the measured 1280×720 frame. Past the
+ * budget the buffer is drawn smaller and the browser scales it up smoothly,
+ * which faceted geometry survives far better than a dropped frame.
+ */
+export const MAX_DRAWN_PIXELS = 1_300_000;
+
+/** The drawing buffer for a window of `width` × `height` CSS pixels at `pixelRatio`, within the budget. */
+export function backingSize(width: number, height: number, pixelRatio: number): { width: number; height: number } {
+  const wanted = Math.max(width, 1) * Math.max(height, 1) * pixelRatio * pixelRatio;
+  const ratio = pixelRatio * Math.min(1, Math.sqrt(MAX_DRAWN_PIXELS / wanted));
+  return { width: Math.max(1, Math.round(width * ratio)), height: Math.max(1, Math.round(height * ratio)) };
+}
+
+/** Rows of flat field the view shows behind the hero's foot and ahead of it, to the lip. */
+export function fieldRows(view: LowpolyView): { behind: number; ahead: number } {
+  return {
+    behind: (view.height - view.footY) / TILE_DEPTH,
+    ahead: (view.footY - view.layout.groundTop) / TILE_DEPTH,
+  };
+}
+
 /** A point on screen, in logical pixels, with its depth key. */
 export interface Placed {
   readonly x: number;

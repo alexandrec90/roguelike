@@ -18,16 +18,14 @@ import { easeYaw } from "../../game/hero/turn";
 import { dryGround } from "../../game/lakes";
 import type { SceneOptions } from "../../game/scene-options";
 import { fromLocal, type PlanetPoint } from "../../game/planet";
-import { puddleField } from "../../game/water/puddle-field";
 import { WEATHER_PRESETS } from "../../game/water/schedule";
 import { RAIN_SLANT } from "../../game/weather";
 import { ACTOR_MESH_KEYS, ActorMeshes, type ActorMeshKey } from "./actor-frame";
-import { RainPass } from "./rain-pass";
+import type { DrawableHandle, DrawCall, LowpolyBackend } from "./backend";
 import { WetWorld } from "./wet-world";
 import { heroHeightPx } from "./hero-mesh";
-import { lowpolyView, type LowpolyView } from "./placement";
-import { LowpolyRenderer } from "./renderer";
-import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE, type ChunkMesh } from "./world-chunks";
+import { fieldRows, lowpolyView, type LowpolyView } from "./placement";
+import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE, groundInView, MIRROR_ROWS, type ChunkMesh } from "./world-chunks";
 
 /** Where the session opens: the pixel skin's start, so a switch lands in the same field. */
 const START: PlanetPoint = { x: 128, y: 128 };
@@ -35,12 +33,11 @@ const START: PlanetPoint = { x: 128, y: 128 };
 /** Milliseconds of chunk building a frame may spend while the planet is still being made. */
 const BUILD_BUDGET_MS = 10;
 
-type Drawable = ReturnType<LowpolyRenderer["createDrawable"]>;
-
 interface LoadedChunk {
   readonly mesh: ChunkMesh;
-  readonly solid: Drawable;
-  readonly sheer: Drawable;
+  readonly ground: DrawableHandle;
+  readonly solid: DrawableHandle;
+  readonly sheer: DrawableHandle;
 }
 
 export class LowpolyGame {
@@ -49,24 +46,20 @@ export class LowpolyGame {
   readonly heroHeight = heroHeightPx();
   private readonly clock: WorldClock;
   private readonly wet: WetWorld;
-  private readonly renderer: LowpolyRenderer;
-  private readonly rain: RainPass;
   private readonly chunks: LoadedChunk[] = [];
   private readonly pending: { cx: number; cy: number }[];
   private readonly actors = new ActorMeshes();
-  private readonly dynamic: Record<ActorMeshKey, Drawable>;
+  private readonly dynamic: Record<ActorMeshKey, DrawableHandle>;
   private shownYaw: number;
   view: LowpolyView;
 
   constructor(
-    gl: WebGL2RenderingContext,
+    readonly renderer: LowpolyBackend,
     private readonly options: SceneOptions,
   ) {
     this.hero = new HeroDriver({ ...dryGround(START), turn: 0 }, options.radius);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
     this.wet = new WetWorld(options.weather === undefined ? undefined : WEATHER_PRESETS[options.weather]);
-    this.renderer = new LowpolyRenderer(gl, puddleField());
-    this.rain = new RainPass(gl);
     this.dynamic = {
       heroSolid: this.renderer.createDrawable(),
       heroSheer: this.renderer.createDrawable(),
@@ -94,7 +87,12 @@ export class LowpolyGame {
     while (this.pending.length > 0 && performance.now() - start < budgetMs) {
       const next = this.pending.shift()!;
       const mesh = buildChunk(next.cx, next.cy);
-      this.chunks.push({ mesh, solid: this.renderer.createDrawable(mesh.solid), sheer: this.renderer.createDrawable(mesh.sheer) });
+      this.chunks.push({
+        mesh,
+        ground: this.renderer.createDrawable(mesh.ground),
+        solid: this.renderer.createDrawable(mesh.solid),
+        sheer: this.renderer.createDrawable(mesh.sheer),
+      });
     }
   }
 
@@ -117,34 +115,40 @@ export class LowpolyGame {
     const weather = this.wet.weather;
     const atmosphere = this.clock.atmosphere(weather.overcast);
     const frame = { view: this.view, atmosphere, shake: this.clock.shake(), water: this.wet.water(live, this.clock.elapsedMs), width, height };
-    const renderer = this.renderer;
-    // What stands, mirrored, for the water to show; then the world itself.
-    renderer.beginReflection(frame);
-    this.drawSolids(live, where.turn);
-    renderer.beginScreen(frame);
-    this.drawSolids(live, where.turn);
-    renderer.sheer();
-    for (const chunk of this.chunks) {
-      renderer.draw(chunk.sheer, { offset: asPair(chunkOffset(chunk.mesh, live)), turn: where.turn });
-    }
-    renderer.draw(this.dynamic.actorSheer, { offset: [0, 0], turn: where.turn });
-    renderer.draw(this.dynamic.heroSheer, { offset: [0, 0], turn: 0 });
-    this.rain.draw({
-      strength: weather.rain,
-      seconds: this.clock.elapsedMs / 1000,
-      slant: RAIN_SLANT * weather.wind,
-      light: 0.55 + 0.45 * atmosphere.daylight,
-      width: this.view.width,
-      height: this.view.height,
+    const turn = where.turn;
+    const chunkCall = (drawable: DrawableHandle, mesh: ChunkMesh): DrawCall => ({ drawable, offset: asPair(chunkOffset(mesh, live)), turn });
+    const rows = fieldRows(this.view);
+    const actors: DrawCall[] = [
+      { drawable: this.dynamic.actorSolid, offset: [0, 0], turn },
+      { drawable: this.dynamic.heroSolid, offset: [0, 0], turn: 0 },
+    ];
+    this.renderer.render(frame, {
+      mirrored: [
+        ...this.chunks
+          .filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows, MIRROR_ROWS))
+          .map((chunk) => chunkCall(chunk.solid, chunk.mesh)),
+        ...actors,
+      ],
+      grounds: this.chunks
+        .filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows))
+        .map((chunk) => chunkCall(chunk.ground, chunk.mesh)),
+      solids: [
+        ...this.chunks.map((chunk) => chunkCall(chunk.solid, chunk.mesh)),
+        { drawable: this.dynamic.actorSolid, offset: [0, 0], turn },
+        { drawable: this.dynamic.heroSolid, offset: [0, 0], turn: 0 },
+      ],
+      sheers: [
+        ...this.chunks.map((chunk) => chunkCall(chunk.sheer, chunk.mesh)),
+        { drawable: this.dynamic.actorSheer, offset: [0, 0], turn },
+        { drawable: this.dynamic.heroSheer, offset: [0, 0], turn: 0 },
+      ],
+      rain: {
+        strength: weather.rain,
+        seconds: this.clock.elapsedMs / 1000,
+        slant: RAIN_SLANT * weather.wind,
+        light: 0.55 + 0.45 * atmosphere.daylight,
+      },
     });
-  }
-
-  private drawSolids(live: PlanetPoint, turn: number): void {
-    for (const chunk of this.chunks) {
-      this.renderer.draw(chunk.solid, { offset: asPair(chunkOffset(chunk.mesh, live)), turn });
-    }
-    this.renderer.draw(this.dynamic.actorSolid, { offset: [0, 0], turn });
-    this.renderer.draw(this.dynamic.heroSolid, { offset: [0, 0], turn: 0 });
   }
 
   private buildActors(live: PlanetPoint): void {

@@ -57,8 +57,8 @@ lists them; `src/main.ts` lazily imports only the one shown.
 
 | Skin | Module | Look |
 | --- | --- | --- |
-| `pixel` (default) | `src/skins/pixel.ts` → `src/game/` layers on `src/engine/` | the 320×180 pixel art below |
-| `lowpoly` | `src/skins/lowpoly/` (`.claude/rules/skin-lowpoly.md`) | flat-shaded 3D geometry at window resolution |
+| `lowpoly` (default) | `src/skins/lowpoly/` (`.claude/rules/skin-lowpoly.md`) | flat-shaded 3D geometry at window resolution; WebGPU with a compute wave simulation, WebGL2 as the fallback (`?gpu=`) |
+| `pixel` | `src/skins/pixel.ts` → `src/game/` layers on `src/engine/` | the 320×180 pixel art below; load it with `?skin=pixel` |
 
 **A skin decides how things look, never what happens.** The planet, terrain, landforms,
 lakes, scenery placement, the hero (`hero/hero-driver.ts`) and, for skins other than
@@ -364,7 +364,7 @@ earlier form of this was Phaser's ambient type namespace: 306 tests passed on a 
 that died at `Phaser.BlendModes.ADD`. The only thing that catches either is loading the
 page.
 
-**Performance is a number, not an impression.** `?bench=1&sync=1` (with `&time=21&weather=storm`
+**Performance is a number, not an impression.** `?skin=pixel&bench=1&sync=1` (with `&time=21&weather=storm`
 for the heaviest sky) walks a fixed route — standing, each gait, then a fight — by pressing
 the keys a player would, and reports each segment's frame work (p50/p95/max), hitches and
 garbage, plus the cost of every layer (`src/game/bench.ts`, `bench-runner.ts`). Run it in a

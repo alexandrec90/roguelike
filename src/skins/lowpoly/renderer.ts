@@ -1,89 +1,63 @@
 /**
- * The WebGL2 half of the skin: the only files here that touch the context are
- * this one and the passes it owns (`reflection.ts`, `rain-pass.ts`).
+ * The WebGL2 backend: the fallback wherever WebGPU is missing (`backend.ts`).
+ * The only files here that touch a WebGL context are this one and the passes
+ * it owns (`reflection.ts`, `rain-pass.ts`).
  *
  * A frame is four passes. The world **mirrored** - what stands, height flipped -
  * into a half-size target. Then the sky; the **solid** pass, where the ground
  * reads its puddles and the mirror; the **sheer** pass of shadows, lakes and
  * spell light, blended without writing depth; and the **rain** over all of it.
- * Each chunk of the planet is two static buffers uploaded once
- * (`world-chunks.ts`); the hero and the actors are re-uploaded each frame.
+ * Its water moves by procedural rings (`water-glsl.ts`); WebGPU's simulates.
  *
  * Budget: the static geometry twice (once mirrored, at a quarter of the pixels),
- * ~280 draw calls; water costs per pixel only where there is water. The CPU's
- * share is the actor meshes and a few dozen uniforms.
+ * ~280 draw calls; water costs per pixel only where there is water.
  */
 
-import type { Atmosphere } from "../../game/atmosphere";
 import { FIELD_SIZE } from "../../game/water/puddle-field";
+import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend } from "./backend";
 import { program, Uniforms } from "./gl-util";
-import { mixRgb, rgb, VERTEX_BYTES, type Rgb } from "./mesh";
-import { DEPTH_FAR, DEPTH_NEAR, type LowpolyView } from "./placement";
+import { rgb, VERTEX_BYTES } from "./mesh";
+import { DEPTH_FAR, DEPTH_NEAR } from "./placement";
+import { RainPass } from "./rain-pass";
 import { ReflectionTarget } from "./reflection";
-import { SKY_FRAGMENT, SKY_VERTEX, WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
+import { SKY_FRAGMENT, SKY_VERTEX, WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID, WORLD_VERTEX } from "./shaders";
+import { lightDirection, stillSky } from "./sky-light";
 
-export interface Drawable {
+interface Drawable extends DrawableHandle {
   readonly vao: WebGLVertexArrayObject;
   readonly buffer: WebGLBuffer;
-  count: number;
-}
-
-/** What one draw needs besides its buffer: where its origin is, and whether it turns with the world. */
-export interface DrawFrame {
-  /** Planet tiles from the hero to the buffer's origin. */
-  readonly offset: readonly [number, number];
-  /** The turn applied to it: the world's, or 0 for something built in the local frame. */
-  readonly turn: number;
-}
-
-/** The water's state this frame, as the shader reads it. */
-export interface WaterState {
-  /** The hero's planet point: what a water pixel's planet point is measured from. */
-  readonly hero: readonly [number, number];
-  /** `waterLevel(wetness)`. */
-  readonly level: number;
-  readonly wetness: number;
-  readonly rain: number;
-  /** The shader's clock, seconds. */
-  readonly seconds: number;
-  /** `RippleRing.slots`. */
-  readonly ripples: Float32Array;
-}
-
-export interface FrameUniforms {
-  readonly view: LowpolyView;
-  readonly atmosphere: Atmosphere;
-  readonly shake: { readonly x: number; readonly y: number };
-  readonly water: WaterState;
-  /** The drawing buffer, device pixels. */
-  readonly width: number;
-  readonly height: number;
 }
 
 /** Texture units: the puddle field and the mirror. */
 const PUDDLE_UNIT = 1;
 const REFLECT_UNIT = 2;
 
-export class LowpolyRenderer {
+export class WebGlBackend implements LowpolyBackend {
+  readonly kind = "webgl";
+  /** The world, able to discard: the ground, the mirror and the sheer pass. */
   private readonly world: Uniforms;
+  /** The world for what stands on screen: no discard, so early depth testing stays on. */
+  private readonly solidWorld: Uniforms;
   private readonly sky: Uniforms;
   private readonly skyVao: WebGLVertexArrayObject;
   private readonly puddles: WebGLTexture;
   private readonly reflection: ReflectionTarget;
+  private readonly rain: RainPass;
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
     puddleField: Uint8Array,
   ) {
     this.world = new Uniforms(gl, program(gl, WORLD_VERTEX, WORLD_FRAGMENT));
+    this.solidWorld = new Uniforms(gl, program(gl, WORLD_VERTEX, WORLD_FRAGMENT_SOLID));
     this.sky = new Uniforms(gl, program(gl, SKY_VERTEX, SKY_FRAGMENT));
     this.skyVao = gl.createVertexArray();
     this.puddles = puddleTexture(gl, puddleField);
     this.reflection = new ReflectionTarget(gl);
+    this.rain = new RainPass(gl);
   }
 
-  /** A buffer for geometry, filled now (static) or every frame (`update`). */
-  createDrawable(bytes?: Uint8Array): Drawable {
+  createDrawable(bytes?: Uint8Array): DrawableHandle {
     const gl = this.gl;
     const vao = gl.createVertexArray();
     const buffer = gl.createBuffer();
@@ -98,7 +72,7 @@ export class LowpolyRenderer {
     gl.enableVertexAttribArray(3);
     gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 24);
     gl.bindVertexArray(null);
-    const drawable = { vao, buffer, count: 0 };
+    const drawable: Drawable = { vao, buffer, count: 0 };
     if (bytes !== undefined) {
       gl.bufferData(gl.ARRAY_BUFFER, bytes, gl.STATIC_DRAW);
       drawable.count = bytes.byteLength / VERTEX_BYTES;
@@ -106,30 +80,25 @@ export class LowpolyRenderer {
     return drawable;
   }
 
-  /** Refill a per-frame buffer. */
-  update(drawable: Drawable, bytes: Uint8Array): void {
+  update(handle: DrawableHandle, bytes: Uint8Array): void {
     const gl = this.gl;
+    const drawable = handle as Drawable;
     gl.bindBuffer(gl.ARRAY_BUFFER, drawable.buffer);
     gl.bufferData(gl.ARRAY_BUFFER, bytes, gl.DYNAMIC_DRAW);
     drawable.count = bytes.byteLength / VERTEX_BYTES;
   }
 
-  /**
-   * Start the frame: every world uniform it shares, then the mirror pass, into
-   * which the caller draws what stands (`solid` is already set up).
-   */
-  beginReflection(frame: FrameUniforms): void {
+  render(frame: FrameUniforms, scene: FrameScene): void {
     const gl = this.gl;
-    gl.useProgram(this.world.target);
-    this.setWorld(frame);
+    const clipping = this.world;
+    // What stands near enough to be seen in water, mirrored.
+    this.setWorld(this.solidWorld, frame, 1);
+    this.setWorld(clipping, frame, -1);
     this.reflection.bind(frame.width, frame.height, stillSky(frame.atmosphere));
-    gl.uniform1f(this.world.at("u_mirror"), -1);
     this.solid();
-  }
+    this.drawAll(clipping, scene.mirrored);
 
-  /** Back to the screen: the sky, then ready for the solid pass. */
-  beginScreen(frame: FrameUniforms): void {
-    const gl = this.gl;
+    // Then the world itself, over the sky: the ground first, so it hides what stands behind it.
     this.reflection.unbind();
     gl.viewport(0, 0, frame.width, frame.height);
     gl.disable(gl.BLEND);
@@ -138,15 +107,22 @@ export class LowpolyRenderer {
     gl.clearDepth(1);
     gl.clear(gl.DEPTH_BUFFER_BIT);
     this.drawSky(frame);
-    gl.useProgram(this.world.target);
-    gl.uniform1f(this.world.at("u_mirror"), 1);
+    gl.useProgram(clipping.target);
+    gl.uniform1f(clipping.at("u_mirror"), 1);
     gl.activeTexture(gl.TEXTURE0 + REFLECT_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, this.reflection.texture);
     this.solid();
+    this.drawAll(clipping, scene.grounds);
+    gl.useProgram(this.solidWorld.target);
+    this.drawAll(this.solidWorld, scene.solids);
+    gl.useProgram(clipping.target);
+    this.sheer();
+    this.drawAll(clipping, scene.sheers);
+    this.rain.draw({ ...scene.rain, width: frame.view.width, height: frame.view.height });
   }
 
   /** The opaque pass: depth tested and written. */
-  solid(): void {
+  private solid(): void {
     const gl = this.gl;
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
@@ -155,7 +131,7 @@ export class LowpolyRenderer {
   }
 
   /** The sheer pass: blended over the solid one, depth tested but never written. */
-  sheer(): void {
+  private sheer(): void {
     const gl = this.gl;
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -164,15 +140,18 @@ export class LowpolyRenderer {
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
-  draw(drawable: Drawable, frame: DrawFrame): void {
-    if (drawable.count === 0) {
-      return;
-    }
+  private drawAll(world: Uniforms, calls: readonly DrawCall[]): void {
     const gl = this.gl;
-    gl.uniform2f(this.world.at("u_offset"), frame.offset[0], frame.offset[1]);
-    gl.uniform2f(this.world.at("u_rot"), Math.cos(frame.turn), Math.sin(frame.turn));
-    gl.bindVertexArray(drawable.vao);
-    gl.drawArrays(gl.TRIANGLES, 0, drawable.count);
+    for (const call of calls) {
+      const drawable = call.drawable as Drawable;
+      if (drawable.count === 0) {
+        continue;
+      }
+      gl.uniform2f(world.at("u_offset"), call.offset[0], call.offset[1]);
+      gl.uniform2f(world.at("u_rot"), Math.cos(call.turn), Math.sin(call.turn));
+      gl.bindVertexArray(drawable.vao);
+      gl.drawArrays(gl.TRIANGLES, 0, drawable.count);
+    }
   }
 
   private drawSky(frame: FrameUniforms): void {
@@ -188,10 +167,13 @@ export class LowpolyRenderer {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  private setWorld(frame: FrameUniforms): void {
+  /** Use one of the world programs and set everything it shares this frame, `mirror` included. */
+  private setWorld(world: Uniforms, frame: FrameUniforms, mirror: number): void {
     const gl = this.gl;
     const { view, atmosphere, water } = frame;
-    const at = (name: string): WebGLUniformLocation | null => this.world.at(name);
+    gl.useProgram(world.target);
+    const at = (name: string): WebGLUniformLocation | null => world.at(name);
+    gl.uniform1f(at("u_mirror"), mirror);
     gl.uniform4f(at("u_view"), view.width, view.height, view.footX, view.footY);
     gl.uniform4f(at("u_roll"), view.layout.groundTop, view.layout.rollHeight, view.knee, view.atanRows);
     gl.uniform2f(at("u_depth"), DEPTH_NEAR, DEPTH_FAR);
@@ -214,15 +196,6 @@ export class LowpolyRenderer {
   }
 }
 
-/**
- * What still water shows with nothing standing over it. The projection is
- * parallel, so every pixel of a mirror looks up the same way: steeply, at the
- * upper sky, a little toward the horizon's colour.
- */
-export function stillSky(atmosphere: Pick<Atmosphere, "skyTop" | "skyHorizon">): Rgb {
-  return mixRgb(rgb(atmosphere.skyTop), rgb(atmosphere.skyHorizon), 0.35);
-}
-
 /** The puddle field as a one-channel texture, read bilinearly and wrapping - as `sampleField` reads it. */
 function puddleTexture(gl: WebGL2RenderingContext, field: Uint8Array): WebGLTexture {
   const texture = gl.createTexture();
@@ -235,20 +208,4 @@ function puddleTexture(gl: WebGL2RenderingContext, field: Uint8Array): WebGLText
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
   return texture;
-}
-
-/**
- * The atmosphere's light as a direction in the local frame.
- *
- * Its `light` is screen-space - +x right, +y *down* - and stays so: the sun
- * turns with the camera, as in the pixel skin, so the planet never needs
- * re-lighting per heading. Screen-up reads as "from above and a little behind
- * the viewer", so faces turned to the camera catch it; the elevation lifts it.
- */
-export function lightDirection(atmosphere: Pick<Atmosphere, "light" | "elevation">): Rgb {
-  const x = atmosphere.light.x;
-  const y = atmosphere.light.y * 0.45;
-  const z = 0.3 + atmosphere.elevation;
-  const length = Math.hypot(x, y, z);
-  return [x / length, y / length, z / length];
 }

@@ -9,6 +9,11 @@ describe("choosing a skin", () => {
     }
   });
 
+  it("opens on the low-poly skin, and the default leads the switch order", () => {
+    expect(DEFAULT_SKIN).toBe("lowpoly");
+    expect(SKINS[0]?.id).toBe(DEFAULT_SKIN);
+  });
+
   it("falls back to the default for nothing or a typo, rather than blanking the page", () => {
     expect(parseSkin(null)).toBe(DEFAULT_SKIN);
     expect(parseSkin("")).toBe(DEFAULT_SKIN);

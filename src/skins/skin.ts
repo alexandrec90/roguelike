@@ -31,13 +31,14 @@ export interface SkinInfo {
   readonly label: string;
 }
 
-/** Every skin, in the order the switch key steps through them. The first is the default. */
+/** Every skin, in the order the switch key steps through them. */
 export const SKINS: readonly SkinInfo[] = [
-  { id: "pixel", label: "Pixel art" },
   { id: "lowpoly", label: "Low poly" },
+  { id: "pixel", label: "Pixel art" },
 ];
 
-export const DEFAULT_SKIN: SkinId = "pixel";
+/** What loads with no `?skin=`: the look the game is heading for. */
+export const DEFAULT_SKIN: SkinId = "lowpoly";
 
 /**
  * What a skin module exports: one function that builds the game into `host`

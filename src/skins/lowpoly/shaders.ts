@@ -106,7 +106,30 @@ void main() {
 }
 `;
 
-export const WORLD_FRAGMENT = `#version 300 es
+/**
+ * The cut a fragment may make: what lies past the horizon, and in the mirror
+ * anything lying flat or sunk past it.
+ *
+ * Only in the variant that needs it. A shader that *can* discard switches off
+ * the GPU's early depth test for every draw it makes, so every hidden fragment
+ * of every overlapping mountain and tree is shaded in full - measured at most of
+ * the frame on an integrated GPU. What stands, on screen, never needs to
+ * discard, and draws with `WORLD_FRAGMENT_SOLID`.
+ */
+const CLIP_GLSL = `
+  bool lies = v_kind == ${Kind.ground} || v_kind == ${Kind.shadow} || v_kind == ${Kind.water};
+  // The reflection is of what stands; the ground it would lie on is the water itself.
+  if (lies && (v_rows > ROLL_ROWS || u_mirror < 0.0)) {
+    discard;
+  }
+  // Past the horizon a body is hidden behind the curve by the ground in front of
+  // it. The mirror draws no ground, so it must not draw those bodies either, or
+  // their sunken images land in the middle of every puddle.
+  if (u_mirror < 0.0 && v_rows > ROLL_ROWS) {
+    discard;
+  }`;
+
+const worldFragment = (clips: boolean): string => `#version 300 es
 precision highp float;
 
 in vec4 v_colour;
@@ -135,18 +158,7 @@ vec3 lit(vec3 colour) {
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x) * u_ambient;
 }
 
-void main() {
-  bool lies = v_kind == ${Kind.ground} || v_kind == ${Kind.shadow} || v_kind == ${Kind.water};
-  // The reflection is of what stands; the ground it would lie on is the water itself.
-  if (lies && (v_rows > ROLL_ROWS || u_mirror < 0.0)) {
-    discard;
-  }
-  // Past the horizon a body is hidden behind the curve by the ground in front of
-  // it. The mirror draws no ground, so it must not draw those bodies either, or
-  // their sunken images land in the middle of every puddle.
-  if (u_mirror < 0.0 && v_rows > ROLL_ROWS) {
-    discard;
-  }
+void main() {${clips ? CLIP_GLSL : ""}
   vec3 colour = v_colour.rgb;
   float alpha = v_colour.a;
   float wet = u_water.y;
@@ -171,6 +183,12 @@ void main() {
   outColour = vec4(colour, alpha);
 }
 `;
+
+/** For the ground, the mirror and the sheer pass: may discard. */
+export const WORLD_FRAGMENT = worldFragment(true);
+
+/** For what stands, on screen: never discards, so the depth test runs early. */
+export const WORLD_FRAGMENT_SOLID = worldFragment(false);
 
 /** One triangle over the whole screen; the fragment shader paints the sky by scanline. */
 export const SKY_VERTEX = `#version 300 es

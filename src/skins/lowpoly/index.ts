@@ -24,28 +24,70 @@ import { aimAt, pressButton, pressKey, releaseAll, releaseButton, releaseKey } f
 import { HelpOverlay } from "../../game/help-overlay";
 import { mouseButtonOf } from "../../game/keybindings";
 import { readSceneOptions } from "../../game/scene-options";
+import { puddleField } from "../../game/water/puddle-field";
+import { backendOrder, parseGpu, parseMsaa, type GpuChoice, type LowpolyBackend } from "./backend";
 import { LowpolyGame } from "./lowpoly-game";
+import { backingSize } from "./placement";
+import { WebGlBackend } from "./renderer";
+import { WebGpuBackend } from "./webgpu/webgpu-renderer";
 
-/** Device pixels per CSS pixel, at most: past this the GPU pays for sharpness nobody sees. */
-const MAX_PIXEL_RATIO = 2;
 
 export function mount(host: HTMLElement, query: URLSearchParams): void {
+  const choice = { gpu: parseGpu(query.get("gpu")), samples: parseMsaa(query.get("msaa")) };
+  void createBackend(host, choice).then(({ canvas, backend }) => start(host, canvas, backend, query));
+}
+
+/** A full-window canvas for the skin. */
+function makeCanvas(host: HTMLElement): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.style.inset = "0";
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   canvas.style.imageRendering = "auto";
   host.appendChild(canvas);
-  const gl = canvas.getContext("webgl2", { antialias: true, alpha: false, depth: true, powerPreference: "low-power" });
-  if (gl === null) {
-    throw new Error("The low-poly skin needs WebGL2, and this browser has none.");
+  return canvas;
+}
+
+/**
+ * The first backend that works, in `backendOrder`. Each try gets a fresh canvas:
+ * a canvas keeps the first kind of context it was asked for, so one that
+ * WebGPU refused cannot become a WebGL2 canvas.
+ */
+async function createBackend(
+  host: HTMLElement,
+  choice: { gpu: GpuChoice; samples: number },
+): Promise<{ canvas: HTMLCanvasElement; backend: LowpolyBackend }> {
+  const reasons: string[] = [];
+  for (const kind of backendOrder(choice.gpu, "gpu" in navigator)) {
+    const canvas = makeCanvas(host);
+    try {
+      const backend =
+        kind === "webgpu" ? await WebGpuBackend.create(canvas, puddleField(), choice.samples) : webglBackend(canvas, choice.samples);
+      console.info(`Low-poly skin: drawing with ${kind}${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
+      return { canvas, backend };
+    } catch (error) {
+      canvas.remove();
+      reasons.push(`${kind} unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
-  const game = new LowpolyGame(gl, readSceneOptions(query));
+  throw new Error(`The low-poly skin has no way to draw: ${reasons.join("; ")}`);
+}
+
+function webglBackend(canvas: HTMLCanvasElement, samples: number): LowpolyBackend {
+  const gl = canvas.getContext("webgl2", { antialias: samples > 1, alpha: false, depth: true, powerPreference: "low-power" });
+  if (gl === null) {
+    throw new Error("no WebGL2 context");
+  }
+  return new WebGlBackend(gl, puddleField());
+}
+
+function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, query: URLSearchParams): void {
+  const game = new LowpolyGame(backend, readSceneOptions(query));
 
   const fit = (): void => {
-    const ratio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
-    canvas.width = Math.max(1, Math.round(host.clientWidth * ratio));
-    canvas.height = Math.max(1, Math.round(host.clientHeight * ratio));
+    const size = backingSize(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);
+    canvas.width = size.width;
+    canvas.height = size.height;
     game.resize(host.clientWidth / Math.max(host.clientHeight, 1));
   };
   fit();
