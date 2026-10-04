@@ -127,6 +127,19 @@ describe("the scenery cache", () => {
     expect(keys.has(before.key)).toBe(false);
   });
 
+  it("re-bakes a prewarmed body in a new light before it is ever drawn full size", () => {
+    const { cache } = cacheWith();
+    cache.warm([OAK]);
+    drain(cache);
+    const before = cache.lean(OAK, REST)!.body.key;
+    cache.setLight(quantizeLight({ x: 0.9, y: -0.4 }, 0.3));
+    cache.prewarm(OAK);
+    expect(cache.pending()).toBe(WIND_LEVELS.length);
+    drain(cache);
+    expect(cache.lean(OAK, REST)!.body.key).not.toBe(before);
+    expect(cache.pending()).toBe(0);
+  });
+
   it("drops a bake for a light that was superseded before it landed", () => {
     const { cache } = cacheWith();
     cache.lean(OAK, REST);

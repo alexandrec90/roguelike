@@ -165,15 +165,28 @@ export function bakeScaled(instance: SceneryInstance, light: BakeLight, scale: n
  * at each spacing, or its full-size cloud point-sampled. Posing a recursive oak
  * is most of a bake, and a ladder asked for one scale at a time posed it forty
  * times over.
+ *
+ * Each rung is finished exactly as `bakePose` finishes the body - the particles
+ * over it, then the outline round it - so a rung is the body at that size and
+ * not a second picture of it. A tree walks off the roll onto the field by
+ * swapping its last rung for its full-size bake, and every pixel the two did
+ * not share was a shape change on that frame.
  */
 export function bakeLadder(instance: SceneryInstance, light: BakeLight, scales: readonly number[]): BakedCloud[] {
   const env = bakeEnv(light, { strength: 1, gustiness: 0.6, fixed: 0 });
+  const finish = (cloud: PixelCloud): BakedCloud => bakeCloud(outlineCloud(cloud, light.light));
   const parts = instance.volumes?.(env);
   if (parts !== undefined && parts.length > 0) {
-    return scales.map((scale) => bakeCloud(parts.flatMap((part) => volumeCloud(part.spec, part.light, part.clip, scale))));
+    const overlay = instance.overlay?.(env) ?? [];
+    return scales.map((scale) =>
+      finish([
+        ...parts.flatMap((part) => volumeCloud(part.spec, part.light, part.clip, scale)),
+        ...pointSample(overlay, scale),
+      ]),
+    );
   }
   const cloud = instance.cloud(env);
-  return scales.map((scale) => bakeCloud(pointSample(cloud, scale)));
+  return scales.map((scale) => finish(pointSample(cloud, scale)));
 }
 
 const NEIGHBOURS: readonly (readonly [number, number])[] = [
