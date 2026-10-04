@@ -84,7 +84,9 @@ hold it down are about layers and pixels, not arithmetic:
 
 - **No `discard` in the solids' shader.** A shader that can discard turns off the early
   depth test for every draw it makes. On-screen solids use `WORLD_FRAGMENT_SOLID` /
-  `worldWgsl(false)`; only the ground, the mirror and the sheer pass may discard.
+  `worldWgsl(false)`; only the ground, the mirror and the sheer pass may discard - and
+  the landforms (`Kind.land`, their own draw list), on a frame where `cutaway.ts` opens
+  the pixel skin's window round the hero because nearer land stands over him.
 - **The ground draws first, alone, and only where it can show** (`groundInView`); the
   mirror draws only what is within `MIRROR_ROWS` of the field.
 - **A pixel budget** (`backingSize`, `MAX_DRAWN_PIXELS`): a high-DPI window would
@@ -117,6 +119,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
 | `terrain-mesh.ts` | `groundMesh` · `lakeMesh` · `landformMesh` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
+| `cutaway.ts` | `heroCutaway` · `heroHidden` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
 | `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
 | `ripples.ts` | `RippleRing` |

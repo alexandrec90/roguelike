@@ -10,7 +10,7 @@ import { HeroDriver } from "../../game/hero/hero-driver";
 import { ACTOR_MESH_KEYS, ActorMeshes } from "./actor-frame";
 import { nearestFirst } from "./lowpoly-game";
 import { heroHeightPx, heroMesh } from "./hero-mesh";
-import { MeshBuilder, VERTEX_BYTES } from "./mesh";
+import { Kind, MeshBuilder, VERTEX_BYTES } from "./mesh";
 import { lightDirection } from "./sky-light";
 import { MESHED_SPECIES } from "./scenery-mesh";
 import { WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
@@ -48,6 +48,16 @@ describe("the planet in chunks", () => {
     for (const species of PLACED_SPECIES) {
       expect(MESHED_SPECIES).toContain(species);
     }
+  });
+
+  it("keeps the landforms apart from the bodies, so only they can be cut round the hero", () => {
+    const landform = planetLandforms()[0]!;
+    const chunk = buildChunk(Math.floor(landform.x / CHUNK_TILES), Math.floor(landform.y / CHUNK_TILES));
+    const kinds = (bytes: Uint8Array): Set<number> =>
+      new Set(Array.from({ length: bytes.byteLength / VERTEX_BYTES }, (_, i) => bytes[i * VERTEX_BYTES + 23]!));
+    expect(chunk.land.byteLength).toBeGreaterThan(0);
+    expect(kinds(chunk.land)).toEqual(new Set([Kind.land]));
+    expect(kinds(chunk.solid).has(Kind.land)).toBe(false);
   });
 
   it("meshes every landform coarse enough to be low poly and fine enough for a tower's walls", () => {

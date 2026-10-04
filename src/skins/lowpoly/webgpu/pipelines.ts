@@ -5,7 +5,7 @@
  * | Pipeline | Target | Depth | Blend |
  * | --- | --- | --- | --- |
  * | `worldMirror` | the reflection, single-sampled | written | none |
- * | `worldGround` | the screen, 4× MSAA | written | none |
+ * | `worldGround` | the screen, 4× MSAA; the land too, on a frame with a window round the hero | written | none |
  * | `worldSolid` | the screen, without discard | written, tested early | none |
  * | `worldSheer` | the screen | tested, not written | alpha |
  * | `sky`, `rain` | the screen | ignored | none / alpha |
