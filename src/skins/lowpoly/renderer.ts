@@ -1,23 +1,28 @@
 /**
- * The WebGL2 half of the skin: the only file here that touches the context.
+ * The WebGL2 half of the skin: the only files here that touch the context are
+ * this one and the passes it owns (`reflection.ts`, `rain-pass.ts`).
  *
- * Three kinds of buffer and two passes. Each chunk of the planet is two static
- * buffers uploaded once (`world-chunks.ts`); the hero and the actors are
- * re-uploaded each frame, a few hundred triangles. The solid pass draws them
- * all with depth; the sheer pass lays shadows, water and spell light over it,
- * blended, without writing depth. The sky is one triangle before either.
+ * A frame is four passes. The world **mirrored** - what stands, height flipped -
+ * into a half-size target. Then the sky; the **solid** pass, where the ground
+ * reads its puddles and the mirror; the **sheer** pass of shadows, lakes and
+ * spell light, blended without writing depth; and the **rain** over all of it.
+ * Each chunk of the planet is two static buffers uploaded once
+ * (`world-chunks.ts`); the hero and the actors are re-uploaded each frame.
  *
- * Budget: ~140 draw calls and ~150k triangles, almost all of them static - an
- * integrated GPU's comfortable territory. The CPU's share is building the
- * actor meshes (well under a millisecond) and setting a dozen uniforms.
+ * Budget: the static geometry twice (once mirrored, at a quarter of the pixels),
+ * ~280 draw calls; water costs per pixel only where there is water. The CPU's
+ * share is the actor meshes and a few dozen uniforms.
  */
 
 import type { Atmosphere } from "../../game/atmosphere";
-import { rgb, VERTEX_BYTES, type Rgb } from "./mesh";
+import { FIELD_SIZE } from "../../game/water/puddle-field";
+import { program, Uniforms } from "./gl-util";
+import { mixRgb, rgb, VERTEX_BYTES, type Rgb } from "./mesh";
 import { DEPTH_FAR, DEPTH_NEAR, type LowpolyView } from "./placement";
+import { ReflectionTarget } from "./reflection";
 import { SKY_FRAGMENT, SKY_VERTEX, WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
 
-interface Drawable {
+export interface Drawable {
   readonly vao: WebGLVertexArrayObject;
   readonly buffer: WebGLBuffer;
   count: number;
@@ -31,22 +36,50 @@ export interface DrawFrame {
   readonly turn: number;
 }
 
+/** The water's state this frame, as the shader reads it. */
+export interface WaterState {
+  /** The hero's planet point: what a water pixel's planet point is measured from. */
+  readonly hero: readonly [number, number];
+  /** `waterLevel(wetness)`. */
+  readonly level: number;
+  readonly wetness: number;
+  readonly rain: number;
+  /** The shader's clock, seconds. */
+  readonly seconds: number;
+  /** `RippleRing.slots`. */
+  readonly ripples: Float32Array;
+}
+
 export interface FrameUniforms {
   readonly view: LowpolyView;
   readonly atmosphere: Atmosphere;
   readonly shake: { readonly x: number; readonly y: number };
+  readonly water: WaterState;
+  /** The drawing buffer, device pixels. */
+  readonly width: number;
+  readonly height: number;
 }
 
-export class LowpolyRenderer {
-  private readonly world: WebGLProgram;
-  private readonly sky: WebGLProgram;
-  private readonly skyVao: WebGLVertexArrayObject;
-  private readonly uniforms = new Map<string, WebGLUniformLocation | null>();
+/** Texture units: the puddle field and the mirror. */
+const PUDDLE_UNIT = 1;
+const REFLECT_UNIT = 2;
 
-  constructor(private readonly gl: WebGL2RenderingContext) {
-    this.world = program(gl, WORLD_VERTEX, WORLD_FRAGMENT);
-    this.sky = program(gl, SKY_VERTEX, SKY_FRAGMENT);
+export class LowpolyRenderer {
+  private readonly world: Uniforms;
+  private readonly sky: Uniforms;
+  private readonly skyVao: WebGLVertexArrayObject;
+  private readonly puddles: WebGLTexture;
+  private readonly reflection: ReflectionTarget;
+
+  constructor(
+    private readonly gl: WebGL2RenderingContext,
+    puddleField: Uint8Array,
+  ) {
+    this.world = new Uniforms(gl, program(gl, WORLD_VERTEX, WORLD_FRAGMENT));
+    this.sky = new Uniforms(gl, program(gl, SKY_VERTEX, SKY_FRAGMENT));
     this.skyVao = gl.createVertexArray();
+    this.puddles = puddleTexture(gl, puddleField);
+    this.reflection = new ReflectionTarget(gl);
   }
 
   /** A buffer for geometry, filled now (static) or every frame (`update`). */
@@ -81,36 +114,35 @@ export class LowpolyRenderer {
     drawable.count = bytes.byteLength / VERTEX_BYTES;
   }
 
-  /** Clear to the sky, and set everything a world draw shares this frame. */
-  begin(width: number, height: number, frame: FrameUniforms): void {
+  /**
+   * Start the frame: every world uniform it shares, then the mirror pass, into
+   * which the caller draws what stands (`solid` is already set up).
+   */
+  beginReflection(frame: FrameUniforms): void {
     const gl = this.gl;
-    gl.viewport(0, 0, width, height);
+    gl.useProgram(this.world.target);
+    this.setWorld(frame);
+    this.reflection.bind(frame.width, frame.height, stillSky(frame.atmosphere));
+    gl.uniform1f(this.world.at("u_mirror"), -1);
+    this.solid();
+  }
+
+  /** Back to the screen: the sky, then ready for the solid pass. */
+  beginScreen(frame: FrameUniforms): void {
+    const gl = this.gl;
+    this.reflection.unbind();
+    gl.viewport(0, 0, frame.width, frame.height);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
-    gl.disable(gl.CULL_FACE);
     gl.depthMask(true);
     gl.clearDepth(1);
     gl.clear(gl.DEPTH_BUFFER_BIT);
-
-    const { view, atmosphere } = frame;
-    gl.useProgram(this.sky);
-    this.set3(this.sky, "u_top", rgb(atmosphere.skyTop));
-    this.set3(this.sky, "u_bottom", rgb(atmosphere.skyHorizon));
-    this.set3(this.sky, "u_haze", rgb(atmosphere.haze));
-    gl.uniform1f(this.at(this.sky, "u_height"), view.height);
-    gl.uniform1f(this.at(this.sky, "u_horizon"), view.layout.horizonY + frame.shake.y);
-    gl.bindVertexArray(this.skyVao);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    gl.useProgram(this.world);
-    gl.uniform4f(this.at(this.world, "u_view"), view.width, view.height, view.footX, view.footY);
-    gl.uniform4f(this.at(this.world, "u_roll"), view.layout.groundTop, view.layout.rollHeight, view.knee, view.atanRows);
-    gl.uniform2f(this.at(this.world, "u_depth"), DEPTH_NEAR, DEPTH_FAR);
-    gl.uniform2f(this.at(this.world, "u_shake"), frame.shake.x, frame.shake.y);
-    this.set3(this.world, "u_lightDir", lightDirection(atmosphere));
-    this.set3(this.world, "u_ambient", rgb(atmosphere.ambient));
-    this.set3(this.world, "u_haze", rgb(atmosphere.haze));
-    gl.uniform3f(this.at(this.world, "u_shading"), 0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight);
+    this.drawSky(frame);
+    gl.useProgram(this.world.target);
+    gl.uniform1f(this.world.at("u_mirror"), 1);
+    gl.activeTexture(gl.TEXTURE0 + REFLECT_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, this.reflection.texture);
+    this.solid();
   }
 
   /** The opaque pass: depth tested and written. */
@@ -137,23 +169,72 @@ export class LowpolyRenderer {
       return;
     }
     const gl = this.gl;
-    gl.uniform2f(this.at(this.world, "u_offset"), frame.offset[0], frame.offset[1]);
-    gl.uniform2f(this.at(this.world, "u_rot"), Math.cos(frame.turn), Math.sin(frame.turn));
+    gl.uniform2f(this.world.at("u_offset"), frame.offset[0], frame.offset[1]);
+    gl.uniform2f(this.world.at("u_rot"), Math.cos(frame.turn), Math.sin(frame.turn));
     gl.bindVertexArray(drawable.vao);
     gl.drawArrays(gl.TRIANGLES, 0, drawable.count);
   }
 
-  private set3(target: WebGLProgram, name: string, value: Rgb): void {
-    this.gl.uniform3f(this.at(target, name), value[0], value[1], value[2]);
+  private drawSky(frame: FrameUniforms): void {
+    const gl = this.gl;
+    const { view, atmosphere } = frame;
+    gl.useProgram(this.sky.target);
+    gl.uniform3fv(this.sky.at("u_top"), rgb(atmosphere.skyTop));
+    gl.uniform3fv(this.sky.at("u_bottom"), rgb(atmosphere.skyHorizon));
+    gl.uniform3fv(this.sky.at("u_haze"), rgb(atmosphere.haze));
+    gl.uniform1f(this.sky.at("u_height"), view.height);
+    gl.uniform1f(this.sky.at("u_horizon"), view.layout.horizonY + frame.shake.y);
+    gl.bindVertexArray(this.skyVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  private at(target: WebGLProgram, name: string): WebGLUniformLocation | null {
-    const key = `${target === this.world ? "w" : "s"}:${name}`;
-    if (!this.uniforms.has(key)) {
-      this.uniforms.set(key, this.gl.getUniformLocation(target, name));
-    }
-    return this.uniforms.get(key) ?? null;
+  private setWorld(frame: FrameUniforms): void {
+    const gl = this.gl;
+    const { view, atmosphere, water } = frame;
+    const at = (name: string): WebGLUniformLocation | null => this.world.at(name);
+    gl.uniform4f(at("u_view"), view.width, view.height, view.footX, view.footY);
+    gl.uniform4f(at("u_roll"), view.layout.groundTop, view.layout.rollHeight, view.knee, view.atanRows);
+    gl.uniform2f(at("u_depth"), DEPTH_NEAR, DEPTH_FAR);
+    gl.uniform2f(at("u_shake"), frame.shake.x, frame.shake.y);
+    gl.uniform3fv(at("u_lightDir"), lightDirection(atmosphere));
+    gl.uniform3fv(at("u_ambient"), rgb(atmosphere.ambient));
+    gl.uniform3fv(at("u_haze"), rgb(atmosphere.haze));
+    gl.uniform3f(at("u_shading"), 0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight);
+    gl.uniform2f(at("u_hero"), water.hero[0], water.hero[1]);
+    gl.uniform2f(at("u_resolution"), frame.width, frame.height);
+    gl.uniform4f(at("u_water"), water.level, water.wetness, water.rain, water.seconds);
+    gl.uniform4fv(at("u_ripples[0]"), water.ripples);
+    gl.uniform1i(at("u_puddles"), PUDDLE_UNIT);
+    gl.uniform1i(at("u_reflect"), REFLECT_UNIT);
+    gl.activeTexture(gl.TEXTURE0 + PUDDLE_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, this.puddles);
+    // Nothing reads the mirror while it is being drawn into.
+    gl.activeTexture(gl.TEXTURE0 + REFLECT_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, null);
   }
+}
+
+/**
+ * What still water shows with nothing standing over it. The projection is
+ * parallel, so every pixel of a mirror looks up the same way: steeply, at the
+ * upper sky, a little toward the horizon's colour.
+ */
+export function stillSky(atmosphere: Pick<Atmosphere, "skyTop" | "skyHorizon">): Rgb {
+  return mixRgb(rgb(atmosphere.skyTop), rgb(atmosphere.skyHorizon), 0.35);
+}
+
+/** The puddle field as a one-channel texture, read bilinearly and wrapping - as `sampleField` reads it. */
+function puddleTexture(gl: WebGL2RenderingContext, field: Uint8Array): WebGLTexture {
+  const texture = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0 + PUDDLE_UNIT);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, FIELD_SIZE, FIELD_SIZE, 0, gl.RED, gl.UNSIGNED_BYTE, field);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  return texture;
 }
 
 /**
@@ -170,28 +251,4 @@ export function lightDirection(atmosphere: Pick<Atmosphere, "light" | "elevation
   const z = 0.3 + atmosphere.elevation;
   const length = Math.hypot(x, y, z);
   return [x / length, y / length, z / length];
-}
-
-function program(gl: WebGL2RenderingContext, vertex: string, fragment: string): WebGLProgram {
-  const made = gl.createProgram();
-  for (const [type, source] of [
-    [gl.VERTEX_SHADER, vertex],
-    [gl.FRAGMENT_SHADER, fragment],
-  ] as const) {
-    const shader = gl.createShader(type);
-    if (shader === null) {
-      throw new Error("Could not create a shader");
-    }
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      throw new Error(`Low-poly shader failed to compile: ${gl.getShaderInfoLog(shader) ?? ""}`);
-    }
-    gl.attachShader(made, shader);
-  }
-  gl.linkProgram(made);
-  if (!gl.getProgramParameter(made, gl.LINK_STATUS)) {
-    throw new Error(`Low-poly program failed to link: ${gl.getProgramInfoLog(made) ?? ""}`);
-  }
-  return made;
 }

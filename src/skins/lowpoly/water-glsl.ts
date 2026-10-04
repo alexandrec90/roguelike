@@ -55,10 +55,13 @@ vec4 cellHash(vec2 cell, float salt) {
   return vec4(h) / 4294967295.0;
 }
 
-/** Slope of one expanding ring at distance \`d\` past its front: a short, damped wave. */
+/** Slope of one expanding ring at distance \`past\` beyond its front: a short, damped wave. */
 float ringWave(float past, float sharp) {
   return exp(-past * past * sharp) * sin(past * 38.0);
 }
+
+/** How bright the rings' crests are here, summed: what makes a ring read as a ring, not a smudge. */
+float g_crest = 0.0;
 
 /** Slope from rain: a lattice of cells, each dropping a ring on its own beat. */
 vec2 rainSlope(vec2 p) {
@@ -85,7 +88,9 @@ vec2 rainSlope(vec2 p) {
         float dist = length(away);
         float past = dist - t * size * 0.9;
         float fade = (1.0 - t) * (1.0 - t);
-        slope += (away / max(dist, 1e-4)) * ringWave(past, 900.0) * fade;
+        float wave = ringWave(past, 900.0) * fade;
+        slope += (away / max(dist, 1e-4)) * wave;
+        g_crest += max(wave, 0.0);
       }
     }
   }
@@ -106,7 +111,9 @@ vec2 stepSlope(vec2 p) {
     float life = 1.0 - age / RIPPLE_LIFE;
     for (int ring = 0; ring < 2; ring++) {
       float past = dist - age * (0.75 - 0.25 * float(ring));
-      slope += (away / max(dist, 1e-4)) * ringWave(past, 260.0) * life * life * ripple.w;
+      float wave = ringWave(past, 260.0) * life * life * ripple.w;
+      slope += (away / max(dist, 1e-4)) * wave;
+      g_crest += max(wave, 0.0);
     }
   }
   return slope;
@@ -117,13 +124,14 @@ vec2 stepSlope(vec2 p) {
  * slope, over a glimpse of the bed, and a glint where a ring faces the light.
  */
 vec3 waterColour(vec2 planet, vec3 bed, vec3 lightDir) {
+  g_crest = 0.0;
   vec2 slope = rainSlope(planet) * 0.6 + stepSlope(planet);
   vec2 uv = gl_FragCoord.xy / u_resolution + slope * vec2(0.012, -0.02);
   vec3 mirrored = texture(u_reflect, uv).rgb;
   vec3 normal = normalize(vec3(-slope * 0.35, 1.0));
   vec3 halfway = normalize(lightDir + vec3(0.0, -0.45, 0.9));
   float glint = pow(max(dot(normal, halfway), 0.0), 60.0) * 0.5;
-  return mix(bed, mirrored, 0.72) + glint;
+  return mix(bed, mirrored, 0.72) + glint + min(g_crest, 1.0) * 0.16;
 }
 
 /** How deep the field's water is at a planet point: < 0 dry, > 0 standing water. */

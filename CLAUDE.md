@@ -71,7 +71,13 @@ depths instead of sky — belong to that identity too: build them as simulation 
 change to what the lip shows, so every skin gets them. Nothing below this section about
 pixels, inks, dither or the 320×180 target binds a skin other than `pixel`.
 
-Not yet in the low-poly skin: weather, the campfire, wildfire and decals (their
+**Standing water is shared world state:** `src/game/water/puddle-field.ts` bakes seeded
+basins over the planet, and water stands where a basin is deeper than a level the rain
+lowers (`stepWetness`) - ~8% of open ground on a dry day, ~27% soaked. The low-poly skin
+draws it with mirror reflections and rain and footstep rings; the pixel skin still draws
+only its own small puddles (`puddlesNear`) and has not adopted the field yet.
+
+Not yet in the low-poly skin: lightning, the campfire, wildfire and decals (their
 simulation still lives inside pixel layers), and the `?bench=1` route.
 
 ## Visual and Asset Architecture

@@ -18,8 +18,7 @@ import { PLANET_TILES, wrapDelta, type PlanetPoint } from "../../game/planet";
 import { sceneryNear } from "../../game/scenery-features";
 import { MeshBuilder } from "./mesh";
 import { sceneryMesh } from "./scenery-mesh";
-import { puddlesNear } from "../../game/terrain";
-import { groundMesh, lakeMesh, landformMesh, puddleMesh } from "./terrain-mesh";
+import { groundMesh, lakeMesh, landformMesh } from "./terrain-mesh";
 
 export const CHUNK_TILES = 32;
 export const CHUNKS_PER_SIDE = PLANET_TILES / CHUNK_TILES;
@@ -51,11 +50,6 @@ export function buildChunk(cx: number, cy: number): ChunkMesh {
   for (const lake of planetLakes()) {
     if (inChunk(lake, cx, cy)) {
       lakeMesh(sheer, lake, origin);
-    }
-  }
-  for (const puddle of puddlesNear(centre, CHUNK_TILES / 2)) {
-    if (inChunk(puddle, cx, cy)) {
-      puddleMesh(sheer, puddle, origin);
     }
   }
   for (const landform of planetLandforms()) {

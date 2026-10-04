@@ -36,6 +36,24 @@ placed and shrunk about its foot on the lip, as a sprite is in the pixel skin. T
 ground, water and landforms are anchored at themselves, so they bend over the lip point
 by point. A new body that forgets its anchor shears apart on the lip.
 
+## Water: a mirror, not a ray
+
+Standing water is shaded per pixel (`water-glsl.ts`), from three things:
+
+- **Where it stands** is the shared puddle field (`src/game/water/puddle-field.ts`):
+  basins baked once into bytes, a level that falls as `stepWetness` soaks the ground.
+  The shader reads those bytes as a texture exactly as `sampleField` does, so the
+  simulation's "is this foot wet" (`WetWorld.isWet`) and the drawn shore agree. Never
+  decide in the shader where water is.
+- **What it shows** is the world drawn mirrored, height negated (`u_mirror`), into a
+  half-size target (`reflection.ts`). In a parallel projection that is the exact planar
+  reflection. The mirror pass draws no ground, so it must also skip whatever the ground
+  would have hidden: past the horizon line nothing is drawn into it.
+- **How it moves** is rings as surface slope: rain cells pinned to the planet, plus
+  `MAX_RIPPLES` footstep and landing rings from `WetWorld` (`stepWake`).
+
+Rain itself is one full-screen pass of hashed streaks (`rain-pass.ts`), nothing on the CPU.
+
 ## Where things come from
 
 | Want | Read it from | Never |
@@ -48,9 +66,11 @@ by point. A new body that forgets its anchor shears apart on the lip.
 ## The budget
 
 All 64 chunks of the planet are built once, nearest first, before the first frame, and
-drawn every frame as static buffers: ~140 draw calls, ~150k triangles. The actors are
-rebuilt per frame, a few hundred triangles. Measured in the running page: ~1 ms of CPU a
-frame (draw ~1.0, simulation ~0.1). A change that adds per-frame CPU work names its cost.
+drawn every frame as static buffers - twice, once mirrored at a quarter of the pixels:
+~280 draw calls. The actors are rebuilt per frame, a few hundred triangles. Measured in
+the running page at 1280×720 in rain: ~1.3 ms a frame with the GPU drained, simulation
+~0.1 of it. Water's per-pixel cost is paid only where there is water. A change that adds
+per-frame work names its cost.
 
 ## The API, in one table
 
@@ -63,10 +83,16 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
-| `terrain-mesh.ts` | `groundMesh` · `lakeMesh` · `puddleMesh` · `landformMesh` |
+| `terrain-mesh.ts` | `groundMesh` · `lakeMesh` · `landformMesh` |
+| `wet-world.ts` | `WetWorld` · `shaderSeconds` |
+| `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
+| `ripples.ts` | `RippleRing` |
+| `reflection.ts` | `ReflectionTarget` · `REFLECTION_SCALE` |
+| `rain-pass.ts` | `RainPass` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `CHUNK_TILES` |
 | `hero-mesh.ts` | `heroMesh` · `heroHeightPx` |
 | `actor-mesh.ts` | `slimeMesh` · `fireballMesh` · `burstMesh` |
+| `actor-frame.ts` | `ActorMeshes` · `ACTOR_MESH_KEYS` |
 | `renderer.ts` | `LowpolyRenderer` · `lightDirection` |
 
 A new species is one entry in `scenery-mesh.ts`'s table; `world.test.ts` fails if the

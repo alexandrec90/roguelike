@@ -14,25 +14,23 @@
 import { WorldClock } from "../../game/world-clock";
 import { EncounterSim } from "../../game/encounter-sim";
 import { HeroDriver } from "../../game/hero/hero-driver";
-import { layeredPose } from "../../game/hero/hero-figure";
-import { tracksOf } from "../../game/hero/hero-look";
 import { easeYaw } from "../../game/hero/turn";
-import { dryGround, wadeDepth } from "../../game/lakes";
+import { dryGround } from "../../game/lakes";
 import type { SceneOptions } from "../../game/scene-options";
-import type { PlanetPoint } from "../../game/planet";
-import { burstMesh, fireballMesh, slimeMesh } from "./actor-mesh";
-import { heroHeightPx, heroMesh } from "./hero-mesh";
-import { MeshBuilder } from "./mesh";
+import { fromLocal, type PlanetPoint } from "../../game/planet";
+import { puddleField } from "../../game/water/puddle-field";
+import { WEATHER_PRESETS } from "../../game/water/schedule";
+import { RAIN_SLANT } from "../../game/weather";
+import { ACTOR_MESH_KEYS, ActorMeshes, type ActorMeshKey } from "./actor-frame";
+import { RainPass } from "./rain-pass";
+import { WetWorld } from "./wet-world";
+import { heroHeightPx } from "./hero-mesh";
 import { lowpolyView, type LowpolyView } from "./placement";
 import { LowpolyRenderer } from "./renderer";
-import { shadowUnder } from "./scenery-mesh";
 import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE, type ChunkMesh } from "./world-chunks";
 
 /** Where the session opens: the pixel skin's start, so a switch lands in the same field. */
 const START: PlanetPoint = { x: 128, y: 128 };
-
-/** How far into a lake the hero's shins go, tiles, at the edge of the deep water. */
-const WADE_SINK = 0.4;
 
 /** Milliseconds of chunk building a frame may spend while the planet is still being made. */
 const BUILD_BUDGET_MS = 10;
@@ -50,11 +48,13 @@ export class LowpolyGame {
   readonly encounter = new EncounterSim();
   readonly heroHeight = heroHeightPx();
   private readonly clock: WorldClock;
+  private readonly wet: WetWorld;
   private readonly renderer: LowpolyRenderer;
+  private readonly rain: RainPass;
   private readonly chunks: LoadedChunk[] = [];
   private readonly pending: { cx: number; cy: number }[];
-  private readonly builders = { heroSolid: new MeshBuilder(), heroSheer: new MeshBuilder(), actorSolid: new MeshBuilder(), actorSheer: new MeshBuilder() };
-  private readonly dynamic: Record<keyof LowpolyGame["builders"], Drawable>;
+  private readonly actors = new ActorMeshes();
+  private readonly dynamic: Record<ActorMeshKey, Drawable>;
   private shownYaw: number;
   view: LowpolyView;
 
@@ -64,7 +64,9 @@ export class LowpolyGame {
   ) {
     this.hero = new HeroDriver({ ...dryGround(START), turn: 0 }, options.radius);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
-    this.renderer = new LowpolyRenderer(gl);
+    this.wet = new WetWorld(options.weather === undefined ? undefined : WEATHER_PRESETS[options.weather]);
+    this.renderer = new LowpolyRenderer(gl, puddleField());
+    this.rain = new RainPass(gl);
     this.dynamic = {
       heroSolid: this.renderer.createDrawable(),
       heroSheer: this.renderer.createDrawable(),
@@ -100,7 +102,10 @@ export class LowpolyGame {
   step(deltaMs: number): void {
     const worldDelta = this.clock.tick(deltaMs);
     this.hero.step(worldDelta);
-    this.encounter.step(this.hero, worldDelta, this.clock.elapsedMs, this.clock.sink);
+    const events = this.encounter.step(this.hero, worldDelta, this.clock.elapsedMs, this.clock.sink);
+    const where = this.hero.whereabouts();
+    const landings = events.landings.map((landing) => fromLocal(where.ground, landing.at));
+    this.wet.step(this.clock.elapsedMs, worldDelta, { pose: { ...where.at, turn: where.turn }, walked: where.walked }, landings);
     this.shownYaw = easeYaw(this.shownYaw, this.hero.player.facing, worldDelta);
   }
 
@@ -109,49 +114,43 @@ export class LowpolyGame {
     const where = this.hero.whereabouts();
     const live = where.at;
     this.buildActors(live);
-    const atmosphere = this.clock.atmosphere(0);
+    const weather = this.wet.weather;
+    const atmosphere = this.clock.atmosphere(weather.overcast);
+    const frame = { view: this.view, atmosphere, shake: this.clock.shake(), water: this.wet.water(live, this.clock.elapsedMs), width, height };
     const renderer = this.renderer;
-    renderer.begin(width, height, { view: this.view, atmosphere, shake: this.clock.shake() });
-    const turn = where.turn;
-    const local = { offset: [0, 0] as const, turn: 0 };
-    const planet = { offset: [0, 0] as const, turn };
-    renderer.solid();
-    for (const chunk of this.chunks) {
-      renderer.draw(chunk.solid, { offset: asPair(chunkOffset(chunk.mesh, live)), turn });
-    }
-    renderer.draw(this.dynamic.actorSolid, planet);
-    renderer.draw(this.dynamic.heroSolid, local);
+    // What stands, mirrored, for the water to show; then the world itself.
+    renderer.beginReflection(frame);
+    this.drawSolids(live, where.turn);
+    renderer.beginScreen(frame);
+    this.drawSolids(live, where.turn);
     renderer.sheer();
     for (const chunk of this.chunks) {
-      renderer.draw(chunk.sheer, { offset: asPair(chunkOffset(chunk.mesh, live)), turn });
+      renderer.draw(chunk.sheer, { offset: asPair(chunkOffset(chunk.mesh, live)), turn: where.turn });
     }
-    renderer.draw(this.dynamic.actorSheer, planet);
-    renderer.draw(this.dynamic.heroSheer, local);
+    renderer.draw(this.dynamic.actorSheer, { offset: [0, 0], turn: where.turn });
+    renderer.draw(this.dynamic.heroSheer, { offset: [0, 0], turn: 0 });
+    this.rain.draw({
+      strength: weather.rain,
+      seconds: this.clock.elapsedMs / 1000,
+      slant: RAIN_SLANT * weather.wind,
+      light: 0.55 + 0.45 * atmosphere.daylight,
+      width: this.view.width,
+      height: this.view.height,
+    });
+  }
+
+  private drawSolids(live: PlanetPoint, turn: number): void {
+    for (const chunk of this.chunks) {
+      this.renderer.draw(chunk.solid, { offset: asPair(chunkOffset(chunk.mesh, live)), turn });
+    }
+    this.renderer.draw(this.dynamic.actorSolid, { offset: [0, 0], turn });
+    this.renderer.draw(this.dynamic.heroSolid, { offset: [0, 0], turn: 0 });
   }
 
   private buildActors(live: PlanetPoint): void {
-    const b = this.builders;
-    for (const builder of Object.values(b)) {
-      builder.reset();
-    }
-    const player = this.hero.player;
-    heroMesh(b.heroSolid, layeredPose(tracksOf(player, this.clock.elapsedMs)), {
-      yaw: this.shownYaw,
-      enchanted: player.enchanted,
-      sunk: wadeDepth(live) * WADE_SINK,
-    });
-    shadowUnder(b.heroSheer, [0, 0, 0], 0.32);
-    for (const slime of this.encounter.slimes.slimes) {
-      slimeMesh(b.actorSolid, b.actorSheer, slime, live);
-    }
-    for (const ball of this.encounter.fireballs) {
-      fireballMesh(b.actorSheer, ball, live);
-    }
-    for (const burst of this.encounter.bursts) {
-      burstMesh(b.actorSheer, burst, live);
-    }
-    for (const key of Object.keys(b) as (keyof typeof b)[]) {
-      this.renderer.update(this.dynamic[key], b[key].bytesView());
+    this.actors.build({ player: this.hero.player, elapsedMs: this.clock.elapsedMs, yaw: this.shownYaw, live, encounter: this.encounter });
+    for (const key of ACTOR_MESH_KEYS) {
+      this.renderer.update(this.dynamic[key], this.actors.bytes(key));
     }
   }
 }

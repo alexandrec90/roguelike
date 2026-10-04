@@ -141,6 +141,12 @@ void main() {
   if (lies && (v_rows > ROLL_ROWS || u_mirror < 0.0)) {
     discard;
   }
+  // Past the horizon a body is hidden behind the curve by the ground in front of
+  // it. The mirror draws no ground, so it must not draw those bodies either, or
+  // their sunken images land in the middle of every puddle.
+  if (u_mirror < 0.0 && v_rows > ROLL_ROWS) {
+    discard;
+  }
   vec3 colour = v_colour.rgb;
   float alpha = v_colour.a;
   float wet = u_water.y;

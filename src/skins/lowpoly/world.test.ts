@@ -5,6 +5,9 @@ import { PLACED_SPECIES } from "../../game/scenery-features";
 import { PLANET_TILES } from "../../game/planet";
 import { heroHeight } from "../../game/hero-layer";
 import { HERO_EQUIPPED } from "../../game/models";
+import { EncounterSim } from "../../game/encounter-sim";
+import { HeroDriver } from "../../game/hero/hero-driver";
+import { ACTOR_MESH_KEYS, ActorMeshes } from "./actor-frame";
 import { nearestFirst } from "./lowpoly-game";
 import { heroHeightPx, heroMesh } from "./hero-mesh";
 import { MeshBuilder, VERTEX_BYTES } from "./mesh";
@@ -67,6 +70,18 @@ describe("the low-poly hero", () => {
     expect(front.vertexCount).toBeGreaterThan(300);
     expect(back.vertexCount).toBe(front.vertexCount);
     expect(back.bytesView()).not.toEqual(front.bytesView());
+  });
+});
+
+describe("the frame's moving meshes", () => {
+  it("builds the hero solid with his shadow, and nothing for actors that are not there", () => {
+    const actors = new ActorMeshes();
+    const hero = new HeroDriver({ x: 128, y: 128, turn: 0 });
+    actors.build({ player: hero.player, elapsedMs: 0, yaw: 0, live: { x: 128, y: 128 }, encounter: new EncounterSim() });
+    expect(ACTOR_MESH_KEYS).toHaveLength(4);
+    expect(actors.bytes("heroSolid").byteLength).toBeGreaterThan(0);
+    expect(actors.bytes("heroSheer").byteLength).toBeGreaterThan(0);
+    expect(actors.bytes("actorSolid").byteLength).toBe(0);
   });
 });
 

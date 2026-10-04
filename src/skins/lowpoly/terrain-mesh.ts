@@ -25,7 +25,7 @@ import {
 } from "../../game/landforms";
 import { PLANET_TILES, wrapTile, type PlanetPoint } from "../../game/planet";
 import { WALL_RISE } from "../../game/projection";
-import { terrainAt, type Feature } from "../../game/terrain";
+import { terrainAt } from "../../game/terrain";
 import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
 import { faceTint, hash01, LOWPOLY, seedOf } from "./palette";
 import { disc } from "./primitives";
@@ -105,24 +105,15 @@ export function groundMesh(solid: MeshBuilder, origin: PlanetPoint, size: number
 /** Corners round a lake's shore: enough to read as round, few enough to read as low poly. */
 const LAKE_SIDES = 18;
 
-/** A lake as two sheets of water: the shallows out to its ragged shore, the deep core inside. */
+/**
+ * A lake: one sheet of water out to its ragged shore. The water shader mirrors
+ * the world in it; the colour here is only the bed it glimpses, darker for a
+ * lake deep enough to have a core.
+ */
 export function lakeMesh(sheer: MeshBuilder, lake: Lake, origin: PlanetPoint): void {
   const centre: Vec3 = [lake.x - origin.x, lake.y - origin.y, 0.04];
   const shore = (corner: number): number => lake.shore + (lake.reach - lake.shore) * hash01(lake.seed + corner * 13);
-  disc(sheer, centre, shore, LAKE_SIDES, { colour: LOWPOLY.water, kind: Kind.water, alpha: 0.62 });
-  if (lake.deep > 0) {
-    disc(sheer, [centre[0], centre[1], 0.05], lake.deep, LAKE_SIDES, { colour: LOWPOLY.waterDeep, kind: Kind.water, alpha: 0.55 });
-  }
-}
-
-/**
- * A puddle (`puddlesNear`): a small ragged sheet of water. Its `size` is a
- * radius in logical pixels across, so a tile is `WALL_RISE` of them.
- */
-export function puddleMesh(sheer: MeshBuilder, puddle: Feature, origin: PlanetPoint): void {
-  const radius = puddle.size / WALL_RISE;
-  const ragged = (corner: number): number => radius * (0.75 + 0.35 * hash01(puddle.seed + corner * 7));
-  disc(sheer, [puddle.x - origin.x, puddle.y - origin.y, 0.03], ragged, 9, { colour: LOWPOLY.water, kind: Kind.water, alpha: 0.55 });
+  disc(sheer, centre, shore, LAKE_SIDES, { colour: lake.deep > 0 ? LOWPOLY.waterDeep : LOWPOLY.water, kind: Kind.water });
 }
 
 /** A landform's surface colour, by the material its field says it is. */
