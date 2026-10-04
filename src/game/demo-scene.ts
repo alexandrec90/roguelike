@@ -22,10 +22,11 @@ import { RollGroundLayer } from "./roll-ground-layer";
 import { DEFAULT_SCENE_OPTIONS, type RenderPath, type SceneOptions } from "./scene-options";
 import { SceneryLayer } from "./scenery-layer";
 import { SkyLayer } from "./sky-layer";
-import { openGround } from "./landforms";
+import { dryGround } from "./lakes";
 import { VegetationLayer } from "./vegetation-layer";
 import { anchorFoot, walkableBand } from "./viewport";
-import { WaterLayer } from "./water-layer";
+import { sinkRows, WadeLayer } from "./wade-layer";
+import { warmNextLake, WaterLayer, type Reflectable } from "./water-layer";
 import { WEATHER_PRESETS } from "./weather";
 import { WeatherLayer } from "./weather-layer";
 import { scorchAt } from "./wildfire";
@@ -39,7 +40,7 @@ const HEIGHT = 180;
  *
  * Planet coordinates, not screen cells: they are places, and the hero walks
  * away from them and - the point of a round world - eventually back to them.
- * `openGround` nudges each off any outcrop the seed happened to put it in.
+ * `dryGround` nudges each off any outcrop or out of any lake the seed happened to put it in.
  */
 const START: PlanetPoint = { x: 128, y: 128 };
 const CAMPFIRE_AT: PlanetPoint = { x: 131, y: 129 };
@@ -88,6 +89,7 @@ export class DemoScene extends Scene {
   private readonly renderPath: RenderPath;
   private readonly encounter = new Encounter();
   private readonly water = new WaterLayer();
+  private readonly wade = new WadeLayer(STORM_SEED ^ 0x3a7e);
   private readonly weather: WeatherLayer;
   private readonly ambient = new AmbientLayer();
   private readonly lighting = new LightingLayer();
@@ -111,7 +113,7 @@ export class DemoScene extends Scene {
     super();
     this.skyFraction = options.skyFraction;
     this.renderPath = options.render;
-    this.hero = new HeroLayer({ ...openGround(START), turn: 0 }, options.radius);
+    this.hero = new HeroLayer({ ...dryGround(START), turn: 0 }, options.radius);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
     this.weather = new WeatherLayer(
       STORM_SEED,
@@ -133,11 +135,12 @@ export class DemoScene extends Scene {
     this.scenery.create(this, this.bounds, WIDTH);
     this.landforms = gpu ? new LandformGpuLayer() : new LandformLayer();
     this.landforms.create(this, WIDTH, HEIGHT, heroHeight());
-    this.encounter.create(this, WIDTH, HEIGHT, openGround(CAMPFIRE_AT));
+    this.encounter.create(this, WIDTH, HEIGHT, dryGround(CAMPFIRE_AT));
     // Burnt ground has no grass on it until it greens over again.
     const fire = this.encounter.wildfire.fire;
     this.vegetation.setBare((point) => scorchAt(fire, point) > 0.15);
     this.water.create(this, WIDTH, HEIGHT);
+    this.wade.create(this, WIDTH, HEIGHT);
     this.weather.create(this, WIDTH, HEIGHT, this.layout.horizonY);
     this.ambient.create(this);
     this.lighting.create(this, WIDTH, HEIGHT);
@@ -167,6 +170,10 @@ export class DemoScene extends Scene {
   }
 
   update(time: number, delta: number): void {
+    // Behind the opening fade, a lake a frame: none costs anything when it first comes into view.
+    if (!this.shown) {
+      warmNextLake();
+    }
     if (!this.revealed(time)) {
       return;
     }
@@ -192,11 +199,14 @@ export class DemoScene extends Scene {
     lap?.lap("scenery");
     this.landforms.update(ctx, ctx.shade);
     lap?.lap("landforms");
+    // How deep he stands is this frame's water, not the last anchor's slid by this frame's scroll.
+    this.water.prepare(ctx);
+    this.hero.wade(sinkRows(this.water.holdsWater(this.hero.footNow(), frame), where.at));
     this.hero.update(ctx);
     lap?.lap("hero");
     this.encounter.update(ctx, this.hero);
     lap?.lap("encounter");
-    this.drawWater(ctx);
+    this.drawWater(ctx, where.walked);
     lap?.lap("water");
     // After everything standing has been placed: the slices are cut round it.
     this.landforms.arrange();
@@ -270,20 +280,14 @@ export class DemoScene extends Scene {
     return [{ x: ctx.frame.footX, y: ctx.frame.footY }, ...feet];
   }
 
-  /** Rain, then the water it lands in — so a drop that lands this frame rings this frame. */
-  private drawWater(ctx: FrameContext): void {
+  /**
+   * Rain, the hero's wake, then the water both land in — so a drop or a
+   * footfall that lands this frame rings this frame.
+   */
+  private drawWater(ctx: FrameContext, walked: number): void {
     this.weather.update(ctx, this.water);
-    const campfire = this.encounter.campfire;
-    this.water.update(ctx, {
-      hero: { cloud: this.hero.cloudNow(), foot: this.hero.footNow() },
-      reflectables: [
-        ...this.encounter.slimes.reflectables().map((slime) => ({
-          cloud: slime.cloud,
-          foot: { x: slime.x, y: slime.y },
-        })),
-        ...(campfire.visible ? [{ cloud: campfire.flameCloud(), foot: campfire.foot, glow: true }] : []),
-      ],
-    });
+    this.wade.update(ctx, this.water, [{ id: "hero", foot: this.hero.footNow(), travelled: walked }]);
+    this.water.update(ctx, { hero: this.hero.reflection(), reflectables: standingOver(this.encounter) });
   }
 
   /** The lighting pass, and the camera's shake — the last things a frame does. */
@@ -367,6 +371,15 @@ export class DemoScene extends Scene {
 }
 
 export const GAME_SIZE = { width: WIDTH, height: HEIGHT } as const;
+
+/** Everything of the encounter's the water gives back: each slime, and the campfire's flame while it burns. */
+function standingOver(encounter: Encounter): Reflectable[] {
+  const campfire = encounter.campfire;
+  return [
+    ...encounter.slimes.reflectables().map((slime) => ({ cloud: slime.cloud, foot: { x: slime.x, y: slime.y } })),
+    ...(campfire.visible ? [{ cloud: campfire.flameCloud(), foot: campfire.foot, glow: true }] : []),
+  ];
+}
 
 /** One frame's facts for the `?map=1` instrument. */
 interface MapFrame {

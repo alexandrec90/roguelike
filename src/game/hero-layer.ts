@@ -59,7 +59,7 @@ import { logicalPoint } from "./integer-scale";
 import { mouseButtonOf } from "./keybindings";
 import { HERO_EQUIPPED } from "./models";
 import { PixelSurface } from "./pixel-surface";
-import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPose } from "./planet";
+import { DEFAULT_STRAFE_RADIUS, type Gait, type PlanetPoint, type PlanetPose } from "./planet";
 import {
   advancePlayer,
   createPlayer,
@@ -73,7 +73,8 @@ import {
 } from "./player";
 import { RANK, rowAtFoot, TILE_WIDTH } from "./projection";
 import { MAX_STEP_MS } from "./spark-emitter";
-import { blockedByLand } from "./landforms";
+import { blockedGround } from "./lakes";
+import { aboveWater, waterlineReflection } from "./water/wake";
 import type { WindOptions } from "./wind";
 
 export interface Foot {
@@ -92,6 +93,10 @@ export interface Whereabouts {
   readonly phase: { readonly x: number; readonly y: number };
   readonly turn: number;
   readonly upcoming: UpcomingAnchor | undefined;
+  /** Where he actually is on the planet - what decides how deep the water round him is. */
+  readonly at: PlanetPoint;
+  /** Tiles walked in all: where his footfalls are. */
+  readonly walked: number;
 }
 
 /**
@@ -133,12 +138,14 @@ export class HeroLayer {
   private driven = false;
   private lastElapsedMs = 0;
   private lastDeltaMs = 0;
+  /** Rows of him under water. */
+  private sunk = 0;
   /** Half his height: where on him the aim is measured from. */
   private readonly chestHeight = heroHeight() / 2;
 
   constructor(start: PlanetPose, radius: number = DEFAULT_STRAFE_RADIUS) {
     this.player = createPlayer(start);
-    this.world = { radius, blocked: blockedByLand };
+    this.world = { radius, blocked: blockedGround };
   }
 
   create(scene: Scene, groundTop: number, foot: Foot): void {
@@ -258,12 +265,32 @@ export class HeroLayer {
 
   /** Where the world has got to under him: the views of the pose the scene hands on. */
   whereabouts(): Whereabouts {
+    const live = livePose(this.player, this.world.radius);
     return {
       ground: groundPose(this.player),
       phase: scrollPhase(this.player),
-      turn: livePose(this.player, this.world.radius).turn,
+      turn: live.turn,
       upcoming: upcomingAnchor(this.player, this.world.radius),
+      at: live,
+      walked: this.player.walked,
     };
+  }
+
+  /**
+   * How many rows of him the water hides this frame (`sinkRows`): his feet and
+   * shins, which are under it. Drawn and reflected without them from the next
+   * `update`.
+   */
+  wade(rows: number): void {
+    this.sunk = Math.max(0, Math.round(rows));
+  }
+
+  /**
+   * What the water gives back of him: the part above it, mirrored about the
+   * waterline - which is where his legs go in, not where his feet stand.
+   */
+  reflection(): { readonly cloud: PixelCloud; readonly foot: Foot } {
+    return waterlineReflection(this.cloud, this.foot, this.sunk);
   }
 
   /**
@@ -319,8 +346,8 @@ export class HeroLayer {
       sun,
       wind,
     });
-    this.cloud = frame.figure;
-    this.body.clear().paint(frame.scene, BODY.footX, BODY.footY).commit();
+    this.cloud = aboveWater(frame.figure, this.sunk);
+    this.body.clear().paint(aboveWater(frame.scene, this.sunk), BODY.footX, BODY.footY).commit();
     this.shade.clear();
     if (shadowStrength > 0.02) {
       this.shade.paint(frame.shadow, SHADOW.footX, SHADOW.footY, Math.min(shadowStrength * 1.1, 1));

@@ -16,7 +16,7 @@ import type { PixelCloud } from "../ink";
 import { clearBuffer, paintInto, type PixelBuffer } from "../pixel-buffer";
 import { puddleGlints, type Puddle } from "../puddles";
 import { rippleAlpha, rippleCloud, type RippleField } from "../ripples";
-import { puddleBody } from "./body";
+import { puddleBody, relativeBody } from "./body";
 import { clipToMask, type WaterMask } from "./mask";
 import { reflectionCloud, type Reflectable } from "./reflect";
 import type { SkyReflection } from "./sky-inks";
@@ -51,7 +51,13 @@ export function paintBodies(buffer: PixelBuffer, scene: WaterScene): void {
   clearBuffer(buffer);
   const margin = scene.mask.margin;
   for (const puddle of scene.puddles) {
-    paintInto(buffer, puddleBody(puddle, scene.sky), margin, margin);
+    const { centerX, centerY } = puddle;
+    // The cached body painted at its centre, rather than a copy of it moved there.
+    if (Number.isInteger(centerX) && Number.isInteger(centerY)) {
+      paintInto(buffer, relativeBody(puddle, scene.sky), margin + centerX, margin + centerY);
+    } else {
+      paintInto(buffer, puddleBody(puddle, scene.sky), margin, margin);
+    }
   }
 }
 

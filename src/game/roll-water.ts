@@ -19,7 +19,7 @@ import type { CameraFrame } from "./camera";
 import { ROLL_ROWS, rollScale } from "./horizon";
 import type { LocalPoint } from "./planet";
 import { hexToRgb } from "./color";
-import { INK_ALPHA, INK_COLORS, type InkId } from "./ink";
+import { INK_ALPHA, INK_COLORS, type InkId, type PixelCloud } from "./ink";
 import type { Puddle } from "./puddles";
 import { TILE_DEPTH, TILE_WIDTH } from "./projection";
 import type { WaterLook } from "./roll-ground";
@@ -77,19 +77,34 @@ export function waterCode(alpha: number, water: boolean): number {
 }
 
 /**
- * Whether a puddle centred at a local point can show on the lip: no nearer
- * than a puddle's depth short of the seam - nearer than that it is wholly the
- * field's - no farther than the horizon, and inside the cone the lip's columns
- * fan out over as its rows recede.
+ * How far short of the seam a puddle's centre can be and still reach over it,
+ * rows: a puddle's depth, and its damp ring.
  */
-export function puddleOnLip(frame: CameraFrame, width: number, local: LocalPoint): boolean {
+const PUDDLE_OVERHANG = 1.5;
+
+/**
+ * Whether water centred at a local point, reaching `extent` tiles from it, can
+ * show on the lip: no nearer than its own depth short of the seam - nearer
+ * than that it is wholly the field's - no farther than the horizon, and inside
+ * the cone the lip's columns fan out over as its rows recede. A lake's extent
+ * is several tiles, so one whose centre is still on the field carries its far
+ * shore over the seam rather than being cut off at it. Left out, the extent is
+ * a puddle's, which the margins already allow for.
+ */
+export function puddleOnLip(
+  frame: CameraFrame,
+  width: number,
+  local: LocalPoint,
+  extent: { readonly x: number; readonly y: number } = { x: 0, y: 0 },
+): boolean {
   const beyond = local.y - (frame.footY - frame.groundTop) / TILE_DEPTH;
-  if (beyond < -1.5 || beyond > ROLL_ROWS + 1) {
+  if (beyond < -Math.max(PUDDLE_OVERHANG, extent.y + 0.5) || beyond - extent.y > ROLL_ROWS + 1) {
     return false;
   }
-  const scale = rollScale(Math.max(beyond, 0), frame.rollHeight);
+  // The far shore is where the cone is widest.
+  const scale = rollScale(Math.max(beyond + extent.y, 0), frame.rollHeight);
   const reach = Math.max(frame.footX, width - frame.footX) / (TILE_WIDTH * scale) + 1;
-  return Math.abs(local.x) <= reach;
+  return Math.abs(local.x) - extent.x <= reach;
 }
 
 /**
@@ -101,32 +116,129 @@ export function screenToTexel(frame: CameraFrame, x: number, y: number): { gx: n
   return { gx: x - frame.footX + TILE_WIDTH / 2, gy: frame.footY - 1 - y };
 }
 
+/** One body's texels about its centre, and the box they fill: built once per body, shared by every step. */
+interface BodyTexels {
+  readonly texels: ReadonlyMap<number, WaterTexel>;
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+}
+
+/** Keyed by the cached body itself, so a body's texels live exactly as long as it does. */
+const BODY_TEXELS = new WeakMap<PixelCloud, BodyTexels>();
+
+function bodyTexels(body: PixelCloud): BodyTexels {
+  let known = BODY_TEXELS.get(body);
+  if (known === undefined) {
+    const texels = new Map<number, WaterTexel>();
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const pixel of body) {
+      // Screen y runs down and texel rows run forward, so the body's rows flip.
+      const dy = -pixel.y;
+      texels.set(texelKey(pixel.x, dy), texelOf(pixel.ink));
+      minX = Math.min(minX, pixel.x);
+      maxX = Math.max(maxX, pixel.x);
+      minY = Math.min(minY, dy);
+      maxY = Math.max(maxY, dy);
+    }
+    known = { texels, minX, maxX, minY, maxY };
+    BODY_TEXELS.set(body, known);
+  }
+  return known;
+}
+
+/** The dither phase water wholly out on the lip is inked at: any one, so long as it is always the same. */
+const FAR_DITHER = { x: 0, y: 0 } as const;
+
+/**
+ * Whether a lake lies wholly past the seam with a row to spare, so no pixel of
+ * it is point-sampled 1:1 against the field and its dither phase cannot be
+ * seen. A puddle never qualifies: its bodies are few and small, and keeping
+ * them exact keeps every one the field hands over identical at the seam.
+ */
+function pastSeam(frame: CameraFrame, puddle: Puddle): boolean {
+  const nearest = puddle.centerY + Math.ceil(puddle.radiusY * 1.4) + 2;
+  return puddle.lake && nearest < frame.groundTop - TILE_DEPTH;
+}
+
+/** A body laid on the lip: its texels, and the world texel its centre landed on. */
+interface PlacedBody {
+  readonly body: BodyTexels;
+  readonly gx: number;
+  readonly gy: number;
+}
+
 export class LipWater implements WaterLook {
-  private readonly texels = new Map<number, WaterTexel>();
-  /** Every cell with a texel of water or damp ground in it, so a dry cell is one lookup. */
-  private readonly cells = new Set<number>();
+  /**
+   * The bodies whose box reaches into each cell, in the order grown, so a later
+   * one wins a texel two share. A lake is ten thousand texels, and copying them
+   * into one map every step was ten milliseconds of the crossing; placing it is
+   * a few hundred cell entries.
+   */
+  private readonly cells = new Map<number, PlacedBody[]>();
+  private readonly placed: PlacedBody[] = [];
 
   /** `frame` is the zero-phase frame the puddles were grown on. */
   constructor(frame: CameraFrame, puddles: readonly Puddle[], sky: SkyReflection) {
     for (const puddle of puddles) {
       const origin = screenToTexel(frame, puddle.centerX, puddle.centerY);
-      // Screen y runs down and texel rows run forward, so the body's rows flip.
-      for (const pixel of relativeBody(puddle, sky)) {
-        const gx = origin.gx + pixel.x;
-        const gy = origin.gy - pixel.y;
-        this.texels.set(texelKey(gx, gy), texelOf(pixel.ink));
-        this.cells.add(texelKey(Math.floor(gx / TILE_WIDTH), Math.floor(gy / TILE_DEPTH)));
+      const body = bodyTexels(relativeBody(puddle, sky, pastSeam(frame, puddle) ? FAR_DITHER : undefined));
+      const placed = { body, gx: origin.gx, gy: origin.gy };
+      this.placed.push(placed);
+      const fromX = Math.floor((origin.gx + body.minX) / TILE_WIDTH);
+      const toX = Math.floor((origin.gx + body.maxX) / TILE_WIDTH);
+      const fromY = Math.floor((origin.gy + body.minY) / TILE_DEPTH);
+      const toY = Math.floor((origin.gy + body.maxY) / TILE_DEPTH);
+      for (let cellY = fromY; cellY <= toY; cellY += 1) {
+        for (let cellX = fromX; cellX <= toX; cellX += 1) {
+          const key = texelKey(cellX, cellY);
+          const list = this.cells.get(key);
+          if (list === undefined) {
+            this.cells.set(key, [placed]);
+          } else {
+            list.push(placed);
+          }
+        }
       }
     }
   }
 
-  /** How many texels hold water or damp ground. */
+  /** How many texels hold water or damp ground, counting each once. */
   get size(): number {
-    return this.texels.size;
+    const seen = new Set<number>();
+    for (const { body, gx, gy } of this.placed) {
+      for (const key of body.texels.keys()) {
+        const dx = Math.floor(key / 0x10000) - 0x8000;
+        const dy = (key % 0x10000) - 0x8000;
+        seen.add(texelKey(gx + dx, gy + dy));
+      }
+    }
+    return seen.size;
   }
 
+  /** Whether any body's box reaches into a cell: a dry cell is one lookup, and a wet one is checked per texel. */
   wetCell(cellX: number, cellY: number): boolean {
     return this.cells.has(texelKey(cellX, cellY));
+  }
+
+  /** The texel at a world texel, from the last body grown over it. */
+  private texelAt(gx: number, gy: number): WaterTexel | undefined {
+    const list = this.cells.get(texelKey(Math.floor(gx / TILE_WIDTH), Math.floor(gy / TILE_DEPTH)));
+    if (list === undefined) {
+      return undefined;
+    }
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const placed = list[index];
+      const texel = placed?.body.texels.get(texelKey(gx - placed.gx, gy - placed.gy));
+      if (texel !== undefined) {
+        return texel;
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -138,7 +250,7 @@ export class LipWater implements WaterLook {
   page(cellX: number, cellY: number, data: Uint8Array, at: number, stride: number): void {
     for (let row = 0; row < TILE_DEPTH; row += 1) {
       for (let column = 0; column < TILE_WIDTH; column += 1) {
-        const texel = this.texels.get(texelKey(cellX * TILE_WIDTH + column, cellY * TILE_DEPTH + row));
+        const texel = this.texelAt(cellX * TILE_WIDTH + column, cellY * TILE_DEPTH + row);
         if (texel !== undefined) {
           data.set([texel.r, texel.g, texel.b, waterCode(texel.a, texel.water)], at + row * stride + column * 4);
         }
@@ -147,7 +259,7 @@ export class LipWater implements WaterLook {
   }
 
   blendInto(gx: number, gy: number, rgba: Uint8ClampedArray, at: number): boolean {
-    const texel = this.texels.get(texelKey(gx, gy));
+    const texel = this.texelAt(gx, gy);
     if (texel === undefined) {
       return false;
     }

@@ -12,7 +12,7 @@
  */
 
 import { PLANET_TILES, wrapDelta, wrapTile, type PlanetPoint } from "../planet";
-import { blockedByLand } from "../landforms";
+import { blockedGround, nearLake } from "../lakes";
 import { pixelHash } from "../transforms";
 import type { SlimeVariant } from "./slime-palette";
 
@@ -41,7 +41,7 @@ export interface Den {
 }
 
 /** The den a planet cell holds, or null. Pure: the same cell always answers the same. */
-export function denAt(cellX: number, cellY: number, blocked: Blocked = blockedByLand): Den | null {
+export function denAt(cellX: number, cellY: number, blocked: Blocked = blockedGround): Den | null {
   const x = wrapTile(Math.floor(cellX));
   const y = wrapTile(Math.floor(cellY));
   if (pixelHash(x, y, SLIME_SEED, 1) >= DEN_DENSITY) {
@@ -51,7 +51,8 @@ export function denAt(cellX: number, cellY: number, blocked: Blocked = blockedBy
     x: wrapTile(x + pixelHash(x, y, SLIME_SEED, 2)),
     y: wrapTile(y + pixelHash(x, y, SLIME_SEED, 3)),
   };
-  if (blocked(point)) {
+  // A den is dry ground, whatever its slimes may later wade into.
+  if (blocked(point) || nearLake(point, 1)) {
     return null;
   }
   return { key: y * PLANET_TILES + x, cellX: x, cellY: y, point };
@@ -68,7 +69,7 @@ export function planetDistance(a: PlanetPoint, b: PlanetPoint): number {
  * A disc rather than the screen's box, for the reason `terrain.ts` gives: the
  * screen turns, and a den must not blink into existence because the hero did.
  */
-export function densNear(centre: PlanetPoint, reach: number, blocked: Blocked = blockedByLand): Den[] {
+export function densNear(centre: PlanetPoint, reach: number, blocked: Blocked = blockedGround): Den[] {
   const found: Den[] = [];
   const left = Math.floor(centre.x - reach);
   const top = Math.floor(centre.y - reach);
@@ -111,7 +112,7 @@ export function variantOf(seed: number): SlimeVariant {
  * tiles off it — "respawning elsewhere" — trying a few seeded spots and falling
  * back to the den when every one of them is rock.
  */
-export function spawnPoint(den: Den, generation: number, blocked: Blocked = blockedByLand): PlanetPoint {
+export function spawnPoint(den: Den, generation: number, blocked: Blocked = blockedGround): PlanetPoint {
   if (generation === 0) {
     return den.point;
   }

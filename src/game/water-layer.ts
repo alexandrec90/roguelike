@@ -30,12 +30,14 @@ import { localFoot, localReach, scrollOffset, visibleLocal, type CameraFrame } f
 import type { FrameContext } from "./frame-context";
 import type { PixelCloud } from "./ink";
 import { PixelSurface } from "./pixel-surface";
-import { fromLocal, toLocal, type LocalPoint, type PlanetPose } from "./planet";
-import type { ScreenPoint } from "./projection";
-import { createPuddle, puddleHolds, rainImpact, type Puddle } from "./puddles";
+import { LAKE_MAX_REACH, LAKE_SPREAD, lakesNear, planetLakes, type Lake } from "./lakes";
+import { fromLocal, toLocal, type LocalPoint, type PlanetPoint, type PlanetPose } from "./planet";
+import { DEPTH_RATIO, TILE_DEPTH, TILE_WIDTH, type ScreenPoint } from "./projection";
+import { createPuddle, PUDDLE_SPREAD, puddleHolds, rainImpact, type Puddle } from "./puddles";
 import { createRippleField, spawnRipple, stepRipples, type RippleField } from "./ripples";
 import { MAX_STEP_MS, type EmitterState } from "./spark-emitter";
 import { puddlesNear } from "./terrain";
+import { bodyPlan } from "./water/body";
 import { createMask, fillMask, maskAt, maskRows, type WaterMask } from "./water/mask";
 import { paintBodies, paintSurface, type WaterScene } from "./water/paint";
 import type { Landing } from "./water/rain";
@@ -63,40 +65,96 @@ export interface Foot {
   readonly y: number;
 }
 
+/** How far a body of water reaches from its centre, tiles across and tiles deep. */
+export interface WaterExtent {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** The most a puddle's lobes push its outline past its radius (`puddles.ts`'s trace). */
+const PUDDLE_EDGE = 1.3;
+
+/** What decides whether a site is grown: its local position, and how far its water reaches. */
+export type KeepWater = (local: LocalPoint, extent: WaterExtent) => boolean;
+
 /**
- * Every puddle within `reach` tiles, grown on the zero-phase grid at `scale`.
+ * Every puddle and lake within `reach` tiles, grown on the zero-phase grid -
+ * puddles at `scale`, lakes as they are: rain swells a puddle, not a lake.
  *
- * The one recipe for where a puddle is and what shape it has: the horizon lip
+ * The one recipe for where water is and what shape it has: the horizon lip
  * (`roll-water.ts`) grows its puddles here too, so the water it carries over
  * the seam is the same water, pixel for pixel. `keep` passes over a site by its
- * local position before its outline is traced - the lip's reach is a disc
- * hundreds of puddles wide, and it can see a cone of it. `around` moves the
- * swept disc's centre off the hero to a local point, so `reach` can be the
- * radius of what is wanted rather than its distance from him.
+ * local position and reach before its outline is traced - the lip's reach is a
+ * disc hundreds of puddles wide, and it can see a cone of it. `around` moves
+ * the swept disc's centre off the hero to a local point, so `reach` can be the
+ * radius of what is wanted rather than its distance from him. Lakes are swept
+ * `LAKE_MAX_REACH` farther, since one whose centre is out of reach can still
+ * have its shore in view. Lakes come first, so a puddle is never under one.
  */
 export function growPuddles(
   frame: CameraFrame,
   pose: PlanetPose,
   reach: number,
   scale: number,
-  options: { readonly keep?: (local: LocalPoint) => boolean; readonly around?: LocalPoint } = {},
+  options: { readonly keep?: KeepWater; readonly around?: LocalPoint } = {},
 ): Puddle[] {
   const flat: CameraFrame = { ...frame, phaseX: 0, phaseY: 0 };
   const centre = options.around === undefined ? pose : fromLocal(pose, options.around);
-  return puddlesNear(centre, reach).flatMap((site) => {
+  const grow = (site: PlanetPoint, extent: WaterExtent, make: (foot: ScreenPoint, id: string) => Puddle): Puddle[] => {
     const local = toLocal(pose, site);
-    if (options.keep !== undefined && !options.keep(local)) {
+    if (options.keep !== undefined && !options.keep(local, extent)) {
       return [];
     }
-    const foot = localFoot(flat, local);
-    return createPuddle({
-      id: `${Math.round(site.x)}:${Math.round(site.y)}`,
-      centerX: foot.x,
-      centerY: foot.y,
-      radius: Math.max(2, site.size * scale),
-      seed: site.seed,
-    });
+    return [make(localFoot(flat, local), `${Math.round(site.x)}:${Math.round(site.y)}`)];
+  };
+  const lakes = lakesNear(centre, reach + LAKE_MAX_REACH).flatMap((lake) =>
+    grow(lake, { x: lake.reach, y: lake.reach }, (foot, id) => lakeWater(lake, foot, `lake:${id}`)),
+  );
+  const puddles = puddlesNear(centre, reach).flatMap((site) => {
+    const radius = Math.max(2, site.size * scale);
+    const extent = {
+      x: (radius * PUDDLE_EDGE) / TILE_WIDTH,
+      y: (radius * PUDDLE_SPREAD * DEPTH_RATIO * PUDDLE_EDGE) / TILE_DEPTH,
+    };
+    return grow(site, extent, (foot, id) =>
+      createPuddle({ id, centerX: foot.x, centerY: foot.y, radius, seed: site.seed }),
+    );
   });
+  return [...lakes, ...puddles];
+}
+
+/** A lake as water: the one outline it always has, centred on a zero-phase screen pixel. */
+function lakeWater(lake: Lake, foot: ScreenPoint, id: string): Puddle {
+  return createPuddle({
+    id,
+    centerX: foot.x,
+    centerY: foot.y,
+    radius: lake.size,
+    seed: lake.seed,
+    spread: LAKE_SPREAD,
+    deep: lake.deepSize,
+    lake: true,
+  });
+}
+
+let warmedLakes = 0;
+
+/**
+ * Trace and plan the next of the planet's lakes, ahead of its being seen; true
+ * while any are left. A lake's outline and body plan are each the cost of a
+ * frame and are kept for the session, so the scene runs this a lake a frame
+ * while its first frame is held behind the fade, and no lake costs anything
+ * the first time it comes over the horizon.
+ */
+export function warmNextLake(): boolean {
+  const lakes = planetLakes();
+  const lake = lakes[warmedLakes];
+  if (lake === undefined) {
+    return false;
+  }
+  warmedLakes += 1;
+  bodyPlan(lakeWater(lake, { x: 0, y: 0 }, "warm"));
+  return warmedLakes < lakes.length;
 }
 
 /** What stands over the water this frame. */
@@ -111,9 +169,17 @@ function reachOf(ctx: FrameContext): number {
   return localReach(visibleLocal(flat, ctx.width, ctx.height));
 }
 
+/** Water any of which lies within `reach` tiles of the hero: a lake whose shore is in view, not only its centre. */
+function withinReach(reach: number): KeepWater {
+  return (local, extent) => Math.abs(local.x) - extent.x <= reach && Math.abs(local.y) - extent.y <= reach;
+}
+
+const RIPPLE_CAPACITY = 96;
+
 export class WaterLayer {
   private puddles: Puddle[] = [];
-  private ripples: RippleField = createRippleField();
+  /** Room for a storm's rings on a lake and a wader's wake at once. */
+  private ripples: RippleField = createRippleField(RIPPLE_CAPACITY);
   private mask!: WaterMask;
   private body!: PixelSurface;
   private surface!: PixelSurface;
@@ -147,8 +213,31 @@ export class WaterLayer {
    * `actors` are in screen pixels, feet where they are drawn.
    */
   update(ctx: FrameContext, actors: WaterActors = {}): void {
-    this.relocate(ctx.frame, ctx.pose, reachOf(ctx));
+    this.prepare(ctx);
     this.draw(ctx.frame, ctx.atmosphere, ctx.elapsedMs, ctx.deltaMs, actors);
+  }
+
+  /**
+   * Re-grow the water for this frame's pose, if it moved on. `update` does it
+   * too; call it first when something must ask what is wet (`holdsWater`)
+   * before the water is drawn, so the answer is this frame's and not the last
+   * anchor's slid by this frame's scroll.
+   */
+  prepare(ctx: FrameContext): void {
+    this.relocate(ctx.frame, ctx.pose, reachOf(ctx));
+  }
+
+  /**
+   * Start a ring at a screen-space point if there is water under it - a
+   * footstep, a landing - `radius` wide at its widest. False if it was dry, or
+   * the pool was full.
+   */
+  ring(point: Foot, frame: CameraFrame, lifeMs: number, radius: number): boolean {
+    if (!this.holdsWater(point, frame)) {
+      return false;
+    }
+    const offset = scrollOffset(frame);
+    return spawnRipple(this.ripples, point.x - offset.x, point.y - offset.y, lifeMs, radius);
   }
 
   /** `prefetch` for the anchor the hero is walking into, at the reach `update` sweeps. */
@@ -174,7 +263,7 @@ export class WaterLayer {
     this.puddles =
       ahead?.pose === pose && ahead.scale === this.scale && ahead.reach === reach
         ? ahead.puddles
-        : growPuddles(frame, pose, reach, this.scale);
+        : growPuddles(frame, pose, reach, this.scale, { keep: withinReach(reach) });
     this.ahead = undefined;
     fillMask(this.mask, this.puddles);
     this.band = maskRows(this.mask);
@@ -185,7 +274,8 @@ export class WaterLayer {
     if (this.sampled === pose || (this.ahead?.pose === pose && this.ahead.scale === this.scale)) {
       return;
     }
-    this.ahead = { pose, scale: this.scale, reach, puddles: growPuddles(frame, pose, reach, this.scale) };
+    const puddles = growPuddles(frame, pose, reach, this.scale, { keep: withinReach(reach) });
+    this.ahead = { pose, scale: this.scale, reach, puddles };
   }
 
   /** How much the wet weather has swollen every puddle: the radius multiplier. */

@@ -34,9 +34,12 @@ export function fillMask(mask: WaterMask, puddles: readonly Puddle[]): void {
   mask.cells.fill(0);
   puddles.forEach((puddle, index) => {
     const id = Math.min(index + 1, 255);
-    for (const pixel of puddle.water) {
-      const x = pixel.x + mask.margin;
-      const y = pixel.y + mask.margin;
+    const originX = puddle.centerX + mask.margin;
+    const originY = puddle.centerY + mask.margin;
+    // The shared outline, placed here: a lake's pixels are never laid out as objects.
+    for (const { dx, dy } of puddle.offsets) {
+      const x = Math.round(originX + dx);
+      const y = Math.round(originY + dy);
       if (x >= 0 && y >= 0 && x < mask.width && y < mask.height) {
         mask.cells[y * mask.width + x] = id;
       }

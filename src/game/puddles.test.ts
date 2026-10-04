@@ -6,6 +6,9 @@ import { DEPTH_RATIO } from "./projection";
 import {
   clipToPuddle,
   createPuddle,
+  glintCount,
+  outlineExtent,
+  outlineHolds,
   puddleGlints,
   puddleHolds,
   puddleReflection,
@@ -292,5 +295,84 @@ describe("rainImpact", () => {
     expect(rainImpact([pool], ...slant(40))).toEqual(rainImpact([pool], ...slant(40)));
     const other = puddle({ seed: 0x2c41 });
     expect(rainImpact([other], ...slant(40))?.y).not.toBe(rainImpact([pool], ...slant(40))?.y);
+  });
+
+  it("lands a drop well inside a lake, not on its far shore", () => {
+    const lake = puddle({ radius: 64, spread: 1, seed: 0x1a4e });
+    const impact = rainImpact([lake], lake.centerX, lake.centerY - 200, lake.centerX, lake.centerY + 200);
+    expect(impact?.puddle).toBe(lake);
+    expect(Math.abs((impact?.y ?? 0) - lake.centerY)).toBeLessThan(lake.radiusY);
+  });
+});
+
+describe("water the size of a lake", () => {
+  const LAKE = { radius: 72, spread: 1, seed: 0x1a4e, deep: 30 } as const;
+
+  it("lies round rather than as a lens when its spread is 1", () => {
+    const lake = puddle(LAKE);
+    expect(lake.radiusY).toBe(Math.round(72 * DEPTH_RATIO));
+    expect(puddle({ radius: 72 }).radiusY).toBeLessThan(lake.radiusY);
+  });
+
+  it("carries a deep core that is a disc on the ground", () => {
+    const lake = puddle(LAKE);
+    expect(lake.deepX).toBe(30);
+    expect(lake.deepY).toBe(Math.round(30 * DEPTH_RATIO));
+    expect(puddle().deepX).toBe(0);
+    expect(puddle().deepY).toBe(0);
+  });
+
+  it("shares one outline and one membership test between every lake of that outline", () => {
+    const here = puddle(LAKE);
+    const there = puddle({ ...LAKE, centerX: -40, centerY: 300 });
+    expect(there.offsets).toBe(here.offsets);
+    expect(there.inside).toBe(here.inside);
+    expect(here.inside(0, 0)).toBe(true);
+    expect(here.inside(1000, 0)).toBe(false);
+    expect(puddleHolds(there, -40, 300)).toBe(true);
+  });
+
+  it("keeps a lake's outline however many puddle outlines the horizon churns through", () => {
+    const before = puddle(LAKE).offsets;
+    for (let seed = 0; seed < 700; seed += 1) {
+      puddle({ radius: 6 + (seed % 8), seed: 0x4000 + seed });
+    }
+    expect(puddle(LAKE).offsets).toBe(before);
+  });
+
+  it("agrees with outlineHolds, the test grass roots by", () => {
+    const lake = puddle({ ...LAKE, centerX: 0, centerY: 0 });
+    for (let dy = -60; dy <= 60; dy += 7) {
+      for (let dx = -100; dx <= 100; dx += 9) {
+        expect(outlineHolds(LAKE.radius, LAKE.seed, dx, dy, LAKE.spread)).toBe(puddleHolds(lake, dx, dy));
+      }
+    }
+  });
+
+  it("measures its shore's nearest and farthest reach, which bound every water pixel", () => {
+    const { nearest, farthest } = outlineExtent(LAKE.radius, LAKE.seed, LAKE.spread);
+    expect(nearest).toBeGreaterThan(0);
+    expect(farthest).toBeGreaterThan(nearest);
+    const lake = puddle({ ...LAKE, centerX: 0, centerY: 0 });
+    const reaches = lake.water.map((pixel) => Math.hypot(pixel.x / 16, pixel.y / 12));
+    expect(Math.max(...reaches)).toBeLessThanOrEqual(farthest + 0.1);
+    expect(lake.rim.some((pixel) => Math.hypot(pixel.x / 16, pixel.y / 12) < nearest + 0.15)).toBe(true);
+  });
+
+  it("has a ragged shore a puddle does not", () => {
+    // The finer lobes only fade in past a tile's width, so a puddle's outline is the one it always had.
+    const small = outlineExtent(10, LAKE.seed);
+    const smallRatio = small.farthest / small.nearest;
+    expect(smallRatio).toBeLessThan(2);
+    expect(puddle({ radius: 10, seed: 0x51bd }).water).toEqual(puddle().water);
+  });
+
+  it("shimmers all over: more glints the wider it is, three on a puddle", () => {
+    expect(glintCount(10)).toBe(3);
+    expect(glintCount(14)).toBe(3);
+    expect(glintCount(72)).toBeGreaterThan(8);
+    const lake = puddle(LAKE);
+    const rows = new Set(puddleGlints(lake, 0).map((pixel) => pixel.y));
+    expect(rows.size).toBeGreaterThan(6);
   });
 });
