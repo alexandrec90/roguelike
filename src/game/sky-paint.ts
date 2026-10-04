@@ -152,9 +152,10 @@ export class SkyPainter {
   }
 
   /**
-   * Cloud: pixel-art cumulus on two decks at a bearing, drifting, lit from the
-   * crown and the sun's side (`sky-clouds.ts`). The decks' noise is built once
-   * for the whole panorama, which keeps a continuous turn - a repaint every
+   * Cloud: pixel-art cumulus on two decks at a bearing, drifting, each built
+   * from puffs and lit from the crown and the sun's side (`sky-clouds.ts`). A
+   * deck's slots are seeded once for the whole panorama and only the clouds on
+   * screen are rasterised, which keeps a continuous turn - a repaint every
    * frame - cheap.
    */
   private paintClouds(atmosphere: Atmosphere, offset: number, drift: number): void {
