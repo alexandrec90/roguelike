@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SCENE_OPTIONS, parseRenderPath, parseWeather, readSceneOptions } from "./scene-options";
+import { DEFAULT_SCENE_OPTIONS, parseRenderPath, parseSkyStyle, parseWeather, readSceneOptions } from "./scene-options";
 import { MAX_FRAME_MS, WorldClock } from "./world-clock";
 
 describe("the world clock", () => {
@@ -57,5 +57,13 @@ describe("scene options", () => {
     expect(parseRenderPath("gpu")).toBe("gpu");
     expect(parseRenderPath("software")).toBe("gpu");
     expect(parseRenderPath(null)).toBe("gpu");
+  });
+
+  it("draws the pixel sky unless asked for the screen-resolution one by name", () => {
+    expect(readSceneOptions(new URLSearchParams("sky=HD")).sky).toBe("hd");
+    expect(parseSkyStyle(" hd ")).toBe("hd");
+    expect(parseSkyStyle("pixel")).toBe("pixel");
+    expect(parseSkyStyle("4k")).toBe("pixel");
+    expect(parseSkyStyle(null)).toBe("pixel");
   });
 });

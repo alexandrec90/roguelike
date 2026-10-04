@@ -10,7 +10,7 @@
 import { Game } from "../engine";
 import { DemoScene, GAME_SIZE } from "../game/demo-scene";
 import { readSceneOptions } from "../game/scene-options";
-import { coverOffset, integerCoverScale } from "../game/integer-scale";
+import { coverOffset, integerCoverScale, presentScale } from "../game/integer-scale";
 import { HelpOverlay } from "../game/help-overlay";
 import { MapOverlay, wantsMap } from "../game/map-overlay";
 import { visibleHeight } from "../game/viewport";
@@ -46,6 +46,9 @@ export function mount(host: HTMLElement, query: URLSearchParams): void {
     game.canvas.style.height = `${GAME_SIZE.height * factor}px`;
     game.canvas.style.left = `${left}px`;
     game.canvas.style.top = `${top}px`;
+    // Only `?sky=hd` has anything finer than a logical pixel to show; without a
+    // backdrop the engine keeps the canvas at 320×180 and CSS does the scaling.
+    game.setPresentScale(presentScale(factor, window.devicePixelRatio));
 
     // The top edge is pinned, so a short window clips the *near* rows — the ones
     // the hero would otherwise be standing on. Tell the scene how much playfield

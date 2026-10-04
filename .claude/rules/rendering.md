@@ -132,6 +132,11 @@ horizon line is shaded with the ground it stands on rather than cut by the sky r
 - **The sky is painted pre-divided by the ambient**, so after the multiply it lands on
   the atmosphere's own colours. Anything else drawn in the band must do the same or be
   a body that is meant to be lit.
+- **`?sky=hd` puts the air behind the pass instead.** The engine draws the world into a
+  320×180 target cleared to transparent and presents it over a `Backdrop` at the
+  canvas's own resolution (`src/engine/game.ts`, a `ScreenPass` in `src/engine/pass.ts`); the
+  backdrop gets the atmosphere's colours unlit and clamps them to the ambient itself,
+  which is what the multiply did to the pre-divided sky.
 
 ## Every layer reads one `FrameContext`
 

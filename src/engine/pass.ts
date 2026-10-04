@@ -11,6 +11,9 @@
  * Uniforms are set by the type the linked program reports for each name, so a
  * caller hands over plain numbers and arrays and never picks `uniform4fv` by
  * hand; an array is addressed by its first element, `u_ramp[0]`, as GL names it.
+ *
+ * `ScreenPass` is the same thing drawn onto the canvas at its full resolution
+ * instead of into a target: the backdrop behind the world (`game.ts`).
  */
 
 import { compileProgram } from "./batcher";
@@ -46,44 +49,38 @@ export function pixelProjection(width: number, height: number): Float32Array {
   ]);
 }
 
-export class ShaderPass {
-  readonly texture: Texture;
-  private readonly program: WebGLProgram;
-  private readonly framebuffer: WebGLFramebuffer;
+/**
+ * A linked program, the quad it draws and its uniforms by name: what a
+ * `ShaderPass` and a `ScreenPass` share.
+ */
+class Program {
+  readonly program: WebGLProgram;
   private readonly vao: WebGLVertexArrayObject;
   private readonly slots = new Map<string, UniformSlot>();
-  private readonly samplers: readonly [string, string][];
 
+  /** `corners` is x, y, u, v for a strip of two triangles. */
   constructor(
     private readonly gl: WebGL2RenderingContext,
-    private readonly textures: TextureStore,
-    key: string,
-    private readonly options: PassOptions,
+    vertexSource: string,
+    fragmentSource: string,
+    name: string,
+    corners: Float32Array,
   ) {
-    this.texture = textures.addTarget(key, options.width, options.height);
-    this.program = compileProgram(gl, options.vertexSource, options.fragmentSource, options.name);
-    const framebuffer = gl.createFramebuffer();
+    this.program = compileProgram(gl, vertexSource, fragmentSource, name);
     const vao = gl.createVertexArray();
     const buffer = gl.createBuffer();
-    if (framebuffer === null || vao === null || buffer === null) {
-      throw new Error(`Could not create pass '${options.name}'`);
+    if (vao === null || buffer === null) {
+      throw new Error(`Could not create pass '${name}'`);
     }
-    this.framebuffer = framebuffer;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texture.glTexture, 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
     this.vao = vao;
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    const { width: w, height: h } = options;
-    // x, y, u, v for a strip of two triangles over the whole target.
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0, 0, w, 0, 1, 0, 0, h, 0, 1, w, h, 1, 1]), gl.STATIC_DRAW);
-    for (const [name, offset] of [
+    gl.bufferData(gl.ARRAY_BUFFER, corners, gl.STATIC_DRAW);
+    for (const [attribute, offset] of [
       ["inPosition", 0],
       ["inTexCoord", 8],
     ] as const) {
-      const location = gl.getAttribLocation(this.program, name);
+      const location = gl.getAttribLocation(this.program, attribute);
       if (location >= 0) {
         gl.enableVertexAttribArray(location);
         gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 16, offset);
@@ -99,29 +96,22 @@ export class ShaderPass {
         this.slots.set(info.name, { location, type: info.type });
       }
     }
-    this.samplers = Object.entries(options.samplers);
   }
 
-  get key(): string {
-    return this.texture.key;
-  }
-
-  /** Clear the target and run the shader over it. */
-  render(): void {
+  /**
+   * Draw the quad into whatever framebuffer and viewport are bound, unblended:
+   * samplers on units in order, then every uniform.
+   */
+  draw(textures: TextureStore, samplers: readonly [string, string][], uniforms: Readonly<Record<string, UniformValue>>): void {
     const gl = this.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.viewport(0, 0, this.options.width, this.options.height);
     gl.disable(gl.BLEND);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(this.program);
-    this.samplers.forEach(([uniform, key], unit) => {
+    samplers.forEach(([uniform, key], unit) => {
       gl.activeTexture(gl.TEXTURE0 + unit);
-      gl.bindTexture(gl.TEXTURE_2D, this.textures.get(key).glTexture);
+      gl.bindTexture(gl.TEXTURE_2D, textures.get(key).glTexture);
       this.set(uniform, unit);
     });
-    this.set("uProjectionMatrix", pixelProjection(this.options.width, this.options.height));
-    for (const [name, value] of Object.entries(this.options.uniforms())) {
+    for (const [name, value] of Object.entries(uniforms)) {
       this.set(name, value);
     }
     gl.bindVertexArray(this.vao);
@@ -171,10 +161,129 @@ export class ShaderPass {
   }
 
   destroy(): void {
+    this.gl.deleteProgram(this.program);
+    this.gl.deleteVertexArray(this.vao);
+  }
+}
+
+export class ShaderPass {
+  readonly texture: Texture;
+  private readonly program: Program;
+  private readonly framebuffer: WebGLFramebuffer;
+  private readonly samplers: readonly [string, string][];
+
+  constructor(
+    private readonly gl: WebGL2RenderingContext,
+    private readonly textures: TextureStore,
+    key: string,
+    private readonly options: PassOptions,
+  ) {
+    this.texture = textures.addTarget(key, options.width, options.height);
+    const { width: w, height: h } = options;
+    this.program = new Program(
+      gl,
+      options.vertexSource,
+      options.fragmentSource,
+      options.name,
+      new Float32Array([0, 0, 0, 0, w, 0, 1, 0, 0, h, 0, 1, w, h, 1, 1]),
+    );
+    const framebuffer = gl.createFramebuffer();
+    if (framebuffer === null) {
+      throw new Error(`Could not create pass '${options.name}'`);
+    }
+    this.framebuffer = framebuffer;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texture.glTexture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.samplers = Object.entries(options.samplers);
+  }
+
+  get key(): string {
+    return this.texture.key;
+  }
+
+  /** Clear the target and run the shader over it. */
+  render(): void {
     const gl = this.gl;
-    gl.deleteProgram(this.program);
-    gl.deleteFramebuffer(this.framebuffer);
-    gl.deleteVertexArray(this.vao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+    gl.viewport(0, 0, this.options.width, this.options.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this.program.draw(this.textures, this.samplers, {
+      uProjectionMatrix: pixelProjection(this.options.width, this.options.height),
+      ...this.options.uniforms(),
+    });
+  }
+
+  destroy(): void {
+    this.program.destroy();
+    this.gl.deleteFramebuffer(this.framebuffer);
     this.textures.remove(this.texture.key);
+  }
+}
+
+/** A device-pixel rectangle of the canvas, measured from its top-left. */
+export interface ScreenRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface ScreenPassOptions {
+  readonly name: string;
+  readonly fragmentSource: string;
+  /** Sampler uniform → key of the texture it reads. Bound to units in this order. */
+  readonly samplers: Readonly<Record<string, string>>;
+}
+
+/**
+ * The quad over the viewport, in clip space. The fragment stage reads
+ * `gl_FragCoord`, which counts from the canvas's bottom-left whatever the viewport.
+ */
+const SCREEN_VERTEX_SHADER = `#version 300 es
+in vec2 inPosition;
+void main() {
+  gl_Position = vec4(inPosition, 0.0, 1.0);
+}
+`;
+
+/**
+ * A fragment shader over a rectangle of the canvas itself, at the canvas's
+ * own resolution - not into a target of its own, and not at the 320×180 the
+ * world is drawn at. What `Game` draws a `Backdrop` with (`game.ts`): the one
+ * place the game puts pixels finer than a logical pixel.
+ */
+export class ScreenPass {
+  private readonly program: Program;
+  private readonly samplers: readonly [string, string][];
+
+  constructor(
+    private readonly gl: WebGL2RenderingContext,
+    private readonly textures: TextureStore,
+    options: ScreenPassOptions,
+  ) {
+    this.program = new Program(
+      gl,
+      SCREEN_VERTEX_SHADER,
+      options.fragmentSource,
+      options.name,
+      new Float32Array([-1, -1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 1, 1, 0, 0]),
+    );
+    this.samplers = Object.entries(options.samplers);
+  }
+
+  /** Run the shader over `rect` of the bound canvas, `canvasHeight` device pixels tall. */
+  render(rect: ScreenRect, canvasHeight: number, uniforms: Readonly<Record<string, UniformValue>>): void {
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+    const gl = this.gl;
+    gl.viewport(rect.x, canvasHeight - rect.y - rect.height, rect.width, rect.height);
+    this.program.draw(this.textures, this.samplers, uniforms);
+  }
+
+  destroy(): void {
+    this.program.destroy();
   }
 }
