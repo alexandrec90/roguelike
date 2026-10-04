@@ -16,12 +16,14 @@
 import type { Image, Scene, Texture } from "../engine";
 import { scrollOffset, type CameraFrame } from "./camera";
 import type { FrameContext } from "./frame-context";
+import { heroCutaway } from "./landform-cutaway";
 import { createLandformPixels, type LandformLight, type LandformPixels } from "./landform-frame";
+import { marchSchedule } from "./landform-march";
 import { isFarView, mergeLandforms, outlineLandforms, renderLandforms, viewsInSight } from "./landform-render";
 import { packSlices, sliceLandforms } from "./landform-slices";
 import { uniqueKey } from "./pixel-surface";
 import { HORIZON_SCALE } from "./horizon";
-import { RANK, rowAtFoot, standingDepth, TILE_DEPTH, TILE_WIDTH } from "./projection";
+import { RANK, standingDepth, TILE_DEPTH, TILE_WIDTH } from "./projection";
 import { unlitHaze } from "./sky-paint";
 
 /** Images made up front for slices; the pool grows if a frame wants more. */
@@ -85,13 +87,6 @@ export class LandformLayer {
       elevation: ctx.atmosphere.elevation,
       turn: ctx.pose.turn,
       haze: unlitHaze(ctx.atmosphere),
-      cutaway: {
-        x: ctx.frame.footX,
-        y: ctx.frame.footY - this.heroHeight / 2,
-        radiusX: this.heroHeight * 0.75,
-        radiusY: this.heroHeight * 0.9,
-        row: Math.round(rowAtFoot(ctx.frame.footY, ctx.frame.groundTop)),
-      },
       ...(shade === undefined ? {} : { shade: shade.at }),
     };
     const far = views.filter((view) => isFarView(frame, view));
@@ -116,7 +111,9 @@ export class LandformLayer {
       return;
     }
     this.nearWasEmpty = near.length === 0;
-    renderLandforms(frame, near, light, this.near);
+    // Only near land can stand over him: the far views are past the field's edge.
+    const cutaway = heroCutaway(frame, near, marchSchedule(frame, near), ctx.pose.turn, this.heroHeight);
+    renderLandforms(frame, near, cutaway === undefined ? light : { ...light, cutaway }, this.near);
     mergeLandforms(this.near, this.far, this.pixels);
     outlineLandforms(this.pixels);
     this.show();
