@@ -42,6 +42,35 @@ export function landformFog(rowsBeyond: number, rollHeight: number): number {
   return HORIZON_HAZE + (FAR_HAZE - HORIZON_HAZE) * (1 - Math.exp(-(rowsBeyond - ROLL_ROWS) / FAR_HAZE_ROWS));
 }
 
+/**
+ * Rows past the field's edge over which a landform's cloud shadow fades out.
+ * No more than `FAR_ROWS` (`landform-render.ts`): a far view takes no cloud
+ * at all, so the fade must be done by then or the shadow would pop.
+ */
+export const CLOUD_FADE_ROWS = 6;
+
+/** How much of the cloud shadow a surface this far past the field's edge takes, 0..1. */
+export function cloudReach(rowsBeyond: number): number {
+  return Math.min(Math.max(1 - rowsBeyond / CLOUD_FADE_ROWS, 0), 1);
+}
+
+/**
+ * Where a surface at depth `localY`, drawn in column `x` at `scale`, reads the
+ * cloud tile: the screen point it would have on the flat field, unrolled.
+ *
+ * On the field that is the pixel itself, so a landform darkens exactly as the
+ * ground beside it does. Past the field's edge the roll packs many tiles of
+ * depth into each scanline, and the tile - which slides a whole `TILE_DEPTH` a
+ * tile walked - would stream over a slope there in stripes; read where the
+ * surface really is, the shadow stays on the mountain as the hero walks.
+ */
+export function cloudPoint(frame: CameraFrame, x: number, localY: number, scale: number): { x: number; y: number } {
+  return {
+    x: Math.round(frame.footX + (x - frame.footX) / scale),
+    y: Math.round(frame.footY - (localY - frame.phaseY) * TILE_DEPTH),
+  };
+}
+
 /** One depth of the march: the same for every column, so worked out once a frame. */
 export interface Step {
   readonly y: number;
@@ -121,8 +150,6 @@ export function marchSchedule(frame: CameraFrame, views: readonly LandformView[]
 export class LandformPainter {
   private readonly cos: number;
   private readonly sin: number;
-  /** The cloud shadow per screen pixel, filled as the march first asks: NaN until then. */
-  private readonly shades: Float32Array | undefined;
   /** The light as a vector in the camera's frame - x right, y away, z up - worked out once. */
   private readonly lightX: number;
   private readonly lightY: number;
@@ -174,7 +201,6 @@ export class LandformPainter {
     this.lightY = -light.light.y * across;
     this.lightZ = lift;
     const width = out.width;
-    this.shades = light.shade === undefined ? undefined : new Float32Array(width * out.height).fill(Number.NaN);
     this.lowest = new Int16Array(width).fill(out.height);
     this.lastStep = new Int32Array(width).fill(-2);
     this.lastRise = new Float32Array(width);
@@ -261,19 +287,15 @@ export class LandformPainter {
     this.lastRise[x] = rise;
   }
 
-  /** The cloud shadow on the ground at a screen pixel, asked of the sampler once per pixel a frame. */
-  private shadeAt(x: number, y: number): number {
-    const shades = this.shades;
-    if (shades === undefined || y < 0 || y >= this.out.height) {
+  /** The cloud shadow on a column of one step: read where the surface is, faded with distance. */
+  private shadeAt(x: number, step: Step): number {
+    const shade = this.light.shade;
+    if (shade === undefined) {
       return 1;
     }
-    const index = y * this.out.width + x;
-    let level = shades[index] ?? Number.NaN;
-    if (Number.isNaN(level)) {
-      level = this.light.shade?.(x, y) ?? 1;
-      shades[index] = level;
-    }
-    return level;
+    const point = cloudPoint(this.frame, x, step.y, step.scale);
+    const reach = cloudReach(Math.max(0, (this.frame.groundTop - point.y) / TILE_DEPTH));
+    return reach <= 0 ? 1 : 1 - (1 - shade(point.x, point.y)) * reach;
   }
 
   /** How brightly a sample of the field faces the light, its crags included. */
@@ -351,7 +373,7 @@ export class LandformPainter {
     pen.h = h;
     pen.scale = step.scale;
     pen.top = step.ground - h * step.scale;
-    pen.shade = this.shadeAt(x, Math.round(step.ground));
+    pen.shade = this.shadeAt(x, step);
     pen.fog = step.fog;
     pen.hazy = step.fog * HAZE_STEPS >= 1 / 16;
     pen.cutaway = this.cutawayFor(x, step.row);

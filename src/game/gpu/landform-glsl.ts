@@ -11,7 +11,9 @@
 
 import { RAMPS, SEAM, STRATA, WINDOW } from "../landform-colour";
 import { MAX_VIEWS, SCHEDULE_WIDTH } from "../landform-gpu-data";
+import { CLOUD_FADE_ROWS } from "../landform-march";
 import { CLIFF, GRASS, ROCK, ROOF, SNOW, WALL } from "../landforms";
+import { TILE_DEPTH } from "../projection";
 import { HAZE_STEPS } from "../roll-ground";
 import { BAYER_4X4 } from "../shading";
 
@@ -185,6 +187,7 @@ uniform vec4 u_cut;        // x, y, radius x, radius y
 uniform vec2 u_cutRow;     // row, 1 when there is a cutaway
 uniform vec4 u_shade;      // offset x, offset y, strength, margin
 uniform vec2 u_cloudSize;
+uniform float u_groundTop;
 uniform float u_rowBase;
 uniform vec3 u_ramp[${RAMP_SIZE}];
 uniform vec2 u_rampSpan[7];
@@ -199,6 +202,8 @@ const int ROOF = ${ROOF};
 const float SEAM = ${SEAM.toFixed(6)};
 const float HAZE_STEPS = ${HAZE_STEPS.toFixed(1)};
 const float PI2 = 6.283185307179586;
+const float TILE_DEPTH = ${TILE_DEPTH.toFixed(1)};
+const float CLOUD_FADE_ROWS = ${CLOUD_FADE_ROWS.toFixed(1)};
 
 float topAt(int x, int k) { return floor(texelFetch(u_tops, ivec2(x, k), 0).r * 255.0 + 0.5); }
 
@@ -288,14 +293,20 @@ bool cutAway(int x, int y, float row) {
   return distance < 0.8 || (1.0 - distance) / 0.2 > bayer(x, y);
 }
 
-float cloudAt(int x, int y) {
-  if (u_shade.z <= 0.0 || y < 0 || float(y) >= u_size.y) return 1.0;
+// The cloud shadow on a column of one step: 'shadeAt', read at 'cloudPoint'
+// and faded by 'cloudReach'.
+float cloudAt(int x, float depth, float scale) {
+  if (u_shade.z <= 0.0) return 1.0;
+  int cx = int(floor(u_frame.x + (float(x) - u_frame.x) / scale + 0.5));
+  int cy = int(floor(u_frame.y - (depth - u_frame.w) * TILE_DEPTH + 0.5));
+  float reach = clamp(1.0 - max(0.0, (u_groundTop - float(cy)) / TILE_DEPTH) / CLOUD_FADE_ROWS, 0.0, 1.0);
+  if (reach <= 0.0) return 1.0;
   int w = int(u_cloudSize.x);
   int h = int(u_cloudSize.y);
-  int u = ((x + int(u_shade.w) - int(u_shade.x)) % w + w) % w;
-  int t = ((y + int(u_shade.w) - int(u_shade.y)) % h + h) % h;
+  int u = ((cx + int(u_shade.w) - int(u_shade.x)) % w + w) % w;
+  int t = ((cy + int(u_shade.w) - int(u_shade.y)) % h + h) % h;
   float value = texelFetch(u_cloud, ivec2(u, t), 0).r;
-  return 1.0 - (1.0 - value) * u_shade.z;
+  return 1.0 - (1.0 - value) * u_shade.z * reach;
 }
 
 // The least t' over steps from..to inclusive, read one at a time.

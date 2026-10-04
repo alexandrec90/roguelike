@@ -180,7 +180,7 @@ void main() {
     rgb = colourOf(v, face, z, z < 3.0 ? level * 0.55 : level, wall, around, wander, x, y);
   }
 
-  float shade = u_viewD[v].z > 0.5 ? 1.0 : cloudAt(x, int(floor(ground + 0.5)));
+  float shade = u_viewD[v].z > 0.5 ? 1.0 : cloudAt(x, a.x, scale);
   vec3 lit = clamp(roundEven(rgb * shade), 0.0, 255.0);
   float haze = b.x * HAZE_STEPS;
   if (haze >= 1.0 / 16.0) {
