@@ -55,6 +55,10 @@ by point. A new body that forgets its anchor shears apart on the lip.
   basins baked once into bytes, a level that falls as `stepWetness` soaks the ground.
   Both shaders read those bytes as a texture exactly as `sampleField` does, so
   `WetWorld.isWet` and the drawn shore agree. Never decide in a shader where water is.
+- **A lake is a puddle, not a mesh.** `water-texels.ts` writes each lake's lobed shore
+  into the texture's second channel as a signed distance, and the ground shader draws
+  it with the puddles (`waterAt`). A flat sheet of its own cannot follow the lip: its
+  long edges stay straight while the ground under them bends over the horizon.
 - **What it shows** is the world drawn mirrored, height negated, into a half-size target.
   In a parallel projection that is the exact planar reflection. The mirror draws no
   ground, so it must also skip what the ground would hide: nothing past the horizon line.
@@ -115,7 +119,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
-| `terrain-mesh.ts` | `groundMesh` · `lakeMesh` · `landformMesh` |
+| `terrain-mesh.ts` | `groundMesh` · `landformMesh` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
 | `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
