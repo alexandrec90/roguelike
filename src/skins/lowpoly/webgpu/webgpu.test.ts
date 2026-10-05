@@ -2,13 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { atmosphereAt } from "../../../game/atmosphere";
 import { DEFAULT_SKY_FRACTION } from "../../../game/horizon";
-import type { Lake } from "../../../game/lakes";
-import { FIELD_SIZE, TEXELS_PER_TILE } from "../../../game/water/puddle-field";
 import type { DrawCall, FrameUniforms } from "../backend";
 import { lowpolyView } from "../placement";
 import { WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "../shaders";
 import { DRAW_FLOATS, drawCount, FRAME_FLOATS, packDraws, packFrame } from "./uniform-pack";
-import { waterTexels } from "./water-texels";
 import { freshImpulses, stepsFor, WAVE_WGSL } from "./wave-sim";
 import { SURFACE_WGSL } from "./wave-surface";
 import { MAX_WAVE_STEPS, WAVE_STEP_S } from "./waves";
@@ -63,20 +60,6 @@ describe("the WebGPU uniforms", () => {
     const floats = packPasses(frame, { strength: 0.5, seconds: 2, slant: 0.4, light: 1 });
     expect(floats).toHaveLength(PASSES_FLOATS);
     expect([...floats.slice(20, 24)]).toEqual([0.5, 2, Math.fround(0.4), 1]);
-  });
-});
-
-describe("the water mask", () => {
-  it("carries the puddle basins in red and marks a lake's reach in green", () => {
-    const field = new Uint8Array(FIELD_SIZE * FIELD_SIZE).fill(9);
-    const lake = { x: 20, y: 30, reach: 2 } as Lake;
-    const texels = waterTexels(field, [lake]);
-    const at = (x: number, y: number, channel: number): number =>
-      texels[(Math.floor(y * TEXELS_PER_TILE) * FIELD_SIZE + Math.floor(x * TEXELS_PER_TILE)) * 2 + channel] ?? -1;
-    expect(at(20, 30, 0)).toBe(9);
-    expect(at(20, 30, 1)).toBe(255);
-    expect(at(21.5, 30, 1)).toBe(255);
-    expect(at(23, 30, 1)).toBe(0);
   });
 });
 

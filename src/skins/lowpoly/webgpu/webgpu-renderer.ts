@@ -23,7 +23,7 @@ import { BufferUsage, TextureUsage } from "./gpu-flags";
 import { createPipelines, type Pipelines } from "./pipelines";
 import { GpuTargets } from "./targets";
 import { DRAW_FLOATS, drawCount, FRAME_FLOATS, packDraws, packFrame, type DrawList } from "./uniform-pack";
-import { waterTexels } from "./water-texels";
+import { waterTexels } from "../water-texels";
 import { WaveSim } from "./wave-sim";
 import { WaveSurface } from "./wave-surface";
 import { packPasses, PASSES_FLOATS } from "./wgsl-passes";
