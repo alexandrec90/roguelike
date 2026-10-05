@@ -35,6 +35,12 @@ export const Kind = {
   water: 3,
   /** Unlit and bright: fire, a spell. */
   glow: 4,
+  /** A body that sways from high up: a tree, a bush (`sway.ts`). Lit as a body. */
+  foliage: 5,
+  /** A blade that bends from its root, and parts round whatever walks through it (`sway.ts`). Lit as a body. */
+  grass: 6,
+  /** A mushroom: nods, stiffer than grass (`sway.ts`). Lit as a body. */
+  sprig: 7,
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];

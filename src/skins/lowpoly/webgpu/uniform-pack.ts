@@ -13,10 +13,11 @@ import type { DrawCall, FrameUniforms } from "../backend";
 import { rgb } from "../mesh";
 import { DEPTH_FAR, DEPTH_NEAR } from "../placement";
 import { lightDirection } from "../sky-light";
+import { MAX_PUSHES } from "../sway";
 import { heroCellOf } from "./waves";
 
-/** Floats in `Frame` (WGSL): ten `vec4f`. */
-export const FRAME_FLOATS = 40;
+/** Floats in `Frame` (WGSL): eleven `vec4f`, then `MAX_PUSHES` more. */
+export const FRAME_FLOATS = 44 + MAX_PUSHES * 4;
 
 /** Floats per entry of `draws` (WGSL `Draw`): two `vec4f`. */
 export const DRAW_FLOATS = 8;
@@ -36,6 +37,8 @@ export const DRAW_FLOATS = 8;
  * | shading | sun | shadow strength | daylight | - |
  * | water | level | wetness | rain | seconds |
  * | sim | hero cell x | hero cell y | - | - |
+ * | wind | carrier phase | turbulence phase | gust strength | - |
+ * | pushes[MAX_PUSHES] | planet x from the hero | y | front radius | strength |
  */
 export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32Array(FRAME_FLOATS)): Float32Array {
   const { view, atmosphere, water } = frame;
@@ -52,6 +55,8 @@ export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32A
   out.set([0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight, 0], 28);
   out.set([water.level, water.wetness, water.rain, water.seconds], 32);
   out.set([heroCellOf(water.hero[0]), heroCellOf(water.hero[1]), 0, 0], 36);
+  out.set(frame.sway.wind, 40);
+  out.set(frame.sway.pushes, 44);
   return out;
 }
 

@@ -16,6 +16,7 @@
 
 import type { Atmosphere } from "../../game/atmosphere";
 import type { LowpolyView } from "./placement";
+import type { SwayState } from "./sway";
 
 /** A buffer of `mesh.ts` vertices on the GPU. */
 export interface DrawableHandle {
@@ -59,6 +60,8 @@ export interface FrameUniforms {
   readonly atmosphere: Atmosphere;
   readonly shake: { readonly x: number; readonly y: number };
   readonly water: WaterState;
+  /** The wind and the pushes that lean grass and foliage (`sway.ts`). */
+  readonly sway: SwayState;
   /** The drawing buffer, device pixels. */
   readonly width: number;
   readonly height: number;
