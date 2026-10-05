@@ -14,6 +14,7 @@ import type { PlanetPoint } from "../../game/planet";
 import type { PlayerState } from "../../game/player";
 import { burstMesh, fireballMesh } from "./actor-mesh";
 import { heroMesh } from "./hero-mesh";
+import { looseSkeleton } from "./hero-sway";
 import { MeshBuilder } from "./mesh";
 import { shadowUnder } from "./scenery-mesh";
 import { slimeGaze, slimeMesh } from "./slime-mesh";
@@ -61,7 +62,8 @@ export class ActorMeshes {
       b[key].reset();
     }
     const { player, live, encounter } = input;
-    heroMesh(b.heroSolid, layeredPose(tracksOf(player, input.elapsedMs)), {
+    const tracks = tracksOf(player, input.elapsedMs);
+    heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), {
       yaw: input.yaw,
       enchanted: player.enchanted,
       sunk: wadeDepth(live) * WADE_SINK,

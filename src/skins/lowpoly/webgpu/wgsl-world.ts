@@ -14,6 +14,8 @@ import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { Kind } from "../mesh";
 import { TOWARD_VIEWER } from "../placement";
+import { LAKE_DEPTH_PER_TILE } from "../water-glsl";
+import { LAKE_RANGE_TILES } from "../water-texels";
 import { WAVE_N, WAVE_RES } from "./waves";
 
 const f = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
@@ -75,6 +77,8 @@ const TILE_WIDTH = ${f(TILE_WIDTH)};
 const TILE_DEPTH = ${f(TILE_DEPTH)};
 const WALL_RISE = ${f(WALL_RISE)};
 const LAP = ${f(PLANET_TILES)};
+const LAKE_RANGE = ${f(LAKE_RANGE_TILES)};
+const LAKE_DEPTH = ${f(LAKE_DEPTH_PER_TILE)};
 const WAVE_RES = ${f(WAVE_RES)};
 const WAVE_N = ${WAVE_N}i;
 const TOWARD_VIEWER = vec3f(${TOWARD_VIEWER.map(f).join(", ")});
@@ -182,9 +186,15 @@ fn liquid(colour: vec3f, alpha: f32, normal: vec3f) -> vec4f {
   return vec4f(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
 }
 
-/** How far a planet point's basin stands under the water level: > 0 is a puddle. Lakes are their own surface. */
-fn puddleDepth(planet: vec2f) -> f32 {
-  return textureSampleLevel(waterMask, repeatSampler, planet / LAP, 0.0).r - frame.water.x;
+/**
+ * Standing water at a planet point, as \`waterAt\` in \`water-glsl.ts\`: x how
+ * deep (> 0 is water), y tiles inside a lake's shore. A lake is the deeper of
+ * the two, so it is drawn exactly as a puddle is.
+ */
+fn waterAt(planet: vec2f) -> vec2f {
+  let mask = textureSampleLevel(waterMask, repeatSampler, planet / LAP, 0.0);
+  let lake = (mask.g - 0.5) * LAKE_RANGE;
+  return vec2f(max(mask.r - frame.water.x, lake * LAKE_DEPTH), lake);
 }
 
 /**
@@ -229,11 +239,13 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
     alpha = 0.94;
   } else if (input.kind == ${Kind.ground}u) {
     var ground = lit(colour, input.normal) * (1.0 - 0.18 * wet);
-    let depth = puddleDepth(input.planet);
+    let water = waterAt(input.planet);
+    let depth = water.x;
     ground *= 1.0 - 0.22 * smoothstep(-0.03, 0.0, depth);
     colour = ground;
     if (depth > 0.0) {
-      colour = mix(ground, waterColour(input.planet, ground * 0.7, input.clip.xy), smoothstep(0.0, 0.012, depth));
+      let bed = ground * 0.7 * (1.0 - 0.45 * smoothstep(0.5, 2.5, water.y));
+      colour = mix(ground, waterColour(input.planet, bed, input.clip.xy), smoothstep(0.0, 0.012, depth));
     }
   } else if (input.kind == ${Kind.liquid}u) {
     let jelly = liquid(colour, alpha, input.normal);
