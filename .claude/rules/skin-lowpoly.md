@@ -49,6 +49,10 @@ placed and shrunk about its foot on the lip, as a sprite is in the pixel skin. T
 ground, water and landforms are anchored at themselves, so they bend over the lip point
 by point. A new body that forgets its anchor shears apart on the lip.
 
+A body's foot also stands **on the drawn land**, not at height 0: walkable ground runs
+up a landform's lower slope (to `BLOCK_HEIGHT`), so a foot at 0 there is buried in the
+facets. Lift it by `standingHeight`, which reads the facets `landformMesh` draws.
+
 ## Water
 
 - **Where it stands** is the shared puddle field (`src/game/water/puddle-field.ts`):
@@ -120,7 +124,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
-| `terrain-mesh.ts` | `groundMesh` · `landformMesh` |
+| `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
 | `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |

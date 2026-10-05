@@ -23,9 +23,11 @@ import {
   WALL,
   fieldHeight,
   fieldSample,
+  planetLandforms,
   type Landform,
+  type LandformField,
 } from "../../game/landforms";
-import { PLANET_TILES, wrapTile, type PlanetPoint } from "../../game/planet";
+import { PLANET_TILES, wrapDelta, wrapTile, type PlanetPoint } from "../../game/planet";
 import { WALL_RISE } from "../../game/projection";
 import { terrainAt } from "../../game/terrain";
 import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
@@ -135,19 +137,33 @@ export function landformStep(landform: Landform): number {
   return Math.min(Math.max(landform.radius / 9, 0.3), 1.25);
 }
 
-/** A landform as a faceted heightfield over its own footprint. */
-export function landformMesh(solid: MeshBuilder, landform: Landform, origin: PlanetPoint): void {
+/** The lattice a landform is meshed on: `cells` squares of `step` tiles a side, from `start` off its centre. */
+interface Lattice {
+  readonly field: LandformField;
+  readonly step: number;
+  readonly cells: number;
+  readonly start: number;
+}
+
+function landformLattice(landform: Landform): Lattice {
   const field = landformField(landform);
   const step = landformStep(landform);
   const cells = Math.ceil((field.half * 2) / step);
-  const start = -cells * step * 0.5;
+  return { field, step, cells, start: -cells * step * 0.5 };
+}
+
+/** Height of lattice point `(i, j)`, tiles. */
+function latticeHeight(lattice: Lattice, i: number, j: number): number {
+  return fieldHeight(lattice.field, lattice.start + i * lattice.step, lattice.start + j * lattice.step) / WALL_RISE;
+}
+
+/** A landform as a faceted heightfield over its own footprint. */
+export function landformMesh(solid: MeshBuilder, landform: Landform, origin: PlanetPoint): void {
+  const lattice = landformLattice(landform);
+  const { field, step, cells, start } = lattice;
   const cx = landform.x - origin.x;
   const cy = landform.y - origin.y;
-  const vertex = (i: number, j: number): Vec3 => {
-    const dx = start + i * step;
-    const dy = start + j * step;
-    return [cx + dx, cy + dy, fieldHeight(field, dx, dy) / WALL_RISE];
-  };
+  const vertex = (i: number, j: number): Vec3 => [cx + start + i * step, cy + start + j * step, latticeHeight(lattice, i, j)];
   const rows: Vec3[][] = Array.from({ length: cells + 1 }, (_, j) => Array.from({ length: cells + 1 }, (_, i) => vertex(i, j)));
   for (let j = 0; j < cells; j += 1) {
     for (let i = 0; i < cells; i += 1) {
@@ -155,6 +171,7 @@ export function landformMesh(solid: MeshBuilder, landform: Landform, origin: Pla
       const b = rows[j]![i + 1]!;
       const c = rows[j + 1]![i + 1]!;
       const d = rows[j + 1]![i]!;
+      // The split `standingHeight` reads back: keep the two in step.
       for (const [p, q, r] of [[a, b, c], [a, c, d]] as const) {
         if (p[2] < FLAT && q[2] < FLAT && r[2] < FLAT) {
           continue;
@@ -169,4 +186,47 @@ export function landformMesh(solid: MeshBuilder, landform: Landform, origin: Pla
       }
     }
   }
+}
+
+/**
+ * How high the drawn land stands under a planet point, tiles: 0 on open ground.
+ *
+ * The hero may walk onto a landform's lower slope - anything under
+ * `BLOCK_HEIGHT` - and the slope is drawn there as facets, so a foot left at
+ * height 0 is buried in them. This is where a body's foot goes instead: the
+ * facets' own height, read off the lattice and split `landformMesh` draws,
+ * not the smoother field between them, so the foot is on what is on screen.
+ */
+export function standingHeight(point: PlanetPoint): number {
+  let tallest = 0;
+  for (const landform of planetLandforms()) {
+    const dx = wrapDelta(point.x, landform.x);
+    const dy = wrapDelta(point.y, landform.y);
+    if (Math.abs(dx) > landform.radius + 3 || Math.abs(dy) > landform.radius + 3) {
+      continue;
+    }
+    tallest = Math.max(tallest, facetHeight(landformLattice(landform), dx, dy));
+  }
+  return tallest;
+}
+
+/** The drawn facet's height at an offset from a landform's centre, tiles. */
+function facetHeight(lattice: Lattice, dx: number, dy: number): number {
+  const u = (dx - lattice.start) / lattice.step;
+  const v = (dy - lattice.start) / lattice.step;
+  if (u < 0 || v < 0 || u > lattice.cells || v > lattice.cells) {
+    return 0;
+  }
+  const i = Math.min(Math.floor(u), lattice.cells - 1);
+  const j = Math.min(Math.floor(v), lattice.cells - 1);
+  const fu = u - i;
+  const fv = v - j;
+  const a = latticeHeight(lattice, i, j);
+  const c = latticeHeight(lattice, i + 1, j + 1);
+  // Triangle a-b-c below the diagonal, a-c-d above it.
+  const [side, along, across] = fu >= fv ? [latticeHeight(lattice, i + 1, j), fu, fv] : [latticeHeight(lattice, i, j + 1), fv, fu];
+  if (a < FLAT && side < FLAT && c < FLAT) {
+    return 0;
+  }
+  return a + (side - a) * along + (c - side) * across;
 }
