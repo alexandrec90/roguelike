@@ -1,12 +1,13 @@
 /**
- * The hero as low-poly solids on his skeleton.
+ * The hero as low-poly solids on his skeleton - in this skin, quite literally:
+ * an undead skeleton with a stick.
  *
  * He is the same rig the pixel skin draws: `HERO_EQUIPPED`, posed by the same
- * layered clips (`layeredPose`, `tracksOf`) and turned by the same yaw. Each
- * body piece the rig already describes - a capsule or a sphere on a bone, in a
- * material (`HERO_VOLUMES`, the sword's own) - becomes a six-sided prism or an
- * icosahedron here. So a new clip, a new piece of gear or a re-proportioned
- * limb shows up in this skin with nothing written for it.
+ * layered clips (`layeredPose`, `tracksOf`) and turned by the same yaw. What
+ * hangs on those bones is this skin's own (`hero-dress.ts`): each piece, a
+ * capsule or a sphere on a bone, becomes a six-sided prism or an icosahedron
+ * here. So a new clip or a re-proportioned limb shows up in this skin with
+ * nothing written for it; a new bone needs a line in the dress to be seen.
  *
  * Rig space is logical pixels, x right, y toward the viewer, z up; the mesh is
  * tiles, x right, y ahead, z up - `toLocal` is the one conversion.
@@ -14,47 +15,28 @@
 
 import type { BladeSample } from "../../game/hero/swing-trail";
 import { HERO_EQUIPPED } from "../../game/models";
-import { orientVector, solveModel, type RigPose, type VolumePiece, type Vec3 as RigVec3 } from "../../game/rig";
+import { orientVector, solveModel, type RigPose, type Vec3 as RigVec3 } from "../../game/rig";
 import { TILE_WIDTH } from "../../game/projection";
+import { SKELETON_DRESS, SKULL_HOLES, STICK_DRESS, type DressPiece } from "./hero-dress";
 import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { blob, frustum } from "./primitives";
 
-/** Every bone's body pieces, the sword's included. */
-const VOLUMES: Readonly<Record<string, readonly VolumePiece[]>> = {
-  ...HERO_EQUIPPED.volumes,
-  ...Object.fromEntries(
-    HERO_EQUIPPED.parts.flatMap((part) => (part.kind === "bone" && part.volumes !== undefined ? [[part.bone.name, part.volumes]] : [])),
-  ),
+/** Every bone's pieces: the skeleton's, and the stick on the rig's sword bone. */
+const VOLUMES: Readonly<Record<string, readonly DressPiece[]>> = {
+  ...SKELETON_DRESS,
+  sword: STICK_DRESS,
 };
 
 /** Sides on a limb: six reads as round from any yaw and as faceted up close. */
 const LIMB_SIDES = 6;
 
-/** A rig material as this skin colours it; a darker `shade` is the trousers' cloth. */
-function pieceColour(piece: VolumePiece, enchanted: boolean): { colour: Rgb; kind: typeof Kind.body | typeof Kind.glow } {
-  if (enchanted && piece.material === "metal") {
+/** A piece's colour, or fire if it burns and the stick is enchanted. */
+function pieceColour(piece: DressPiece, enchanted: boolean): { colour: Rgb; kind: typeof Kind.body | typeof Kind.glow } {
+  if (enchanted && piece.burns === true) {
     return { colour: LOWPOLY.fire, kind: Kind.glow };
   }
-  const shade = piece.shade ?? 0;
-  switch (piece.material) {
-    case "tunic":
-      return { colour: shade < -0.2 ? LOWPOLY.trousers : LOWPOLY.tunic, kind: Kind.body };
-    case "skin":
-      return { colour: LOWPOLY.skin, kind: Kind.body };
-    case "hair":
-      return { colour: LOWPOLY.hair, kind: Kind.body };
-    case "leather":
-      return { colour: LOWPOLY.leather, kind: Kind.body };
-    case "crimson":
-      return { colour: LOWPOLY.crimson, kind: Kind.body };
-    case "metal":
-      return { colour: LOWPOLY.metal, kind: Kind.body };
-    case "gold":
-      return { colour: LOWPOLY.gold, kind: Kind.body };
-    default:
-      return { colour: mixRgb(LOWPOLY.rock, LOWPOLY.tunic, 0.5), kind: Kind.body };
-  }
+  return { colour: LOWPOLY[piece.colour], kind: Kind.body };
 }
 
 /** A rig point (pixels, y toward the viewer) as local tiles (y ahead), raised by `lift` tiles. */
@@ -111,23 +93,24 @@ export function heroMesh(b: MeshBuilder, pose: RigPose, options: HeroMeshOptions
       }
     });
   }
-  eyes(b, solved.head?.end, options.yaw, lift);
+  skullHoles(b, solved.head?.end, options.yaw, lift);
 }
 
 /**
- * Two dark eyes on the front of the face - the one detail that says which way
- * he is looking from any distance. On his back they are inside his head.
+ * The skull's empty sockets and nose, dark against the bone - the one detail
+ * that says which way he is looking from any distance. On his back they are
+ * inside his head.
  */
-function eyes(b: MeshBuilder, head: RigVec3 | undefined, yaw: number, lift: number): void {
+function skullHoles(b: MeshBuilder, head: RigVec3 | undefined, yaw: number, lift: number): void {
   if (head === undefined) {
     return;
   }
-  for (const side of [-1, 1]) {
-    const out = orientVector({ x: side * 1.15, y: 3.45, z: -0.3 }, yaw, false);
-    const at = toLocal({ x: head.x + out.x, y: head.y + out.y, z: head.z + out.z }, lift);
-    const r = 0.5 / TILE_WIDTH;
-    blob(b, at, [r, r, r * 1.3], { colour: LOWPOLY.hair, anchor: [0, 0] }, side, 0);
-  }
+  SKULL_HOLES.forEach(({ at, radius }, index) => {
+    const out = orientVector(at, yaw, false);
+    const centre = toLocal({ x: head.x + out.x, y: head.y + out.y, z: head.z + out.z }, lift);
+    const r = radius / TILE_WIDTH;
+    blob(b, centre, [r, r, r], { colour: LOWPOLY.socket, anchor: [0, 0] }, index, 0);
+  });
 }
 
 /** How bright the newest strip of the trail is; older strips fade from it. */
@@ -136,12 +119,12 @@ const TRAIL_ALPHA = 0.8;
 /**
  * The swing's trail: a ribbon through the air between the blade's last few
  * spans (`bladeSweep`), brightest at the blade and fading toward its tail.
- * Sheer and unlit, steel-white - or fire when the blade burns - and depth
+ * Sheer and unlit, white fading to bone - or fire when the blade burns - and depth
  * tested against him, so the part swept behind his back is hidden by it.
  */
 export function swingTrailMesh(b: MeshBuilder, sweep: readonly BladeSample[], options: { readonly enchanted: boolean; readonly sunk: number }): void {
   const lift = -options.sunk;
-  const [head, tail] = options.enchanted ? [LOWPOLY.fireCore, LOWPOLY.fire] : [LOWPOLY.trail, LOWPOLY.metal];
+  const [head, tail] = options.enchanted ? [LOWPOLY.fireCore, LOWPOLY.fire] : [LOWPOLY.trail, LOWPOLY.bone];
   for (let index = 0; index + 1 < sweep.length; index += 1) {
     const newer = sweep[index] as BladeSample;
     const older = sweep[index + 1] as BladeSample;

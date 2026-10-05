@@ -14,6 +14,7 @@ import type { PlanetPoint } from "../../game/planet";
 import type { PlayerState } from "../../game/player";
 import { burstMesh, fireballMesh, slimeMesh } from "./actor-mesh";
 import { heroMesh, swingTrailMesh } from "./hero-mesh";
+import { looseSkeleton } from "./hero-sway";
 import { MeshBuilder } from "./mesh";
 import { shadowUnder } from "./scenery-mesh";
 
@@ -54,7 +55,7 @@ export class ActorMeshes {
     const { player, live, encounter } = input;
     const tracks = tracksOf(player, input.elapsedMs);
     const sunk = wadeDepth(live) * WADE_SINK;
-    heroMesh(b.heroSolid, layeredPose(tracks), { yaw: input.yaw, enchanted: player.enchanted, sunk });
+    heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), { yaw: input.yaw, enchanted: player.enchanted, sunk });
     shadowUnder(b.heroSheer, [0, 0, 0], HERO_SHADOW);
     if (player.attackMs !== undefined) {
       const sweep = bladeSweep(player.attackMs, layeredPose({ ...tracks, swingMs: undefined }), { yaw: input.yaw });
