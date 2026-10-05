@@ -17,6 +17,8 @@
  * | `terrain-mesh.ts`, `scenery-mesh.ts` | ground, lakes, landforms; each scenery species |
  * | `hero-mesh.ts`, `actor-mesh.ts` | the rigged hero; slimes, fireballs, bursts |
  * | `mesh.ts`, `primitives.ts`, `palette.ts` | flat-shaded triangles, the solids, the skin's colours |
+ * | `trip.ts`, `trip-shaders.ts` | `?trip=`: the psychedelic dial - moving colour, a breathing world, puddles in complementary hues; and `?fx=` its five extras |
+ * | `trail-pass.ts` | the trip's `trails`: frame feedback, on WebGL2 (`webgpu/trail-gpu.ts` on WebGPU) |
  */
 
 import { FrameClock } from "../../engine/loop";
@@ -29,6 +31,7 @@ import { backendOrder, parseGpu, parseMsaa, type GpuChoice, type LowpolyBackend 
 import { LowpolyGame } from "./lowpoly-game";
 import { backingSize } from "./placement";
 import { WebGlBackend } from "./renderer";
+import { parseFx, parseTrip } from "./trip";
 import { WebGpuBackend } from "./webgpu/webgpu-renderer";
 
 
@@ -82,7 +85,7 @@ function webglBackend(canvas: HTMLCanvasElement, samples: number): LowpolyBacken
 }
 
 function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, query: URLSearchParams): void {
-  const game = new LowpolyGame(backend, readSceneOptions(query));
+  const game = new LowpolyGame(backend, readSceneOptions(query), parseTrip(query.get("trip")), parseFx(query.get("fx")));
 
   const fit = (): void => {
     const size = backingSize(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);

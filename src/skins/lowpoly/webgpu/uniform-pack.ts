@@ -15,8 +15,8 @@ import { DEPTH_FAR, DEPTH_NEAR } from "../placement";
 import { lightDirection } from "../sky-light";
 import { heroCellOf } from "./waves";
 
-/** Floats in `Frame` (WGSL): ten `vec4f`. */
-export const FRAME_FLOATS = 40;
+/** Floats in `Frame` (WGSL): eleven `vec4f`. */
+export const FRAME_FLOATS = 44;
 
 /** Floats per entry of `draws` (WGSL `Draw`): two `vec4f`. */
 export const DRAW_FLOATS = 8;
@@ -36,6 +36,7 @@ export const DRAW_FLOATS = 8;
  * | shading | sun | shadow strength | daylight | - |
  * | water | level | wetness | rain | seconds |
  * | sim | hero cell x | hero cell y | - | - |
+ * | trip | amount | seconds | `TRIP_FX` bits | - |
  */
 export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32Array(FRAME_FLOATS)): Float32Array {
   const { view, atmosphere, water } = frame;
@@ -52,13 +53,15 @@ export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32A
   out.set([0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight, 0], 28);
   out.set([water.level, water.wetness, water.rain, water.seconds], 32);
   out.set([heroCellOf(water.hero[0]), heroCellOf(water.hero[1]), 0, 0], 36);
+  out.set([frame.trip, water.seconds, frame.fx, 0], 40);
   return out;
 }
 
-/** One run of draws, all mirrored (-1) or all not (1). */
+/** One run of draws, all mirrored (-1) or all not (1), and all overhead (`flip` 1, the trip's sky) or not. */
 export interface DrawList {
   readonly calls: readonly DrawCall[];
   readonly mirror: number;
+  readonly flip?: number;
 }
 
 /** Entries the lists need in all. */
@@ -69,15 +72,15 @@ export function drawCount(lists: readonly DrawList[]): number {
 /**
  * A frame's draws, list after list in the order the passes issue them, so draw
  * `n` is entry `n` and each list starts where the last ended. Each entry is its
- * offset, the cosine and sine of its turn, and the mirror.
+ * offset, the cosine and sine of its turn, the mirror, and the flip.
  */
 export function packDraws(lists: readonly DrawList[], out?: Float32Array): Float32Array {
   const count = drawCount(lists);
   const target = out !== undefined && out.length >= count * DRAW_FLOATS ? out : new Float32Array(count * DRAW_FLOATS);
   let at = 0;
-  for (const { calls, mirror } of lists) {
+  for (const { calls, mirror, flip = 0 } of lists) {
     for (const call of calls) {
-      target.set([call.offset[0], call.offset[1], Math.cos(call.turn), Math.sin(call.turn), mirror, 0, 0, 0], at);
+      target.set([call.offset[0], call.offset[1], Math.cos(call.turn), Math.sin(call.turn), mirror, flip, 0, 0], at);
       at += DRAW_FLOATS;
     }
   }

@@ -13,6 +13,8 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horiz
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { Kind } from "../mesh";
+import { TRIP } from "../trip";
+import { TRIP_WGSL } from "../trip-shaders";
 import { WAVE_N, WAVE_RES } from "./waves";
 
 const f = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
@@ -30,6 +32,7 @@ struct Frame {
   shading: vec4f,
   water: vec4f,
   sim: vec4f,
+  trip: vec4f,
 };
 
 struct Draw {
@@ -77,6 +80,8 @@ const LAP = ${f(PLANET_TILES)};
 const WAVE_RES = ${f(WAVE_RES)};
 const WAVE_N = ${WAVE_N}i;
 
+${TRIP_WGSL}
+
 struct VertexIn {
   @location(0) pos: vec3f,
   @location(1) anchor: vec2f,
@@ -93,6 +98,8 @@ struct VertexOut {
   @location(3) planet: vec2f,
   @location(4) @interpolate(flat) kind: u32,
   @location(5) @interpolate(flat) mirror: f32,
+  @location(6) away: vec2f,
+  @location(7) @interpolate(flat) flip: f32,
 };
 
 fn turned(p: vec2f, rot: vec2f) -> vec2f {
@@ -122,8 +129,14 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   let rot = draw.place.zw;
   let mirror = draw.mirror.x;
   let kind = u32(input.normal.w * 127.0 + 0.5);
-  let foot = turned(input.anchor + draw.place.xy, rot);
-  let off = turned(input.pos.xy - input.anchor, rot);
+  // The trip's swell and breath, both read at the foot so a body moves as one (trip.ts).
+  let away = input.anchor + draw.place.xy;
+  let swell = tripSwell(away + frame.hero.xy);
+  let breath = tripBreath(away);
+  let foot = turned(away, rot);
+  let off = turned(input.pos.xy - input.anchor, rot) * breath;
+  let curl = tripCurl(foot.x);
+  let flip = draw.mirror.y;
 
   let groundTop = frame.roll.x;
   let affineY = frame.view.w - foot.y * TILE_DEPTH;
@@ -139,17 +152,25 @@ fn vertexMain(input: VertexIn) -> VertexOut {
     scale = shrinkAt(rows);
     let over = rows - ROLL_ROWS;
     let sink = select(0.0, SINK_RATE * over * over, over > 0.0);
-    ground = groundTop - frame.roll.y * lift + sink * scale;
+    // The trip's curl lifts the lip's far edge past the line without creasing its seam.
+    ground = groundTop - frame.roll.y * (lift + curl * lift * lift) + sink * scale;
   }
   let x = frame.view.z + (foot.x + off.x) * TILE_WIDTH * scale + frame.depthShake.z;
-  let y = ground - (off.y * TILE_DEPTH + input.pos.z * mirror * WALL_RISE) * scale + frame.depthShake.w;
+  // The swell lifts the water as well as what stands in it, so it is not mirrored.
+  var y = ground - (off.y * TILE_DEPTH + (input.pos.z * mirror * breath + swell) * WALL_RISE) * scale + frame.depthShake.w;
+  if (flip > 0.0) {
+    // Upside down about the horizon line this column's lip reaches.
+    y = 2.0 * (groundTop - frame.roll.y * (1.0 + curl) + frame.depthShake.w) - y;
+  }
 
   var bias = 0.0;
   if (kind == ${Kind.ground}u) { bias = 0.06; }
   if (kind == ${Kind.shadow}u) { bias = 0.04; }
   if (kind == ${Kind.water}u) { bias = 0.03; }
   let depth = foot.y + off.y * scale + bias;
-  let z = clamp((depth - frame.depthShake.x) / (frame.depthShake.y - frame.depthShake.x), 0.0, 1.0);
+  // The overhead world keeps the back of the depth range, so the world drawn after it always wins.
+  let key = clamp((depth - frame.depthShake.x) / (frame.depthShake.y - frame.depthShake.x), 0.0, 1.0);
+  let z = select(${f(TRIP.skyDepth)} * key, ${f(TRIP.skyDepth)} + ${f(1 - TRIP.skyDepth)} * key, flip > 0.0);
 
   var result: VertexOut;
   result.clip = vec4f(x / frame.view.x * 2.0 - 1.0, 1.0 - y / frame.view.y * 2.0, z, 1.0);
@@ -159,6 +180,8 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   result.planet = input.pos.xy + draw.place.xy + frame.hero.xy;
   result.kind = kind;
   result.mirror = mirror;
+  result.away = input.pos.xy + draw.place.xy;
+  result.flip = flip;
   return result;
 }
 
@@ -227,7 +250,15 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
   }
   let far = clamp(input.rows / ROLL_ROWS, 0.0, 1.0);
   let haze = select(far * far * (3.0 - 2.0 * far) * 0.78, 0.82, input.rows > ROLL_ROWS);
-  colour = mix(colour, frame.haze.rgb, haze);
+  let air = tripHaze(frame.haze.rgb, input.away);
+  colour = mix(colour, air, haze);
+  // The world overhead is seen through the air between.
+  colour = select(colour, mix(colour, air, ${f(TRIP.skyHaze)}), input.flip > 0.0);
+  let n = normalize(input.normal);
+  colour = tripColour(colour, input.away, n, input.mirror);
+  if (input.kind != ${Kind.ground}u && input.kind != ${Kind.shadow}u && input.kind != ${Kind.water}u) {
+    colour += tripNeon(n, input.away, frame.shading.z);
+  }
   return vec4f(colour, alpha);
 }
 `;

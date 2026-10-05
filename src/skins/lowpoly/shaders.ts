@@ -16,6 +16,8 @@
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
 import { Kind } from "./mesh";
+import { TRIP } from "./trip";
+import { TRIP_GLSL } from "./trip-shaders";
 import { WATER_GLSL } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
@@ -36,12 +38,17 @@ uniform vec2 u_depth;    // nearest and farthest depth key
 uniform vec2 u_shake;    // logical pixels
 uniform vec2 u_hero;     // the hero's planet point
 uniform float u_mirror;  // 1, or -1 to draw the world reflected in still water at z = 0
+uniform float u_flip;    // 1 to draw the world again overhead, upside down about the horizon line (the trip's sky)
 
 out vec4 v_colour;
 out vec3 v_normal;
 out float v_rows;
 out vec2 v_planet;
+out vec2 v_away;
 flat out int v_kind;
+flat out float v_flip;
+
+${TRIP_GLSL}
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
 const float HORIZON_SCALE = ${float(HORIZON_SCALE)};
@@ -73,8 +80,13 @@ float shrinkAt(float rows) {
 
 void main() {
   int kind = int(a_normal.w * 127.0 + 0.5);
-  vec2 foot = turned(a_anchor + u_offset);
-  vec2 off = turned(a_pos.xy - a_anchor);
+  // The trip's swell and breath, both read at the foot so a body moves as one (trip.ts).
+  vec2 away = a_anchor + u_offset;
+  float swell = tripSwell(away + u_hero);
+  float breath = tripBreath(away);
+  vec2 foot = turned(away);
+  vec2 off = turned(a_pos.xy - a_anchor) * breath;
+  float curl = tripCurl(foot.x);
 
   float groundTop = u_roll.x;
   float affineY = u_view.w - foot.y * TILE_DEPTH;
@@ -87,22 +99,32 @@ void main() {
     scale = shrinkAt(rows);
     float over = rows - ROLL_ROWS;
     float sink = over > 0.0 ? SINK_RATE * over * over : 0.0;
-    ground = groundTop - u_roll.y * lift + sink * scale;
+    // The trip's curl lifts the lip's far edge past the line without creasing its seam.
+    ground = groundTop - u_roll.y * (lift + curl * lift * lift) + sink * scale;
   }
   float x = u_view.z + (foot.x + off.x) * TILE_WIDTH * scale + u_shake.x;
-  float y = ground - (off.y * TILE_DEPTH + a_pos.z * u_mirror * WALL_RISE) * scale + u_shake.y;
+  // The swell lifts the water as well as what stands in it, so it is not mirrored.
+  float y = ground - (off.y * TILE_DEPTH + (a_pos.z * u_mirror * breath + swell) * WALL_RISE) * scale + u_shake.y;
+  if (u_flip > 0.0) {
+    // Upside down about the horizon line this column's lip reaches.
+    y = 2.0 * (groundTop - u_roll.y * (1.0 + curl) + u_shake.y) - y;
+  }
 
   // Things lying on the ground sit a hair behind anything standing on the same row.
   float bias = kind == ${Kind.ground} ? 0.06 : (kind == ${Kind.shadow} ? 0.04 : (kind == ${Kind.water} ? 0.03 : 0.0));
   float depth = foot.y + off.y * scale + bias;
-  float z = clamp((depth - u_depth.x) / (u_depth.y - u_depth.x), 0.0, 1.0) * 2.0 - 1.0;
+  // The overhead world keeps the back of the depth range, so the world drawn after it always wins.
+  float key = clamp((depth - u_depth.x) / (u_depth.y - u_depth.x), 0.0, 1.0);
+  float z = (u_flip > 0.0 ? ${float(TRIP.skyDepth)} + ${float(1 - TRIP.skyDepth)} * key : ${float(TRIP.skyDepth)} * key) * 2.0 - 1.0;
 
   gl_Position = vec4(x / u_view.x * 2.0 - 1.0, 1.0 - y / u_view.y * 2.0, z, 1.0);
   v_colour = a_colour;
   v_normal = vec3(turned(a_normal.xy), a_normal.z);
   v_rows = rows;
   v_planet = a_pos.xy + u_offset + u_hero;
+  v_away = a_pos.xy + u_offset;
   v_kind = kind;
+  v_flip = u_flip;
 }
 `;
 
@@ -136,7 +158,9 @@ in vec4 v_colour;
 in vec3 v_normal;
 in float v_rows;
 in vec2 v_planet;
+in vec2 v_away;
 flat in int v_kind;
+flat in float v_flip;
 
 uniform vec3 u_lightDir;  // toward the light, local frame
 uniform vec3 u_ambient;   // the hour's colour, multiplied over everything lit
@@ -149,6 +173,7 @@ out vec4 outColour;
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
 
 ${WATER_GLSL}
+${TRIP_GLSL}
 
 /** A face lit by the sun and the sky, under the hour's colour. */
 vec3 lit(vec3 colour) {
@@ -179,7 +204,15 @@ void main() {${clips ? CLIP_GLSL : ""}
   }
   float far = clamp(v_rows / ROLL_ROWS, 0.0, 1.0);
   float haze = v_rows > ROLL_ROWS ? 0.82 : far * far * (3.0 - 2.0 * far) * 0.78;
-  colour = mix(colour, u_haze, haze);
+  vec3 air = tripHaze(u_haze, v_away);
+  colour = mix(colour, air, haze);
+  // The world overhead is seen through the air between.
+  colour = v_flip > 0.0 ? mix(colour, air, ${float(TRIP.skyHaze)}) : colour;
+  vec3 n = normalize(v_normal);
+  colour = tripColour(colour, v_away, n, u_mirror);
+  if (v_kind != ${Kind.ground} && v_kind != ${Kind.shadow} && v_kind != ${Kind.water}) {
+    colour += tripNeon(n, v_away, u_shading.z);
+  }
   outColour = vec4(colour, alpha);
 }
 `;

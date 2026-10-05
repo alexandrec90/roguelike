@@ -22,6 +22,7 @@ import { WEATHER_PRESETS } from "../../game/water/schedule";
 import { RAIN_SLANT } from "../../game/weather";
 import { ACTOR_MESH_KEYS, ActorMeshes, type ActorMeshKey } from "./actor-frame";
 import type { DrawableHandle, DrawCall, LowpolyBackend } from "./backend";
+import { hasFx, trippedAtmosphere } from "./trip";
 import { WetWorld } from "./wet-world";
 import { heroHeightPx } from "./hero-mesh";
 import { fieldRows, lowpolyView, type LowpolyView } from "./placement";
@@ -53,9 +54,16 @@ export class LowpolyGame {
   private shownYaw: number;
   view: LowpolyView;
 
+  /**
+   * @param trip how far gone the picture is, 0..1 (`trip.ts`, `?trip=`), and
+   * @param fx which of its extra terms run (`TRIP_FX` bits, `?fx=`). Both public
+   * and mutable so a dev console can turn them live (`__lowpoly.trip = 0.5`).
+   */
   constructor(
     readonly renderer: LowpolyBackend,
     private readonly options: SceneOptions,
+    public trip = 0,
+    public fx = 0,
   ) {
     this.hero = new HeroDriver({ ...dryGround(START), turn: 0 }, options.radius);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
@@ -114,10 +122,15 @@ export class LowpolyGame {
     this.buildActors(live);
     const weather = this.wet.weather;
     const atmosphere = this.clock.atmosphere(weather.overcast);
-    const frame = { view: this.view, atmosphere, shake: this.clock.shake(), water: this.wet.water(live, this.clock.elapsedMs), width, height };
+    const water = this.wet.water(live, this.clock.elapsedMs);
+    const { trip, fx } = this;
+    const frame = { view: this.view, atmosphere: trippedAtmosphere(atmosphere, trip, water.seconds), shake: this.clock.shake(), water, trip, fx, width, height };
     const turn = where.turn;
     const chunkCall = (drawable: DrawableHandle, mesh: ChunkMesh): DrawCall => ({ drawable, offset: asPair(chunkOffset(mesh, live)), turn });
     const rows = fieldRows(this.view);
+    const inView = this.chunks.filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows));
+    // The trip's sky: the field again, overhead. What it shows is the far field, so the chunks in view are all it needs.
+    const overhead = trip > 0 && hasFx(fx, "sky");
     const actors: DrawCall[] = [
       { drawable: this.dynamic.actorSolid, offset: [0, 0], turn },
       { drawable: this.dynamic.heroSolid, offset: [0, 0], turn: 0 },
@@ -129,9 +142,11 @@ export class LowpolyGame {
           .map((chunk) => chunkCall(chunk.solid, chunk.mesh)),
         ...actors,
       ],
-      grounds: this.chunks
-        .filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows))
-        .map((chunk) => chunkCall(chunk.ground, chunk.mesh)),
+      grounds: inView.map((chunk) => chunkCall(chunk.ground, chunk.mesh)),
+      overhead: {
+        grounds: overhead ? inView.map((chunk) => chunkCall(chunk.ground, chunk.mesh)) : [],
+        solids: overhead ? inView.map((chunk) => chunkCall(chunk.solid, chunk.mesh)) : [],
+      },
       solids: [
         ...this.chunks.map((chunk) => chunkCall(chunk.solid, chunk.mesh)),
         { drawable: this.dynamic.actorSolid, offset: [0, 0], turn },

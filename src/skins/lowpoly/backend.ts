@@ -59,6 +59,10 @@ export interface FrameUniforms {
   readonly atmosphere: Atmosphere;
   readonly shake: { readonly x: number; readonly y: number };
   readonly water: WaterState;
+  /** How far gone, 0..1 (`trip.ts`): 0 draws the skin as it was. Its clock is `water.seconds`. */
+  readonly trip: number;
+  /** Which of the trip's extra terms run, as `TRIP_FX` bits (`?fx=`). */
+  readonly fx: number;
   /** The drawing buffer, device pixels. */
   readonly width: number;
   readonly height: number;
@@ -75,6 +79,11 @@ export interface FrameScene {
   /** The solids near enough that their reflection can land in water on screen (`MIRROR_ROWS`). */
   readonly mirrored: readonly DrawCall[];
   readonly sheers: readonly DrawCall[];
+  /**
+   * The trip's `sky`: the field's ground and what stands on it, drawn again
+   * upside down about the horizon line before the world itself. Empty unless on.
+   */
+  readonly overhead: { readonly grounds: readonly DrawCall[]; readonly solids: readonly DrawCall[] };
   readonly rain: RainState;
 }
 

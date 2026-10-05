@@ -32,11 +32,19 @@ water's motion differs, because only WebGPU has compute.
 | --- | --- | --- | --- |
 | the projection | `placement.ts` | `shaders.ts` | `webgpu/wgsl-world.ts` |
 | the wave step | `webgpu/waves.ts` | - | `webgpu/wave-sim.ts` |
+| the trip (`?trip=`, `?fx=`) | `trip.ts` | `trip-shaders.ts` | `trip-shaders.ts` |
+| the trip's trails | `trailFrame` | `trail-pass.ts` | `webgpu/trail-gpu.ts` |
 
 **Change one, change all.** `placement.test.ts` pins `placeVertex` to the pixel skin's
 `localPlacement` and `waves.test.ts` the wave step's behaviour; a drift between a
 reference and its shader only shows on screen. WGSL clip depth runs 0..1 where GLSL's
 runs -1..1, and a WebGPU fragment's position and a texture's rows both count from the top.
+
+**The trip is a look, not a rule change.** `?trip=` (0..1) and `?fx=` drive every term in
+`trip.ts`; at 0 each is exactly the identity. Two of its terms bend this file's
+contracts, and only while on: `curl` lifts the lip past the horizon line, and `sky`
+draws the field a second time, flipped about that line, in the back `1 - TRIP.skyDepth`
+of the depth range - so the world itself always keeps `[0, TRIP.skyDepth)` of it.
 
 Depth is **rows ahead**, not distance from an eye: along any screen ray of this
 projection the point further ahead is further away, so it is an exact z-buffer key on
@@ -121,6 +129,10 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
 | `ripples.ts` | `RippleRing` |
 | `sky-light.ts` | `lightDirection` · `stillSky` |
+| `trip.ts` | `TRIP` · `TRIP_FX` · `parseTrip` · `parseFx` · `hasFx` · `hueTurn` · `tripTint` · `tripHue` · `tripSwell` · `tripBreath` · `tripHazeTurn` · `tripNeon` · `tripCurl` · `tripDepth` · `trailFrame` · `trippedAtmosphere` · `tripMirrorSky` |
+| `trip-shaders.ts` | `TRIP_GLSL` · `TRIP_WGSL` |
+| `trail-pass.ts` | `TrailPass` · `TRAIL_FRAGMENT` |
+| `webgpu/trail-gpu.ts` | `TrailGpu` · `TRAIL_WGSL` · `packTrail` |
 | `renderer.ts` | `WebGlBackend` |
 | `reflection.ts` | `ReflectionTarget` · `REFLECTION_SCALE` |
 | `rain-pass.ts` | `RainPass` |

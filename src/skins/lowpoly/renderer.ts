@@ -7,6 +7,8 @@
  * into a half-size target. Then the sky; the **solid** pass, where the ground
  * reads its puddles and the mirror; the **sheer** pass of shadows, lakes and
  * spell light, blended without writing depth; and the **rain** over all of it.
+ * The trip (`trip.ts`) may add two: its overhead world after the sky, and its
+ * trails over the finished frame (`trail-pass.ts`).
  * Its water moves by procedural rings (`water-glsl.ts`); WebGPU's simulates.
  *
  * Budget: the static geometry twice (once mirrored, at a quarter of the pixels),
@@ -22,6 +24,8 @@ import { RainPass } from "./rain-pass";
 import { ReflectionTarget } from "./reflection";
 import { SKY_FRAGMENT, SKY_VERTEX, WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID, WORLD_VERTEX } from "./shaders";
 import { lightDirection, stillSky } from "./sky-light";
+import { TrailPass } from "./trail-pass";
+import { trailFrame, tripMirrorSky } from "./trip";
 
 interface Drawable extends DrawableHandle {
   readonly vao: WebGLVertexArrayObject;
@@ -43,6 +47,7 @@ export class WebGlBackend implements LowpolyBackend {
   private readonly puddles: WebGLTexture;
   private readonly reflection: ReflectionTarget;
   private readonly rain: RainPass;
+  private readonly trail: TrailPass;
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
@@ -55,6 +60,7 @@ export class WebGlBackend implements LowpolyBackend {
     this.puddles = puddleTexture(gl, puddleField);
     this.reflection = new ReflectionTarget(gl);
     this.rain = new RainPass(gl);
+    this.trail = new TrailPass(gl);
   }
 
   createDrawable(bytes?: Uint8Array): DrawableHandle {
@@ -94,7 +100,7 @@ export class WebGlBackend implements LowpolyBackend {
     // What stands near enough to be seen in water, mirrored.
     this.setWorld(this.solidWorld, frame, 1);
     this.setWorld(clipping, frame, -1);
-    this.reflection.bind(frame.width, frame.height, stillSky(frame.atmosphere));
+    this.reflection.bind(frame.width, frame.height, tripMirrorSky(stillSky(frame.atmosphere), frame.trip));
     this.solid();
     this.drawAll(clipping, scene.mirrored);
 
@@ -112,6 +118,13 @@ export class WebGlBackend implements LowpolyBackend {
     gl.activeTexture(gl.TEXTURE0 + REFLECT_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, this.reflection.texture);
     this.solid();
+    // The trip's sky: the world overhead, in the back of the depth range, before the world itself.
+    if (scene.overhead.grounds.length > 0 || scene.overhead.solids.length > 0) {
+      this.drawAll(clipping, scene.overhead.grounds, 1);
+      gl.useProgram(this.solidWorld.target);
+      this.drawAll(this.solidWorld, scene.overhead.solids, 1);
+      gl.useProgram(clipping.target);
+    }
     this.drawAll(clipping, scene.grounds);
     gl.useProgram(this.solidWorld.target);
     this.drawAll(this.solidWorld, scene.solids);
@@ -119,6 +132,10 @@ export class WebGlBackend implements LowpolyBackend {
     this.sheer();
     this.drawAll(clipping, scene.sheers);
     this.rain.draw({ ...scene.rain, width: frame.view.width, height: frame.view.height });
+    const trail = trailFrame(frame);
+    if (trail !== undefined) {
+      this.trail.draw(trail);
+    }
   }
 
   /** The opaque pass: depth tested and written. */
@@ -140,8 +157,10 @@ export class WebGlBackend implements LowpolyBackend {
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
-  private drawAll(world: Uniforms, calls: readonly DrawCall[]): void {
+  /** Draw `calls` with the program in use; `flip` 1 draws them overhead, upside down (the trip's sky). */
+  private drawAll(world: Uniforms, calls: readonly DrawCall[], flip = 0): void {
     const gl = this.gl;
+    gl.uniform1f(world.at("u_flip"), flip);
     for (const call of calls) {
       const drawable = call.drawable as Drawable;
       if (drawable.count === 0) {
@@ -185,6 +204,7 @@ export class WebGlBackend implements LowpolyBackend {
     gl.uniform2f(at("u_hero"), water.hero[0], water.hero[1]);
     gl.uniform2f(at("u_resolution"), frame.width, frame.height);
     gl.uniform4f(at("u_water"), water.level, water.wetness, water.rain, water.seconds);
+    gl.uniform4f(at("u_trip"), frame.trip, water.seconds, frame.fx, 0);
     gl.uniform4fv(at("u_ripples[0]"), water.ripples);
     gl.uniform1i(at("u_puddles"), PUDDLE_UNIT);
     gl.uniform1i(at("u_reflect"), REFLECT_UNIT);

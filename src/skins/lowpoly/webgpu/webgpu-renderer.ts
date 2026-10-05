@@ -16,6 +16,8 @@
 import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend } from "../backend";
 import { VERTEX_BYTES } from "../mesh";
 import { stillSky } from "../sky-light";
+import { trailFrame, tripMirrorSky } from "../trip";
+import { TrailGpu } from "./trail-gpu";
 import { FIELD_SIZE } from "../../../game/water/puddle-field";
 import { BufferUsage, TextureUsage } from "./gpu-flags";
 import { createPipelines, type Pipelines } from "./pipelines";
@@ -43,6 +45,7 @@ export class WebGpuBackend implements LowpolyBackend {
   private readonly targets: GpuTargets;
   private readonly waves: WaveSim;
   private readonly surface: WaveSurface;
+  private readonly trail: TrailGpu;
   private readonly frameBuffer: GPUBuffer;
   private readonly passesBuffer: GPUBuffer;
   private readonly passesGroup: GPUBindGroup;
@@ -71,7 +74,8 @@ export class WebGpuBackend implements LowpolyBackend {
       throw new Error("No WebGPU canvas context");
     }
     const format = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({ device, format, alphaMode: "opaque" });
+    // COPY_SRC so the trip's trails can keep the finished frame (`trail-gpu.ts`).
+    context.configure({ device, format, alphaMode: "opaque", usage: TextureUsage.RENDER_ATTACHMENT | TextureUsage.COPY_SRC });
     device.pushErrorScope("validation");
     const backend = new WebGpuBackend(device, context, format, puddleField, samples);
     const error = await device.popErrorScope();
@@ -97,6 +101,7 @@ export class WebGpuBackend implements LowpolyBackend {
     this.blank = device.createTexture({ size: [1, 1], format: "rgba8unorm", usage: TextureUsage.TEXTURE_BINDING }).createView();
     this.waves = new WaveSim(device, this.mask, this.repeat);
     this.surface = new WaveSurface(device, this.waves.heightBuffers());
+    this.trail = new TrailGpu(device, format);
     const uniform = (floats: number): GPUBuffer => device.createBuffer({ size: floats * 4, usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST });
     this.frameBuffer = uniform(FRAME_FLOATS);
     this.passesBuffer = uniform(PASSES_FLOATS);
@@ -132,9 +137,11 @@ export class WebGpuBackend implements LowpolyBackend {
     if (this.targets.fit(frame.width, frame.height) || this.groups === undefined) {
       this.groups = this.bindGroups();
     }
-    // Mirror pass, then the screen's ground, solids and sheers: draw n is entry n.
+    // Mirror pass, then the screen's overhead world, ground, solids and sheers: draw n is entry n.
     const lists = [
       { calls: scene.mirrored, mirror: -1 },
+      { calls: scene.overhead.grounds, mirror: 1, flip: 1 },
+      { calls: scene.overhead.solids, mirror: 1, flip: 1 },
       { calls: scene.grounds, mirror: 1 },
       { calls: scene.solids, mirror: 1 },
       { calls: scene.sheers, mirror: 1 },
@@ -150,7 +157,7 @@ export class WebGpuBackend implements LowpolyBackend {
     }
     const groups = this.groups ?? this.bindGroups();
 
-    const sky = stillSky(frame.atmosphere);
+    const sky = tripMirrorSky(stillSky(frame.atmosphere), frame.trip);
     const mirror = encoder.beginRenderPass({
       colorAttachments: [{ view: this.targets.mirror, clearValue: [sky[0], sky[1], sky[2], 1], loadOp: "clear", storeOp: "store" }],
       depthStencilAttachment: { view: this.targets.mirrorDepth, depthClearValue: 1, depthLoadOp: "clear", depthStoreOp: "discard" },
@@ -160,27 +167,36 @@ export class WebGpuBackend implements LowpolyBackend {
     drawCalls(mirror, scene.mirrored, first(0));
     mirror.end();
 
+    const canvas = this.context.getCurrentTexture();
     const screen = encoder.beginRenderPass({
-      colorAttachments: [screenAttachment(this.targets.screenColour, this.context.getCurrentTexture().createView())],
+      colorAttachments: [screenAttachment(this.targets.screenColour, canvas.createView())],
       depthStencilAttachment: { view: this.targets.screenDepth, depthClearValue: 1, depthLoadOp: "clear", depthStoreOp: "discard" },
     });
     screen.setPipeline(this.pipelines.sky);
     screen.setBindGroup(0, this.passesGroup);
     screen.draw(3);
-    // The ground first, so it hides what stands behind it from the early depth test.
+    // The trip's sky, in the back of the depth range; then the ground, so it hides what stands behind it.
     screen.setPipeline(this.pipelines.worldGround);
     screen.setBindGroup(0, groups[1]);
-    drawCalls(screen, scene.grounds, first(1));
+    drawCalls(screen, scene.overhead.grounds, first(1));
     screen.setPipeline(this.pipelines.worldSolid);
-    drawCalls(screen, scene.solids, first(2));
+    drawCalls(screen, scene.overhead.solids, first(2));
+    screen.setPipeline(this.pipelines.worldGround);
+    drawCalls(screen, scene.grounds, first(3));
+    screen.setPipeline(this.pipelines.worldSolid);
+    drawCalls(screen, scene.solids, first(4));
     screen.setPipeline(this.pipelines.worldSheer);
-    drawCalls(screen, scene.sheers, first(3));
+    drawCalls(screen, scene.sheers, first(5));
     if (scene.rain.strength > 0) {
       screen.setPipeline(this.pipelines.rain);
       screen.setBindGroup(0, this.passesGroup);
       screen.draw(3);
     }
     screen.end();
+    const trail = trailFrame(frame);
+    if (trail !== undefined) {
+      this.trail.encode(encoder, canvas, trail);
+    }
     device.queue.submit([encoder.finish()]);
   }
 

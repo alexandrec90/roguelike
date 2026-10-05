@@ -20,6 +20,8 @@ const frame: FrameUniforms = {
   atmosphere: atmosphereAt(13),
   shake: { x: 1, y: -2 },
   water: { hero: [12.5, 40.25], level: 0.7, wetness: 0.4, rain: 0.6, seconds: 3.5, ripples: new Float32Array(64) },
+  trip: 0.25,
+  fx: 9,
   width: 1280,
   height: 720,
 };
@@ -35,6 +37,8 @@ describe("the WebGPU uniforms", () => {
     expect(floats[35]).toBe(3.5);
     // The hero's wave cell: eight to a tile.
     expect([...floats.slice(36, 38)]).toEqual([100, 322]);
+    // The trip: its amount, on the water's clock, and its switches.
+    expect([...floats.slice(40, 43)]).toEqual([0.25, 3.5, 9]);
   });
 
   it("number the draws list after list, so a list's first draw is the sum of those before it", () => {
@@ -50,6 +54,9 @@ describe("the WebGPU uniforms", () => {
     expect(floats[DRAW_FLOATS * 2 + 4]).toBe(1);
     expect(floats[4]).toBe(-1);
     expect(floats[3]).toBeCloseTo(1, 9);
+    // No flip unless a list asks: only the trip's overhead world is drawn upside down.
+    expect(floats[5]).toBe(0);
+    expect(packDraws([{ calls: [call(1)], mirror: 1, flip: 1 }])[5]).toBe(1);
   });
 
   it("pack the sky and rain block", () => {

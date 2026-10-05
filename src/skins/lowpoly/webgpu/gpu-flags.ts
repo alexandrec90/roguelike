@@ -15,6 +15,7 @@ export const BufferUsage = {
 } as const;
 
 export const TextureUsage = {
+  COPY_SRC: 0x01,
   COPY_DST: 0x02,
   TEXTURE_BINDING: 0x04,
   STORAGE_BINDING: 0x08,
