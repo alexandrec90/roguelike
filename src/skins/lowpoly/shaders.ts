@@ -175,10 +175,13 @@ void main() {${clips ? CLIP_GLSL : ""}
   } else if (v_kind == ${Kind.ground}) {
     // Soaked ground is darker; standing water is a mirror over it, with a damp rim.
     vec3 ground = lit(colour) * (1.0 - 0.18 * wet);
-    float depth = puddleAt(v_planet);
+    vec2 water = waterAt(v_planet);
+    float depth = water.x;
     float rim = smoothstep(-0.03, 0.0, depth);
     ground *= 1.0 - 0.22 * rim;
-    colour = depth > 0.0 ? mix(ground, waterColour(v_planet, ground * 0.7, u_lightDir), smoothstep(0.0, 0.012, depth)) : ground;
+    // A lake's middle is deeper than any puddle, and its bed shows darker.
+    vec3 bed = ground * 0.7 * (1.0 - 0.45 * smoothstep(0.5, 2.5, water.y));
+    colour = depth > 0.0 ? mix(ground, waterColour(v_planet, bed, u_lightDir), smoothstep(0.0, 0.012, depth)) : ground;
   } else if (v_kind != ${Kind.glow}) {
     colour = lit(colour);
   }

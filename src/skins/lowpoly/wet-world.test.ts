@@ -10,6 +10,8 @@ import { REFLECTION_SCALE } from "./reflection";
 import { stillSky } from "./sky-light";
 import { WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
 import { MAX_RIPPLES, WATER_GLSL } from "./water-glsl";
+import { LAKE_RANGE_TILES } from "./water-texels";
+import { worldWgsl } from "./webgpu/wgsl-world";
 import { CLOCK_WRAP_S, shaderSeconds, WetWorld } from "./wet-world";
 
 const lake = planetLakes()[0]!;
@@ -97,11 +99,19 @@ describe("the ripple ring", () => {
 describe("the water and rain shaders", () => {
   it("read the puddle field and the mirror, and hand the ripple array its size", () => {
     expect(WATER_GLSL).toContain(`uniform vec4 u_ripples[${MAX_RIPPLES}]`);
-    expect(WORLD_FRAGMENT).toContain("puddleAt(v_planet)");
+    expect(WORLD_FRAGMENT).toContain("waterAt(v_planet)");
     expect(WORLD_FRAGMENT).toContain("texture(u_reflect");
     // Height mirrored after the sway has bent it, so a reflection leans with its plant.
     expect(WORLD_VERTEX).toContain("float height = a_pos.z + sway.z;");
     expect(WORLD_VERTEX).toContain("height * u_mirror");
+  });
+
+  it("draw a lake where the ground draws a puddle, from the mask's second channel", () => {
+    expect(WATER_GLSL).toContain("(mask.g - 0.5) * LAKE_RANGE");
+    expect(WATER_GLSL).toContain(`const float LAKE_RANGE = ${LAKE_RANGE_TILES}.0;`);
+    expect(worldWgsl(true)).toContain("(mask.g - 0.5) * LAKE_RANGE");
+    expect(worldWgsl(true)).toContain(`const LAKE_RANGE = ${LAKE_RANGE_TILES}.0;`);
+    expect(worldWgsl(true)).toContain("let water = waterAt(input.planet);");
   });
 
   it("never let the mirror draw the ground or what has sunk past the horizon", () => {

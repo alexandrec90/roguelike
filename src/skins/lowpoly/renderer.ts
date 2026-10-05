@@ -5,7 +5,7 @@
  *
  * A frame is four passes. The world **mirrored** - what stands, height flipped -
  * into a half-size target. Then the sky; the **solid** pass, where the ground
- * reads its puddles and the mirror; the **sheer** pass of shadows, lakes and
+ * reads its puddles, its lakes and the mirror; the **sheer** pass of shadows and
  * spell light, blended without writing depth; and the **rain** over all of it.
  * Its water moves by procedural rings (`water-glsl.ts`); WebGPU's simulates.
  *
@@ -22,13 +22,14 @@ import { RainPass } from "./rain-pass";
 import { ReflectionTarget } from "./reflection";
 import { SKY_FRAGMENT, SKY_VERTEX, WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID, WORLD_VERTEX } from "./shaders";
 import { lightDirection, stillSky } from "./sky-light";
+import { waterTexels } from "./water-texels";
 
 interface Drawable extends DrawableHandle {
   readonly vao: WebGLVertexArrayObject;
   readonly buffer: WebGLBuffer;
 }
 
-/** Texture units: the puddle field and the mirror. */
+/** Texture units: the puddle field (with the lakes) and the mirror. */
 const PUDDLE_UNIT = 1;
 const REFLECT_UNIT = 2;
 
@@ -198,13 +199,16 @@ export class WebGlBackend implements LowpolyBackend {
   }
 }
 
-/** The puddle field as a one-channel texture, read bilinearly and wrapping - as `sampleField` reads it. */
+/**
+ * The puddle field and the lakes as a two-channel texture (`water-texels.ts`),
+ * read bilinearly and wrapping - as `sampleField` reads it.
+ */
 function puddleTexture(gl: WebGL2RenderingContext, field: Uint8Array): WebGLTexture {
   const texture = gl.createTexture();
   gl.activeTexture(gl.TEXTURE0 + PUDDLE_UNIT);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, FIELD_SIZE, FIELD_SIZE, 0, gl.RED, gl.UNSIGNED_BYTE, field);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, FIELD_SIZE, FIELD_SIZE, 0, gl.RG, gl.UNSIGNED_BYTE, waterTexels(field));
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);

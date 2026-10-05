@@ -74,6 +74,10 @@ three-blade tufts, then meadow patches of five-blade sheaves. `Kind.grass` and i
   basins baked once into bytes, a level that falls as `stepWetness` soaks the ground.
   Both shaders read those bytes as a texture exactly as `sampleField` does, so
   `WetWorld.isWet` and the drawn shore agree. Never decide in a shader where water is.
+- **A lake is a puddle, not a mesh.** `water-texels.ts` writes each lake's lobed shore
+  into the texture's second channel as a signed distance, and the ground shader draws
+  it with the puddles (`waterAt`). A flat sheet of its own cannot follow the lip: its
+  long edges stay straight while the ground under them bends over the horizon.
 - **What it shows** is the world drawn mirrored, height negated, into a half-size target.
   In a parallel projection that is the exact planar reflection. The mirror draws no
   ground, so it must also skip what the ground would hide: nothing past the horizon line.
@@ -119,6 +123,7 @@ band above the field, a cheaper procedural ring lattice, and the wave surface te
 | --- | --- | --- |
 | where anything is | the shared simulation: `terrain.ts`, `lakes.ts`, `landforms.ts`, `scenery-features.ts`, `encounter-sim.ts` | a placement decided in this skin |
 | the hero's pose | `HERO_EQUIPPED`, `layeredPose`, `tracksOf` - the same rig and clips | a model of his own |
+| the hero's look | `hero-dress.ts`: an undead skeleton and a stick, pieces on the rig's own bones (the stick on `sword`); `hero-sway.ts` sums a loose-spine term onto the shared pose | a bone or a clip of the skin's own |
 | a colour | `palette.ts`, the skin's own small set | a hex inline in a mesh |
 | the light | `atmosphere.ts`'s screen-space direction, via `lightDirection` | a light fixed to the planet |
 
@@ -134,7 +139,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
-| `terrain-mesh.ts` | `groundMesh` · `lakeMesh` · `landformMesh` |
+| `terrain-mesh.ts` | `groundMesh` · `landformMesh` |
 | `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` |
 | `sway-pushes.ts` | `pushesOf` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
@@ -146,6 +151,8 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `reflection.ts` | `ReflectionTarget` · `REFLECTION_SCALE` |
 | `rain-pass.ts` | `RainPass` |
 | `hero-mesh.ts` | `heroMesh` · `heroHeightPx` |
+| `hero-dress.ts` | `SKELETON_DRESS` · `STICK_DRESS` · `SKULL` · `SKULL_HOLES` · `DressPiece` |
+| `hero-sway.ts` | `looseSkeleton` · `freeOf` · `SwayTracks` |
 | `actor-mesh.ts` | `slimeMesh` · `fireballMesh` · `burstMesh` |
 | `actor-frame.ts` | `ActorMeshes` · `ACTOR_MESH_KEYS` |
 | `webgpu/webgpu-renderer.ts` | `WebGpuBackend` |
