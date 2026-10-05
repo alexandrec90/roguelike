@@ -50,7 +50,7 @@
 
 import { advanceTrack } from "./hero/action-track";
 import { HEADING_VECTOR, isDiagonal, type Heading } from "./keybindings";
-import { CAST, SWING } from "./models";
+import { CAST, SWING, SWING_BEATS } from "./models";
 import {
   applyGait,
   DEFAULT_STRAFE_RADIUS,
@@ -76,7 +76,7 @@ export const REACH_TILES = 0.4;
 export const ATTACK_MS = SWING.durationMs;
 
 /** Where in the swing the blade meets its target: the clip's contact key. */
-export const SWING_CONTACT_MS = Math.round(SWING.durationMs * 0.45);
+export const SWING_CONTACT_MS = Math.round(SWING.durationMs * SWING_BEATS.contact);
 
 /**
  * How long the hands rest between two casts. Holding the button fires at the

@@ -12,6 +12,7 @@
  * tiles, x right, y ahead, z up - `toLocal` is the one conversion.
  */
 
+import type { BladeSample } from "../../game/hero/swing-trail";
 import { HERO_EQUIPPED } from "../../game/models";
 import { orientVector, solveModel, type RigPose, type VolumePiece, type Vec3 as RigVec3 } from "../../game/rig";
 import { TILE_WIDTH } from "../../game/projection";
@@ -126,6 +127,31 @@ function eyes(b: MeshBuilder, head: RigVec3 | undefined, yaw: number, lift: numb
     const at = toLocal({ x: head.x + out.x, y: head.y + out.y, z: head.z + out.z }, lift);
     const r = 0.5 / TILE_WIDTH;
     blob(b, at, [r, r, r * 1.3], { colour: LOWPOLY.hair, anchor: [0, 0] }, side, 0);
+  }
+}
+
+/** How bright the newest strip of the trail is; older strips fade from it. */
+const TRAIL_ALPHA = 0.8;
+
+/**
+ * The swing's trail: a ribbon through the air between the blade's last few
+ * spans (`bladeSweep`), brightest at the blade and fading toward its tail.
+ * Sheer and unlit, steel-white - or fire when the blade burns - and depth
+ * tested against him, so the part swept behind his back is hidden by it.
+ */
+export function swingTrailMesh(b: MeshBuilder, sweep: readonly BladeSample[], options: { readonly enchanted: boolean; readonly sunk: number }): void {
+  const lift = -options.sunk;
+  const [head, tail] = options.enchanted ? [LOWPOLY.fireCore, LOWPOLY.fire] : [LOWPOLY.trail, LOWPOLY.metal];
+  for (let index = 0; index + 1 < sweep.length; index += 1) {
+    const newer = sweep[index] as BladeSample;
+    const older = sweep[index + 1] as BladeSample;
+    const fade = 1 - newer.age;
+    b.quad(toLocal(newer.a, lift), toLocal(newer.b, lift), toLocal(older.b, lift), toLocal(older.a, lift), {
+      colour: mixRgb(tail, head, fade),
+      kind: Kind.glow,
+      alpha: TRAIL_ALPHA * fade,
+      anchor: [0, 0],
+    });
   }
 }
 

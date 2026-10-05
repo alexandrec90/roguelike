@@ -124,7 +124,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `renderer.ts` | `WebGlBackend` |
 | `reflection.ts` | `ReflectionTarget` · `REFLECTION_SCALE` |
 | `rain-pass.ts` | `RainPass` |
-| `hero-mesh.ts` | `heroMesh` · `heroHeightPx` |
+| `hero-mesh.ts` | `heroMesh` · `heroHeightPx` · `swingTrailMesh` |
 | `actor-mesh.ts` | `slimeMesh` · `fireballMesh` · `burstMesh` |
 | `actor-frame.ts` | `ActorMeshes` · `ACTOR_MESH_KEYS` |
 | `webgpu/webgpu-renderer.ts` | `WebGpuBackend` |

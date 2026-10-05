@@ -44,6 +44,7 @@ export const LOWPOLY = {
   leather: rgb("#7a5536"),
   crimson: rgb("#c2463f"),
   metal: rgb("#c9d3dc"),
+  trail: rgb("#f4faff"),
   gold: rgb("#e2b543"),
   fire: rgb("#ffb347"),
   fireCore: rgb("#fff1b0"),
