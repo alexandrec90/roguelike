@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { faceNormal, Kind, MeshBuilder, mixRgb, rgb, shadeRgb, VERTEX_BYTES } from "./mesh";
-import { BLOB_FACES, blob, cone, disc, frustum } from "./primitives";
+import { BLOB_FACES, blob, cone, disc, frustum, SMOOTH_FACES, smoothBlob } from "./primitives";
 
 /** Read back vertex `i`: position, anchor, normal, kind and colour. */
 function vertex(b: MeshBuilder, i: number) {
@@ -45,6 +45,16 @@ describe("the mesh builder", () => {
     const b = new MeshBuilder();
     b.tri([0, 0, 1], [0, 1, 1], [1, 0, 1], { colour: [1, 1, 1], inside: [0, 0, 0] });
     expect(vertex(b, 0).normal[2]).toBeCloseTo(1, 2);
+  });
+
+  it("keeps the normal it is handed at each corner of a smooth triangle", () => {
+    const b = new MeshBuilder();
+    b.smoothTri([0, 0, 0], [1, 0, 0], [0, 1, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], { colour: [1, 1, 1] });
+    expect(vertex(b, 0).normal).toEqual([1, 0, 0]);
+    expect(vertex(b, 1).normal).toEqual([0, 1, 0]);
+    expect(vertex(b, 2).normal).toEqual([0, 0, 1]);
+    b.smoothTri([0, 0, 0], [1, 1, 1], [2, 2, 2], [[1, 0, 0], [1, 0, 0], [1, 0, 0]], { colour: [1, 1, 1] });
+    expect(b.vertexCount).toBe(3);
   });
 
   it("drops a sliver with no area, and grows past its first allocation", () => {
@@ -107,6 +117,41 @@ describe("the solids", () => {
     expect(one.vertexCount).toBe(BLOB_FACES * 3);
     expect(one.bytesView()).toEqual(two.bytesView());
     expect(outward(one, [1, 1, 1])).toBe(true);
+  });
+
+  it("a smooth blob is the icosahedron split in four, a normal per corner pointing out", () => {
+    const b = new MeshBuilder();
+    smoothBlob(b, (d) => [1 + d[0], 2 + d[1] * 0.5, 3 + d[2] * 2], { colour: [1, 1, 1], kind: Kind.liquid });
+    expect(b.vertexCount).toBe(SMOOTH_FACES * 3);
+    expect(SMOOTH_FACES).toBe(80);
+    for (let i = 0; i < b.vertexCount; i += 1) {
+      const v = vertex(b, i);
+      const out = [v.pos[0]! - 1, v.pos[1]! - 2, v.pos[2]! - 3];
+      expect(v.normal[0]! * out[0]! + v.normal[1]! * out[1]! + v.normal[2]! * out[2]!).toBeGreaterThan(0);
+      expect(v.kind).toBe(Kind.liquid);
+    }
+    // Corners of one face carry different normals: that is what makes it read as curved.
+    expect(vertex(b, 0).normal).not.toEqual(vertex(b, 1).normal);
+  });
+
+  it("a smooth blob made for one eye keeps only the faces turned toward it", () => {
+    const all = new MeshBuilder();
+    const front = new MeshBuilder();
+    const sphere = (d: readonly number[]) => [d[0]!, d[1]!, d[2]!] as const;
+    smoothBlob(all, sphere, { colour: [1, 1, 1] });
+    smoothBlob(front, sphere, { colour: [1, 1, 1] }, [0, -1, 0]);
+    expect(front.vertexCount).toBeGreaterThan(all.vertexCount * 0.35);
+    expect(front.vertexCount).toBeLessThan(all.vertexCount * 0.65);
+    for (let i = 0; i < front.vertexCount; i += 3) {
+      const centroidY = (vertex(front, i).pos[1]! + vertex(front, i + 1).pos[1]! + vertex(front, i + 2).pos[1]!) / 3;
+      expect(centroidY).toBeLessThan(0);
+    }
+  });
+
+  it("does not turn jelly to face the sky the way it does what lies on the ground", () => {
+    const b = new MeshBuilder();
+    b.tri([0, 0, 0], [0, 1, 0], [1, 0, 0], { colour: [1, 1, 1], kind: Kind.liquid });
+    expect(vertex(b, 0).normal[2]).toBeCloseTo(-1, 2);
   });
 
   it("a disc lies flat at its height, with a radius per corner if asked", () => {

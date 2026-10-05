@@ -13,6 +13,7 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horiz
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { Kind } from "../mesh";
+import { TOWARD_VIEWER } from "../placement";
 import { WAVE_N, WAVE_RES } from "./waves";
 
 const f = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
@@ -76,6 +77,7 @@ const WALL_RISE = ${f(WALL_RISE)};
 const LAP = ${f(PLANET_TILES)};
 const WAVE_RES = ${f(WAVE_RES)};
 const WAVE_N = ${WAVE_N}i;
+const TOWARD_VIEWER = vec3f(${TOWARD_VIEWER.map(f).join(", ")});
 
 struct VertexIn {
   @location(0) pos: vec3f,
@@ -169,6 +171,17 @@ fn lit(colour: vec3f, normal: vec3f) -> vec3f {
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * frame.shading.x) * frame.ambient.rgb;
 }
 
+/** Jelly, as \`shaders.ts\` has it: lit, a highlight, and a rim thickening to the silhouette. */
+fn liquid(colour: vec3f, alpha: f32, normal: vec3f) -> vec4f {
+  let n = normalize(normal);
+  let facing = max(dot(n, TOWARD_VIEWER), 0.0);
+  let rim = (1.0 - facing) * (1.0 - facing);
+  let toward = max(dot(n, normalize(frame.lightDir.xyz + TOWARD_VIEWER)), 0.0);
+  let glint = (0.9 * pow(toward, 48.0) + 0.15 * pow(toward, 6.0)) * frame.shading.x;
+  let shaded = lit(colour, normal) * (1.0 + 0.35 * rim) + glint * frame.ambient.rgb;
+  return vec4f(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
+}
+
 /** How far a planet point's basin stands under the water level: > 0 is a puddle. Lakes are their own surface. */
 fn puddleDepth(planet: vec2f) -> f32 {
   return textureSampleLevel(waterMask, repeatSampler, planet / LAP, 0.0).r - frame.water.x;
@@ -222,6 +235,10 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
     if (depth > 0.0) {
       colour = mix(ground, waterColour(input.planet, ground * 0.7, input.clip.xy), smoothstep(0.0, 0.012, depth));
     }
+  } else if (input.kind == ${Kind.liquid}u) {
+    let jelly = liquid(colour, alpha, input.normal);
+    colour = jelly.rgb;
+    alpha = jelly.a;
   } else if (input.kind != ${Kind.glow}u) {
     colour = lit(colour, input.normal);
   }

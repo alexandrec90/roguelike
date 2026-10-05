@@ -111,7 +111,7 @@ export class LowpolyGame {
   draw(width: number, height: number): void {
     const where = this.hero.whereabouts();
     const live = where.at;
-    this.buildActors(live);
+    this.buildActors(live, where.turn);
     const weather = this.wet.weather;
     const atmosphere = this.clock.atmosphere(weather.overcast);
     const frame = { view: this.view, atmosphere, shake: this.clock.shake(), water: this.wet.water(live, this.clock.elapsedMs), width, height };
@@ -151,8 +151,8 @@ export class LowpolyGame {
     });
   }
 
-  private buildActors(live: PlanetPoint): void {
-    this.actors.build({ player: this.hero.player, elapsedMs: this.clock.elapsedMs, yaw: this.shownYaw, live, encounter: this.encounter });
+  private buildActors(live: PlanetPoint, turn: number): void {
+    this.actors.build({ player: this.hero.player, elapsedMs: this.clock.elapsedMs, yaw: this.shownYaw, live, turn, encounter: this.encounter });
     for (const key of ACTOR_MESH_KEYS) {
       this.renderer.update(this.dynamic[key], this.actors.bytes(key));
     }

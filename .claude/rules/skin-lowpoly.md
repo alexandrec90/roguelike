@@ -49,6 +49,12 @@ placed and shrunk about its foot on the lip, as a sprite is in the pixel skin. T
 ground, water and landforms are anchored at themselves, so they bend over the lip point
 by point. A new body that forgets its anchor shears apart on the lip.
 
+**A see-through body is half of one.** The sheer pass is neither mirrored nor depth
+written, and nothing culls back faces. So a slime's `Kind.liquid` skin puts only the
+faces turned to the eye in it (`smoothBlob`'s `facing`, from `viewInPlanet`) - else its
+back blends through its front in triangle order - and keeps an opaque part, its heart
+and eyes, in the solid pass for the mirror and the depth test.
+
 ## Water
 
 - **Where it stands** is the shared puddle field (`src/game/water/puddle-field.ts`):
@@ -110,9 +116,9 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | Module | Symbols |
 | --- | --- |
 | `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
-| `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` |
+| `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` · `TOWARD_VIEWER` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
 | `terrain-mesh.ts` | `groundMesh` · `lakeMesh` · `landformMesh` |
@@ -125,7 +131,8 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `reflection.ts` | `ReflectionTarget` · `REFLECTION_SCALE` |
 | `rain-pass.ts` | `RainPass` |
 | `hero-mesh.ts` | `heroMesh` · `heroHeightPx` |
-| `actor-mesh.ts` | `slimeMesh` · `fireballMesh` · `burstMesh` |
+| `actor-mesh.ts` | `fireballMesh` · `burstMesh` |
+| `slime-mesh.ts` | `slimeMesh` · `slimeBody` · `skinPoint` · `slimeGaze` · `viewInPlanet` |
 | `actor-frame.ts` | `ActorMeshes` · `ACTOR_MESH_KEYS` |
 | `webgpu/webgpu-renderer.ts` | `WebGpuBackend` |
 | `webgpu/waves.ts` | `stepWaveGrid` · `windowCell` · `cellRecycled` · `WAVE_N` · `WAVE_RES` |

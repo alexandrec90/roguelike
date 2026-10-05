@@ -49,6 +49,12 @@ export const LOWPOLY = {
   fireCore: rgb("#fff1b0"),
   frost: rgb("#bfe9ff"),
   shadow: rgb("#1c2030"),
+  slimeGreen: rgb("#6cc98a"),
+  slimeFire: rgb("#f08a4b"),
+  slimeFrost: rgb("#8fd3f0"),
+  slimeArcane: rgb("#a77be0"),
+  slimeEye: rgb("#15171e"),
+  eyeGlint: rgb("#dfe6e8"),
 } as const satisfies Record<string, Rgb>;
 
 export type LowpolyColour = keyof typeof LOWPOLY;

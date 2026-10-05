@@ -16,9 +16,11 @@
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
 import { Kind } from "./mesh";
+import { TOWARD_VIEWER } from "./placement";
 import { WATER_GLSL } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
+const vec3 = (v: readonly [number, number, number]): string => `vec3(${v.map(float).join(", ")})`;
 
 export const WORLD_VERTEX = `#version 300 es
 precision highp float;
@@ -150,12 +152,29 @@ const float ROLL_ROWS = ${float(ROLL_ROWS)};
 
 ${WATER_GLSL}
 
+const vec3 TOWARD_VIEWER = ${vec3(TOWARD_VIEWER)};
+
 /** A face lit by the sun and the sky, under the hour's colour. */
 vec3 lit(vec3 colour) {
   vec3 n = normalize(v_normal);
   float lambert = max(dot(n, u_lightDir), 0.0);
   float sky = 0.5 + 0.5 * n.z;
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x) * u_ambient;
+}
+
+/**
+ * Jelly: lit, plus the sun's highlight where it glances toward the eye, and a
+ * rim that brightens and thickens toward the silhouette - thin where you look
+ * straight through it, as a drop of liquid is.
+ */
+vec4 liquid(vec3 colour, float alpha) {
+  vec3 n = normalize(v_normal);
+  float facing = max(dot(n, TOWARD_VIEWER), 0.0);
+  float rim = (1.0 - facing) * (1.0 - facing);
+  float toward = max(dot(n, normalize(u_lightDir + TOWARD_VIEWER)), 0.0);
+  float glint = (0.9 * pow(toward, 48.0) + 0.15 * pow(toward, 6.0)) * u_shading.x;
+  vec3 shaded = lit(colour) * (1.0 + 0.35 * rim) + glint * u_ambient;
+  return vec4(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
 }
 
 void main() {${clips ? CLIP_GLSL : ""}
@@ -174,6 +193,10 @@ void main() {${clips ? CLIP_GLSL : ""}
     float rim = smoothstep(-0.03, 0.0, depth);
     ground *= 1.0 - 0.22 * rim;
     colour = depth > 0.0 ? mix(ground, waterColour(v_planet, ground * 0.7, u_lightDir), smoothstep(0.0, 0.012, depth)) : ground;
+  } else if (v_kind == ${Kind.liquid}) {
+    vec4 jelly = liquid(colour, alpha);
+    colour = jelly.rgb;
+    alpha = jelly.a;
   } else if (v_kind != ${Kind.glow}) {
     colour = lit(colour);
   }

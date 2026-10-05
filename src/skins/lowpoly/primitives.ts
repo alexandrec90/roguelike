@@ -1,6 +1,6 @@
 /**
  * The handful of solids everything in the skin is built from: a tapered prism,
- * a cone, a jittered icosahedron and a flat disc.
+ * a cone, a jittered icosahedron, a smooth one and a flat disc.
  *
  * Every one is a few dozen triangles at most. That is the style - the facets
  * are the point - and it is also why the skin is cheap: a whole tree is under
@@ -122,6 +122,82 @@ export function blob(b: MeshBuilder, centre: Vec3, radii: Vec3, style: Style, se
   });
 }
 
+interface Sphere {
+  /** Unit directions, one per corner. */
+  readonly corners: readonly Vec3[];
+  /** Corner indices, each face wound outward. */
+  readonly faces: readonly (readonly [number, number, number])[];
+}
+
+/** The icosahedron with every face split in four and pushed out onto the sphere. */
+function subdividedSphere(): Sphere {
+  const corners: Vec3[] = ICO_VERTICES.map((v) => normalise(v));
+  const midpoints = new Map<string, number>();
+  const midpoint = (i: number, j: number): number => {
+    const key = i < j ? `${i}:${j}` : `${j}:${i}`;
+    let index = midpoints.get(key);
+    if (index === undefined) {
+      index = corners.length;
+      corners.push(normalise(lerp(corners[i]!, corners[j]!, 0.5)));
+      midpoints.set(key, index);
+    }
+    return index;
+  };
+  const faces: [number, number, number][] = [];
+  for (const [a, b, c] of ICO_FACES) {
+    const ab = midpoint(a, b);
+    const bc = midpoint(b, c);
+    const ca = midpoint(c, a);
+    for (const face of [[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]] as [number, number, number][]) {
+      const [p, q, r] = face.map((index) => corners[index]!) as [Vec3, Vec3, Vec3];
+      const n = cross(sub(q, p), sub(r, p));
+      const centroid = lerp(lerp(p, q, 0.5), r, 1 / 3);
+      faces.push(dot(n, centroid) < 0 ? [face[0], face[2], face[1]] : face);
+    }
+  }
+  return { corners, faces };
+}
+
+let sphere: Sphere | undefined;
+
+/** Faces in a `smoothBlob`: the icosahedron's twenty, each split in four. */
+export const SMOOTH_FACES = ICO_FACES.length * 4;
+
+/**
+ * A soft closed surface: each corner of a once-split icosahedron placed by
+ * `surface` from its unit direction, with a normal per corner averaged from the
+ * faces round it - so the light rolls across it instead of breaking at facets.
+ * `surface` may stretch, sag and ripple the sphere as it likes, as long as it
+ * keeps it from folding through itself.
+ *
+ * With `facing`, only the faces turned toward that direction are made: the back
+ * half of a sheer body, which would otherwise blend through the front in
+ * whatever order its triangles happened to come.
+ */
+export function smoothBlob(b: MeshBuilder, surface: (direction: Vec3) => Vec3, style: Style, facing?: Vec3): void {
+  sphere ??= subdividedSphere();
+  const points = sphere.corners.map(surface);
+  const normals: [number, number, number][] = points.map(() => [0, 0, 0]);
+  const faceNormals = sphere.faces.map(([i, j, k]) => {
+    // Unnormalised, so a corner leans toward its larger faces.
+    const n = cross(sub(points[j]!, points[i]!), sub(points[k]!, points[i]!));
+    for (const index of [i, j, k]) {
+      const sum = normals[index]!;
+      sum[0] += n[0];
+      sum[1] += n[1];
+      sum[2] += n[2];
+    }
+    return n;
+  });
+  const unit = normals.map((n): Vec3 => (Math.hypot(...n) < 1e-12 ? [0, 0, 1] : normalise(n)));
+  sphere.faces.forEach(([i, j, k], face) => {
+    if (facing !== undefined && dot(faceNormals[face]!, facing) <= 0) {
+      return;
+    }
+    b.smoothTri(points[i]!, points[j]!, points[k]!, [unit[i]!, unit[j]!, unit[k]!], style);
+  });
+}
+
 /**
  * A flat polygon lying at height `centre[2]`: a shadow, a pond, a lake. `radius`
  * may vary per corner, which is how a lake gets a ragged shore.
@@ -144,6 +220,10 @@ function sub(a: Vec3, b: Vec3): Vec3 {
 
 function cross(a: Vec3, b: Vec3): Vec3 {
   return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+function dot(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 function normalise(v: Vec3): Vec3 {
