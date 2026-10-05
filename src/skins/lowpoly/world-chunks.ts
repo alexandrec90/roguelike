@@ -12,14 +12,14 @@
  * even where its geometry runs over the edge, so nothing is drawn twice.
  */
 
-import { LAKE_MAX_REACH, lakesNear, planetLakes } from "../../game/lakes";
+import { LAKE_MAX_REACH, lakesNear } from "../../game/lakes";
 import { planetLandforms } from "../../game/landforms";
 import { PLANET_TILES, wrapDelta, type PlanetPoint } from "../../game/planet";
 import { sceneryNear } from "../../game/scenery-features";
 import { MeshBuilder } from "./mesh";
 import { ROLL_ROWS } from "../../game/horizon";
 import { sceneryMesh } from "./scenery-mesh";
-import { groundMesh, lakeMesh, landformMesh } from "./terrain-mesh";
+import { groundMesh, landformMesh } from "./terrain-mesh";
 
 export const CHUNK_TILES = 32;
 export const CHUNKS_PER_SIDE = PLANET_TILES / CHUNK_TILES;
@@ -62,11 +62,6 @@ export function buildChunk(cx: number, cy: number): ChunkMesh {
   const sheer = new MeshBuilder();
 
   groundMesh(ground, origin, CHUNK_TILES, lakesNear(centre, CHUNK_TILES / 2 + LAKE_MAX_REACH + 1));
-  for (const lake of planetLakes()) {
-    if (inChunk(lake, cx, cy)) {
-      lakeMesh(sheer, lake, origin);
-    }
-  }
   for (const landform of planetLandforms()) {
     if (inChunk(landform, cx, cy)) {
       landformMesh(land, landform, origin);

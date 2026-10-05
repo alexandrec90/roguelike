@@ -1,5 +1,7 @@
 /**
- * The ground, the lakes and the landforms, as faceted geometry over the planet.
+ * The ground and the landforms, as faceted geometry over the planet. A lake is
+ * not geometry: the ground shader draws its water (`water-texels.ts`), as it
+ * draws a puddle, so it bends over the horizon's lip with the ground under it.
  *
  * Nothing is decided here about *where* anything is: grass or path is
  * `terrainAt`, a lake is `planetLakes`, a mountain's every height is its
@@ -28,7 +30,6 @@ import { WALL_RISE } from "../../game/projection";
 import { terrainAt } from "../../game/terrain";
 import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
 import { faceTint, hash01, LOWPOLY, seedOf } from "./palette";
-import { disc } from "./primitives";
 
 /** How far a ground vertex may wander off its lattice point, tiles: enough to break the grid. */
 const GROUND_JITTER = 0.32;
@@ -62,14 +63,15 @@ function dryness(point: PlanetPoint): number {
   return 0.5 + 0.25 * Math.sin(3 * u + 2 * v) + 0.25 * Math.sin(5 * v - 4 * u + 1.3);
 }
 
-/** What the ground is at a planet point, as this skin colours it. */
+/**
+ * What the ground is at a planet point, as this skin colours it. A lake's bed is
+ * its shore's sand: the ground shader draws the water over it as it draws a
+ * puddle over grass (`waterAt`), so a face the shore line cuts through is sand
+ * on both sides of it rather than a block of bed colour out on the bank.
+ */
 export function groundColour(point: PlanetPoint, lakes: readonly Lake[]): Rgb {
   for (const lake of lakes) {
-    const distance = lakeDistance(lake, point);
-    if (distance < lake.reach) {
-      return LOWPOLY.lakebed;
-    }
-    if (distance < lake.reach + SHORE) {
+    if (lakeDistance(lake, point) < lake.reach + SHORE) {
       return LOWPOLY.shore;
     }
   }
@@ -100,20 +102,6 @@ export function groundMesh(solid: MeshBuilder, origin: PlanetPoint, size: number
       });
     }
   }
-}
-
-/** Corners round a lake's shore: enough to read as round, few enough to read as low poly. */
-const LAKE_SIDES = 18;
-
-/**
- * A lake: one sheet of water out to its ragged shore. The water shader mirrors
- * the world in it; the colour here is only the bed it glimpses, darker for a
- * lake deep enough to have a core.
- */
-export function lakeMesh(sheer: MeshBuilder, lake: Lake, origin: PlanetPoint): void {
-  const centre: Vec3 = [lake.x - origin.x, lake.y - origin.y, 0.04];
-  const shore = (corner: number): number => lake.shore + (lake.reach - lake.shore) * hash01(lake.seed + corner * 13);
-  disc(sheer, centre, shore, LAKE_SIDES, { colour: lake.deep > 0 ? LOWPOLY.waterDeep : LOWPOLY.water, kind: Kind.water });
 }
 
 /** A landform's surface colour, by the material its field says it is. */
