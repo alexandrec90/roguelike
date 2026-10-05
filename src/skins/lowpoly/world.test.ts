@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { planetLakes } from "../../game/lakes";
 import { planetLandforms } from "../../game/landforms";
 import { PLACED_SPECIES } from "../../game/scenery-features";
 import { PLANET_TILES } from "../../game/planet";
@@ -10,11 +11,12 @@ import { HeroDriver } from "../../game/hero/hero-driver";
 import { ACTOR_MESH_KEYS, ActorMeshes } from "./actor-frame";
 import { nearestFirst } from "./lowpoly-game";
 import { heroHeightPx, heroMesh } from "./hero-mesh";
-import { MeshBuilder, VERTEX_BYTES } from "./mesh";
+import { Kind, MeshBuilder, VERTEX_BYTES } from "./mesh";
+import { LOWPOLY } from "./palette";
 import { lightDirection } from "./sky-light";
 import { MESHED_SPECIES } from "./scenery-mesh";
 import { WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
-import { landformStep } from "./terrain-mesh";
+import { groundColour, landformStep } from "./terrain-mesh";
 import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE } from "./world-chunks";
 
 describe("the planet in chunks", () => {
@@ -42,6 +44,17 @@ describe("the planet in chunks", () => {
     expect(order).toHaveLength(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE);
     expect(new Set(order.map(({ cx, cy }) => `${cx},${cy}`)).size).toBe(order.length);
     expect(order[0]).toEqual({ cx: 4, cy: 4 });
+  });
+
+  it("gives a lake no sheet of its own: the ground draws its water, and its bed is the shore's sand", () => {
+    const lake = planetLakes()[0]!;
+    const chunk = buildChunk(Math.floor(lake.x / CHUNK_TILES), Math.floor(lake.y / CHUNK_TILES));
+    const kinds = new Set<number>();
+    for (let at = 23; at < chunk.sheer.byteLength; at += VERTEX_BYTES) {
+      kinds.add(chunk.sheer[at]!);
+    }
+    expect(kinds.has(Kind.water)).toBe(false);
+    expect(groundColour(lake, [lake])).toEqual(LOWPOLY.shore);
   });
 
   it("has a body for every species the planet places", () => {
