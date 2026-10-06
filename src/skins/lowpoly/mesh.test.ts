@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { faceNormal, Kind, MeshBuilder, mixRgb, rgb, shadeRgb, VERTEX_BYTES } from "./mesh";
-import { BLOB_FACES, blob, cone, disc, frustum } from "./primitives";
+import { BLOB_FACES, blob, cone, disc, frond, frondFaces, frustum } from "./primitives";
 
 /** Read back vertex `i`: position, anchor, normal, kind and colour. */
 function vertex(b: MeshBuilder, i: number) {
@@ -90,6 +90,30 @@ describe("the solids", () => {
     frustum(b, { from: [0, 0, 0], to: [0, 0, 2], r0: 0.5, r1: 0.3, sides: 6 }, { colour: [1, 1, 1] });
     expect(b.vertexCount).toBe((6 * 2 + 4 * 2) * 3);
     expect(outward(b, [0, 0, 1])).toBe(true);
+  });
+
+  it("an uncapped prism is its sides alone", () => {
+    const b = new MeshBuilder();
+    frustum(b, { from: [0, 0, 0], to: [1, 0, 1], r0: 0.2, r1: 0.1, sides: 4, capped: false }, { colour: [1, 1, 1] });
+    expect(b.vertexCount).toBe(4 * 2 * 3);
+    expect(outward(b, [0.5, 0, 0.5])).toBe(true);
+  });
+
+  it("a frond is two faces a point, every one turned to the sky, seeded", () => {
+    const shape = { centre: [0, 0, 1] as const, radius: 1, teeth: 5, lift: 0.3, droop: 0.2 };
+    const one = new MeshBuilder();
+    const two = new MeshBuilder();
+    frond(one, shape, { colour: [0.5, 0.5, 0.5] }, 9);
+    frond(two, shape, { colour: [0.5, 0.5, 0.5] }, 9);
+    expect(one.vertexCount).toBe(frondFaces(5) * 3);
+    expect(one.bytesView()).toEqual(two.bytesView());
+    for (let i = 0; i < one.vertexCount; i += 1) {
+      expect(vertex(one, i).normal[2]).toBeGreaterThan(0);
+    }
+    // The middle stands above the notches, and the points hang below them.
+    const heights = Array.from({ length: one.vertexCount }, (_, i) => vertex(one, i).pos[2]!);
+    expect(Math.max(...heights)).toBeCloseTo(1.3, 5);
+    expect(Math.min(...heights)).toBeLessThan(1);
   });
 
   it("a cone is a fan to its apex over a capped base", () => {
