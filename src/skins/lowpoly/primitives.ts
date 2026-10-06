@@ -19,11 +19,13 @@ export interface FrustumShape {
   readonly r0: number;
   readonly r1: number;
   readonly sides: number;
+  /** False leaves both ends open: a branch whose ends hide in its parent and its leaves. */
+  readonly capped?: boolean;
 }
 
-/** A tapered prism, capped both ends. A limb, a trunk, a stem. */
+/** A tapered prism, capped both ends unless told not to. A limb, a trunk, a stem. */
 export function frustum(b: MeshBuilder, shape: FrustumShape, style: Style): void {
-  const { from, to, r0, r1, sides } = shape;
+  const { from, to, r0, r1, sides, capped = true } = shape;
   const axis = sub(to, from);
   const length = Math.hypot(...axis);
   if (length < 1e-6) {
@@ -48,7 +50,7 @@ export function frustum(b: MeshBuilder, shape: FrustumShape, style: Style): void
     const j = (i + 1) % sides;
     b.quad(near[i]!, near[j]!, far[j]!, far[i]!, faced);
   }
-  for (let i = 1; i < sides - 1; i += 1) {
+  for (let i = 1; capped && i < sides - 1; i += 1) {
     b.tri(near[0]!, near[i]!, near[i + 1]!, faced);
     b.tri(far[0]!, far[i]!, far[i + 1]!, faced);
   }
@@ -118,6 +120,56 @@ export function blob(b: MeshBuilder, centre: Vec3, radii: Vec3, style: Style, se
       ...style,
       colour: faceTint(style.colour, seed + face * 104729),
       inside: centre,
+    });
+  });
+}
+
+/**
+ * A plate of leaves: a shallow fan from a raised middle out to a rim of
+ * `teeth` points, notched between them, the points hanging lower than the
+ * notches. `centre` is at the notches' height.
+ */
+export interface FrondShape {
+  readonly centre: Vec3;
+  readonly radius: number;
+  readonly teeth: number;
+  /** How far the middle stands above the notches. */
+  readonly lift: number;
+  /** How far a point hangs below the notches. */
+  readonly droop: number;
+  /** A notch's reach as a share of a point's. */
+  readonly notch?: number;
+  readonly phase?: number;
+}
+
+/** Triangles in a `frond` of `teeth` points: two a point, one either side of it. */
+export function frondFaces(teeth: number): number {
+  return teeth * 2;
+}
+
+/**
+ * A serrated, drooping plate - one tier of a broadleaf's foliage, the way
+ * stylised low-poly foliage is drawn: a layer, not a ball. Every face is turned
+ * to the sky, so it lights as the top of a canopy from any side, and each point
+ * is seeded a little longer or shorter so no two plates share an outline.
+ */
+export function frond(b: MeshBuilder, shape: FrondShape, style: Style, seed: number): void {
+  const { centre, radius, teeth, lift, droop, notch = 0.62, phase = 0 } = shape;
+  const apex: Vec3 = [centre[0], centre[1], centre[2] + lift];
+  const below: Vec3 = [centre[0], centre[1], centre[2] - radius * 8];
+  const rim: Vec3[] = Array.from({ length: teeth * 2 }, (_, k) => {
+    const point = k % 2 === 0;
+    const wobble = hash01(seed + k * 7919);
+    const angle = phase + (k * Math.PI) / teeth + (wobble - 0.5) * (0.5 / teeth);
+    const reach = point ? radius * (0.85 + wobble * 0.3) : radius * notch;
+    const z = point ? centre[2] - droop * (0.7 + wobble * 0.6) : centre[2];
+    return [centre[0] + Math.cos(angle) * reach, centre[1] + Math.sin(angle) * reach, z];
+  });
+  rim.forEach((corner, k) => {
+    b.tri(apex, corner, rim[(k + 1) % rim.length]!, {
+      ...style,
+      colour: faceTint(style.colour, seed + k * 104729),
+      inside: below,
     });
   });
 }

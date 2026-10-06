@@ -123,9 +123,10 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `frond` · `frondFaces` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
+| `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `cutaway.ts` | `heroCutaway` · `heroHidden` |
@@ -149,4 +150,8 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `webgpu/pipelines.ts` | `createPipelines` · `DEFAULT_SAMPLES` |
 
 A new species is one entry in `scenery-mesh.ts`'s table; `world.test.ts` fails if the
-planet places a species this skin has no body for.
+planet places a species this skin has no body for. A broadleaf is a `Canopy` - trunk,
+limbs, twigs and tiered `frond` clumps as proportions of its height - handed to
+`broadleafMesh`, not a new function. Every chunk is drawn every frame, so a tree is held
+to a triangle budget (`broadleaf-mesh.test.ts`); the wood is about half the planet's
+solid triangles.
