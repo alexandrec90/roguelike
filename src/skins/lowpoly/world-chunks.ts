@@ -37,8 +37,14 @@ export interface ChunkMesh {
    * rasterised only to be discarded.
    */
   readonly ground: Uint8Array;
-  /** Opaque: landforms and bodies - what stands, drawn and mirrored. */
+  /** Opaque: bodies - trees, rocks, bushes - drawn and mirrored. */
   readonly solid: Uint8Array;
+  /**
+   * Opaque: the landforms, drawn and mirrored like `solid` but kept apart, so
+   * that on a frame with a window round the hero (`cutaway.ts`) they alone
+   * draw with the shader that can discard.
+   */
+  readonly land: Uint8Array;
   /** Sheer: shadows and water, drawn over the solid pass. */
   readonly sheer: Uint8Array;
 }
@@ -54,12 +60,13 @@ export function buildChunk(cx: number, cy: number, look: Look = FLAT_LOOK): Chun
   const centre = { x: origin.x + CHUNK_TILES / 2, y: origin.y + CHUNK_TILES / 2 };
   const ground = new MeshBuilder();
   const solid = new MeshBuilder();
+  const land = new MeshBuilder();
   const sheer = new MeshBuilder();
 
   groundMesh(ground, origin, CHUNK_TILES, lakesNear(centre, CHUNK_TILES / 2 + LAKE_MAX_REACH + 1), look);
   for (const landform of planetLandforms()) {
     if (inChunk(landform, cx, cy)) {
-      landformMesh(solid, landform, origin, look);
+      landformMesh(land, landform, origin, look);
     }
   }
   // The flat look's ground is level under a foot, so its scenery keeps its plain disc of shadow.
@@ -71,7 +78,15 @@ export function buildChunk(cx: number, cy: number, look: Look = FLAT_LOOK): Chun
       sceneryMesh(solid, sheer, feature.species, [x, y, under?.(x, y) ?? 0], feature.seed, { look, ground: under });
     }
   }
-  return { cx, cy, origin, ground: ground.bytesView().slice(), solid: solid.bytesView().slice(), sheer: sheer.bytesView().slice() };
+  return {
+    cx,
+    cy,
+    origin,
+    ground: ground.bytesView().slice(),
+    solid: solid.bytesView().slice(),
+    land: land.bytesView().slice(),
+    sheer: sheer.bytesView().slice(),
+  };
 }
 
 /** Rows of the screen's field, from the hero: how far it reaches behind him and ahead, from the view. */

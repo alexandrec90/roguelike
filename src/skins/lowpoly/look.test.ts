@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { FLAT_LOOK, PAINTED_LOOK, parseLook } from "./look";
-import { BLOB_FACES, blob } from "./primitives";
+import { BLOB_FACES, blob, frond } from "./primitives";
 import { MeshBuilder, VERTEX_BYTES } from "./mesh";
 import { faceTint, PAINT } from "./palette";
 import { WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "./shaders";
@@ -90,6 +90,27 @@ describe("a painted blob", () => {
     const stretched = bottom(one) / bottom(flat);
     expect(Math.abs(stretched - 1)).toBeLessThanOrEqual(PAINTED_LOOK.stretch + 1e-6);
     expect(top(one) / top(flat) / stretched).toBeGreaterThan(1 + PAINTED_LOOK.peak * 0.5);
+  });
+});
+
+describe("painted foliage", () => {
+  const plate = { centre: [0, 0, 1] as const, radius: 0.5, teeth: 6, lift: 0.15, droop: 0.1 };
+
+  it("is the flat look's frond, byte for byte, when no look is given", () => {
+    const plain = new MeshBuilder();
+    const flat = new MeshBuilder();
+    frond(plain, plate, { colour: [0.3, 0.6, 0.2] }, 11);
+    frond(flat, plate, { colour: [0.3, 0.6, 0.2] }, 11, FLAT_LOOK);
+    expect(flat.bytesView()).toEqual(plain.bytesView());
+  });
+
+  it("keeps its shape under the painted look and changes only its faces' colour", () => {
+    const flat = new MeshBuilder();
+    const painted = new MeshBuilder();
+    frond(flat, plate, { colour: [0.3, 0.6, 0.2] }, 11);
+    frond(painted, plate, { colour: [0.3, 0.6, 0.2] }, 11, PAINTED_LOOK);
+    expect(positions(painted)).toEqual(positions(flat));
+    expect(painted.bytesView()).not.toEqual(flat.bytesView());
   });
 });
 

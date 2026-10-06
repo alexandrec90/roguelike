@@ -4,7 +4,8 @@
  * Which species stands where, and with what seed, is `scenery-features.ts` -
  * the same answer the pixel skin bakes its trees from - so a broadleaf in one
  * skin is a broadleaf, in the same spot, in the other. What a species *looks*
- * like is the skin's: here, a trunk and a faceted crown. Sizes come from
+ * like is the skin's: here, a broadleaf is a forking skeleton in tiers of
+ * leaves (`broadleaf-mesh.ts`) and a conifer stacked cones. Sizes come from
  * `speciesHeight`, so a tree is as tall against the hero in both.
  *
  * Coordinates are tiles, x and y on the ground, z up; `at` is the foot.
@@ -12,8 +13,9 @@
 
 import { speciesHeight } from "../../game/scenery-features";
 import { WALL_RISE } from "../../game/projection";
+import { broadleafMesh } from "./broadleaf-mesh";
 import { FLAT_LOOK, type Look } from "./look";
-import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
+import { Kind, MeshBuilder, mixRgb, type Vec3 } from "./mesh";
 import { LOWPOLY, hash01 } from "./palette";
 import { blob, cone, disc, frustum } from "./primitives";
 
@@ -79,24 +81,6 @@ function trunk(solid: MeshBuilder, at: Vec3, height: number, radius: number, anc
   frustum(solid, { from: at, to: [at[0], at[1], at[2] + height], r0: radius, r1: radius * 0.6, sides: 5 }, { colour: LOWPOLY.bark, anchor });
 }
 
-function broadleaf(crown: Rgb, lobes: number, flatten: number): SpeciesMesh {
-  return (solid, at, height, seed, look) => {
-    const anchor = [at[0], at[1]] as const;
-    const trunkTop = height * 0.35;
-    trunk(solid, at, trunkTop + 0.3, 0.14, anchor);
-    const radius = height * 0.3;
-    for (let lobe = 0; lobe < lobes; lobe += 1) {
-      const angle = hash01(seed + lobe * 31) * Math.PI * 2;
-      const off = lobe === 0 ? 0 : radius * 0.55;
-      const r = lobe === 0 ? radius : radius * 0.7;
-      const centre: Vec3 = [at[0] + Math.cos(angle) * off, at[1] + Math.sin(angle) * off, at[2] + trunkTop + r * flatten];
-      const colour = mixRgb(crown, LOWPOLY.leafLight, hash01(seed + lobe) * 0.35);
-      blob(solid, centre, [r, r, r * flatten], { colour, anchor }, seed + lobe * 977, { look, crown: true });
-    }
-    return radius * 0.95;
-  };
-}
-
 function conifer(solid: MeshBuilder, at: Vec3, height: number, seed: number): number {
   const anchor = [at[0], at[1]] as const;
   trunk(solid, at, height * 0.25, 0.13, anchor);
@@ -140,10 +124,14 @@ function mushrooms(solid: MeshBuilder, at: Vec3, height: number, seed: number): 
 }
 
 const SPECIES: Readonly<Record<string, SpeciesMesh>> = {
-  "sdf-crown": broadleaf(LOWPOLY.leaf, 1, 0.9),
-  "oak-recursive": broadleaf(mixRgb(LOWPOLY.leaf, LOWPOLY.pine, 0.3), 3, 0.75),
-  "noise-canopy": broadleaf(LOWPOLY.leafLight, 2, 0.65),
-  "colonized-ash": broadleaf(LOWPOLY.ash, 2, 1),
+  // A round, full crown: three limbs and a clump over the fork.
+  "sdf-crown": broadleafMesh({ leaf: LOWPOLY.leaf, trunk: 0.36, limbs: 3, limb: 0.28, spread: 0.75, twigs: 2, twig: 0.17, clump: 0.18, tiers: 3, heart: true }),
+  // Low and wide: a short bole, limbs flung out nearly level.
+  "oak-recursive": broadleafMesh({ leaf: mixRgb(LOWPOLY.leaf, LOWPOLY.pine, 0.3), trunk: 0.3, limbs: 3, limb: 0.32, spread: 1.05, twigs: 2, twig: 0.18, clump: 0.19, tiers: 2 }),
+  // Tall and open, turning: two limbs climbing steeply, gaps between the clumps.
+  "noise-canopy": broadleafMesh({ leaf: LOWPOLY.autumn, trunk: 0.48, limbs: 2, limb: 0.26, spread: 0.55, twigs: 3, twig: 0.18, clump: 0.16, tiers: 3 }),
+  // Slender, pale and sparse.
+  "colonized-ash": broadleafMesh({ leaf: LOWPOLY.ash, trunk: 0.52, limbs: 2, limb: 0.24, spread: 0.5, twigs: 2, twig: 0.16, clump: 0.15, tiers: 2, heart: true }),
   "snow-conifer": conifer,
   bush,
   boulder,

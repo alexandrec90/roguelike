@@ -64,7 +64,8 @@ a global.
 | --- | --- | --- |
 | Light (`shading.w`) | smooth Lambert plus sky | `painted()` in both shaders: flat steps, lit leaning `PAINT.warm`, shade `PAINT.cool`, undersides `PAINT.deep`; lines in `PAINT_STEPS` |
 | Faces (`faceTint`) | ±4.5% brightness | ±10%, hue drifting to `PAINT.drift`; crowns take a rare `PAINT.accent` |
-| Crowns (`blob`) | dented ball | stretched, leaned, drawn up to a point |
+| Blobs (`blob`) | dented ball | stretched, leaned, drawn up to a point |
+| Foliage (`frond`) | a broadleaf's tiered plates | the same plates, tinted as crowns (hue drift and accent) |
 | Ground (`ground-relief.ts`) | level, a hair of wobble | hills to `hills` tiles; colour by warped patch, not by face |
 
 The ground steps on how much more or less than **level ground** a face is lit, so the
@@ -116,7 +117,9 @@ hold it down are about layers and pixels, not arithmetic:
 
 - **No `discard` in the solids' shader.** A shader that can discard turns off the early
   depth test for every draw it makes. On-screen solids use `WORLD_FRAGMENT_SOLID` /
-  `worldWgsl(false)`; only the ground, the mirror and the sheer pass may discard.
+  `worldWgsl(false)`; only the ground, the mirror and the sheer pass may discard - and
+  the landforms (`Kind.land`, their own draw list), on a frame where `cutaway.ts` opens
+  the pixel skin's window round the hero because nearer land stands over him.
 - **The ground draws first, alone, and only where it can show** (`groundInView`); the
   mirror draws only what is within `MIRROR_ROWS` of the field.
 - **A pixel budget** (`backingSize`, `MAX_DRAWN_PIXELS`): a high-DPI window would
@@ -145,13 +148,15 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `disc` · `BlobShape` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `frond` · `frondFaces` · `disc` · `BlobShape` |
 | `palette.ts` | `LOWPOLY` · `PAINT` · `PAINT_STEPS` · `faceTint` · `hash01` · `seedOf` |
 | `look.ts` | `Look` · `FLAT_LOOK` · `PAINTED_LOOK` · `parseLook` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` · `SceneryLay` · `GroundUnder` |
+| `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
 | `ground-relief.ts` | `groundVertex` · `groundCell` · `groundSurface` · `SHORE` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
+| `cutaway.ts` | `heroCutaway` · `heroHidden` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
 | `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
 | `ripples.ts` | `RippleRing` |
@@ -172,4 +177,8 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `webgpu/pipelines.ts` | `createPipelines` · `DEFAULT_SAMPLES` |
 
 A new species is one entry in `scenery-mesh.ts`'s table; `world.test.ts` fails if the
-planet places a species this skin has no body for.
+planet places a species this skin has no body for. A broadleaf is a `Canopy` - trunk,
+limbs, twigs and tiered `frond` clumps as proportions of its height - handed to
+`broadleafMesh`, not a new function. Every chunk is drawn every frame, so a tree is held
+to a triangle budget (`broadleaf-mesh.test.ts`); the wood is about half the planet's
+solid triangles.

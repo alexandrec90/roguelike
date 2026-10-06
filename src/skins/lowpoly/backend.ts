@@ -15,6 +15,7 @@
  */
 
 import type { Atmosphere } from "../../game/atmosphere";
+import type { LowpolyCutaway } from "./cutaway";
 import type { Look } from "./look";
 import type { LowpolyView } from "./placement";
 
@@ -65,6 +66,8 @@ export interface FrameUniforms {
   /** The drawing buffer, device pixels. */
   readonly width: number;
   readonly height: number;
+  /** The window round the hero, shake included; absent when no land stands over him. */
+  readonly cutaway?: LowpolyCutaway;
 }
 
 /**
@@ -75,6 +78,12 @@ export interface FrameUniforms {
 export interface FrameScene {
   readonly grounds: readonly DrawCall[];
   readonly solids: readonly DrawCall[];
+  /**
+   * The landforms: solid, and drawn as the solids are - except on a frame with
+   * a `cutaway`, when they draw with the shader that can discard and lose the
+   * early depth test for it.
+   */
+  readonly lands: readonly DrawCall[];
   /** The solids near enough that their reflection can land in water on screen (`MIRROR_ROWS`). */
   readonly mirrored: readonly DrawCall[];
   readonly sheers: readonly DrawCall[];
