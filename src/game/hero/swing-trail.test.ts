@@ -1,11 +1,44 @@
 import { describe, expect, it } from "vitest";
 
-import { HERO_EQUIPPED, SWING } from "../models";
+import { HERO_EQUIPPED, SWING, SWING_BEATS } from "../models";
 import { familyRamp } from "../palette";
-import { TRAIL_FROM_MS, TRAIL_SAMPLES, TRAIL_STEP_MS, trailCloud, trailSegments } from "./swing-trail";
+import { projectPoint } from "./rig-volume";
+import { TRAIL_FROM_MS, TRAIL_SAMPLES, TRAIL_STEP_MS, bladeSweep, trailCloud, trailSegments } from "./swing-trail";
 
 const BASE = HERO_EQUIPPED.basePose;
-const CONTACT = Math.round(0.45 * SWING.durationMs);
+const CONTACT = Math.round(SWING_BEATS.contact * SWING.durationMs);
+
+describe("bladeSweep", () => {
+  it("is the trail before projection: the pixel trail is exactly it on screen", () => {
+    const sweep = bladeSweep(CONTACT, BASE);
+    expect(trailSegments(CONTACT, BASE)).toEqual(
+      sweep.map((sample) => ({ a: projectPoint(sample.a), b: projectPoint(sample.b), age: sample.age })),
+    );
+  });
+
+  it("lies in a level band at chest height through the cut", () => {
+    const sweep = bladeSweep(CONTACT + 30, BASE);
+    expect(sweep.length).toBeGreaterThan(10);
+    const heights = sweep.flatMap((sample) => [sample.a.z, sample.b.z]);
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(3);
+    expect(Math.min(...heights)).toBeGreaterThan(8);
+  });
+
+  it("holds the whole cut at the follow-through: a crescent wider on screen than it is tall", () => {
+    const tips = trailSegments(Math.round(SWING_BEATS.through * SWING.durationMs), BASE).map((segment) => segment.b);
+    const xs = tips.map((tip) => tip.x);
+    const ys = tips.map((tip) => tip.y);
+    expect(Math.min(...xs)).toBeLessThan(-8);
+    expect(Math.max(...xs)).toBeGreaterThan(8);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(1.5 * (Math.max(...ys) - Math.min(...ys)));
+  });
+
+  it("turns with the rig", () => {
+    const front = bladeSweep(CONTACT, BASE)[0]!;
+    const turned = bladeSweep(CONTACT, BASE, { yaw: Math.PI })[0]!;
+    expect(Math.sign(turned.b.y)).toBe(-Math.sign(front.b.y));
+  });
+});
 
 describe("trailSegments", () => {
   it("is empty before the windup peaks and after the swing has settled", () => {

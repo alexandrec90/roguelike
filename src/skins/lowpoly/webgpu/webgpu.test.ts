@@ -6,6 +6,7 @@ import type { DrawCall, FrameUniforms } from "../backend";
 import { FLAT_LOOK, PAINTED_LOOK } from "../look";
 import { lowpolyView } from "../placement";
 import { WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "../shaders";
+import { MAX_PUSHES } from "../sway";
 import { DRAW_FLOATS, drawCount, FRAME_FLOATS, packDraws, packFrame } from "./uniform-pack";
 import { freshImpulses, stepsFor, WAVE_WGSL } from "./wave-sim";
 import { SURFACE_WGSL } from "./wave-surface";
@@ -19,6 +20,7 @@ const frame: FrameUniforms = {
   shake: { x: 1, y: -2 },
   water: { hero: [12.5, 40.25], level: 0.7, wetness: 0.4, rain: 0.6, seconds: 3.5, ripples: new Float32Array(64) },
   look: FLAT_LOOK,
+  sway: { wind: [1.5, 2.5, 0.75, 0], pushes: Float32Array.from({ length: MAX_PUSHES * 4 }, (_, i) => i + 1) },
   width: 1280,
   height: 720,
 };
@@ -34,13 +36,23 @@ describe("the WebGPU uniforms", () => {
     expect(floats[35]).toBe(3.5);
     // The hero's wave cell: eight to a tile.
     expect([...floats.slice(36, 38)]).toEqual([100, 322]);
+    // The wind.
+    expect([...floats.slice(40, 44)]).toEqual([1.5, 2.5, 0.75, 0]);
     // No window round the hero: a zero radius the shader reads as none.
-    expect([...floats.slice(40, 44)]).toEqual([0, 0, 0, 1]);
+    expect([...floats.slice(44, 48)]).toEqual([0, 0, 0, 1]);
+    // Every push slot, last of all.
+    expect([...floats.slice(48)]).toEqual([...frame.sway.pushes]);
   });
 
-  it("carry the window round the hero last", () => {
+  it("carry the window round the hero after the wind, before the pushes", () => {
     const cutaway = { x: 150, y: 90, radiusX: 15, radiusY: 18 };
-    expect([...packFrame({ ...frame, cutaway }).slice(40, 44)]).toEqual([150, 90, 15, 18]);
+    expect([...packFrame({ ...frame, cutaway }).slice(44, 48)]).toEqual([150, 90, 15, 18]);
+  });
+
+  it("declare the same Frame the packing fills: one vec4f per four floats", () => {
+    const struct = worldWgsl(false).match(/struct Frame \{([^}]*)\}/)?.[1] ?? "";
+    const vec4s = (struct.match(/: vec4f/g)?.length ?? 0) + Number(struct.match(/array<vec4f, (\d+)>/)?.[1] ?? 0);
+    expect(vec4s * 4).toBe(FRAME_FLOATS);
   });
 
   it("tell the world shader which look to light in, in shading.w", () => {
@@ -113,7 +125,9 @@ describe("the shader sources", () => {
   it("read the water from the simulated surface, and mirror height in the vertex stage", () => {
     const world = worldWgsl(true);
     expect(world).toContain("textureSampleLevel(waveSurface");
-    expect(world).toContain("input.pos.z * mirror");
+    // Height mirrored after the sway has bent it, so a reflection leans with its plant.
+    expect(world).toContain("let height = input.pos.z + sway.z;");
+    expect(world).toContain("height * mirror");
     expect(WAVE_WGSL).toContain("fn stepWaves");
     expect(SURFACE_WGSL).toContain("textureStore(surface");
     expect(SKY_WGSL).toContain("fn skyFragment");

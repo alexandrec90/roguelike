@@ -15,6 +15,7 @@ import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { Kind, type Rgb } from "../mesh";
 import { PAINT_STEPS } from "../palette";
 import { paintConstants } from "../shaders";
+import { MAX_PUSHES, SWAY_WGSL } from "../sway";
 import { LAKE_DEPTH_PER_TILE } from "../water-glsl";
 import { LAKE_RANGE_TILES } from "../water-texels";
 import { WAVE_N, WAVE_RES } from "./waves";
@@ -35,7 +36,9 @@ struct Frame {
   shading: vec4f,
   water: vec4f,
   sim: vec4f,
+  wind: vec4f,
   cut: vec4f,
+  pushes: array<vec4f, ${MAX_PUSHES}>,
 };
 
 struct Draw {
@@ -112,7 +115,7 @@ struct VertexOut {
 fn turned(p: vec2f, rot: vec2f) -> vec2f {
   return vec2f(p.x * rot.x - p.y * rot.y, p.x * rot.y + p.y * rot.x);
 }
-
+${SWAY_WGSL}
 fn squash(row: f32) -> f32 {
   let r = row / frame.roll.z;
   return 1.0 / (1.0 + r * r);
@@ -137,7 +140,9 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   let mirror = draw.mirror.x;
   let kind = u32(input.normal.w * 127.0 + 0.5);
   let foot = turned(input.anchor + draw.place.xy, rot);
-  let off = turned(input.pos.xy - input.anchor, rot);
+  let sway = swayOffset(kind, input.anchor + draw.place.xy, input.pos.z, rot);
+  let off = turned(input.pos.xy - input.anchor, rot) + sway.xy;
+  let height = input.pos.z + sway.z;
 
   let groundTop = frame.roll.x;
   let affineY = frame.view.w - foot.y * TILE_DEPTH;
@@ -156,7 +161,7 @@ fn vertexMain(input: VertexIn) -> VertexOut {
     ground = groundTop - frame.roll.y * lift + sink * scale;
   }
   let x = frame.view.z + (foot.x + off.x) * TILE_WIDTH * scale + frame.depthShake.z;
-  let y = ground - (off.y * TILE_DEPTH + input.pos.z * mirror * WALL_RISE) * scale + frame.depthShake.w;
+  let y = ground - (off.y * TILE_DEPTH + height * mirror * WALL_RISE) * scale + frame.depthShake.w;
 
   var bias = 0.0;
   if (kind == ${Kind.ground}u) { bias = 0.06; }

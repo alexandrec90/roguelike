@@ -18,6 +18,7 @@ import type { Atmosphere } from "../../game/atmosphere";
 import type { LowpolyCutaway } from "./cutaway";
 import type { Look } from "./look";
 import type { LowpolyView } from "./placement";
+import type { SwayState } from "./sway";
 
 /** A buffer of `mesh.ts` vertices on the GPU. */
 export interface DrawableHandle {
@@ -63,6 +64,8 @@ export interface FrameUniforms {
   readonly water: WaterState;
   /** `?look=`: the shaders read its `stepped`. */
   readonly look: Look;
+  /** The wind and the pushes that lean grass and foliage (`sway.ts`). */
+  readonly sway: SwayState;
   /** The drawing buffer, device pixels. */
   readonly width: number;
   readonly height: number;

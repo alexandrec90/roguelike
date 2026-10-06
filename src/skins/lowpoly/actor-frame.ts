@@ -8,11 +8,12 @@
 import type { EncounterSim } from "../../game/encounter-sim";
 import { layeredPose } from "../../game/hero/hero-figure";
 import { tracksOf } from "../../game/hero/hero-look";
+import { bladeSweep } from "../../game/hero/swing-trail";
 import { wadeDepth } from "../../game/lakes";
 import type { PlanetPoint } from "../../game/planet";
 import type { PlayerState } from "../../game/player";
 import { burstMesh, fireballMesh, slimeMesh } from "./actor-mesh";
-import { heroMesh } from "./hero-mesh";
+import { heroMesh, swingTrailMesh } from "./hero-mesh";
 import { looseSkeleton } from "./hero-sway";
 import { FLAT_LOOK, type Look } from "./look";
 import { MeshBuilder } from "./mesh";
@@ -58,13 +59,13 @@ export class ActorMeshes {
     const { player, live, encounter } = input;
     const ground = standingHeight(live, this.look);
     const tracks = tracksOf(player, input.elapsedMs);
-    heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), {
-      yaw: input.yaw,
-      enchanted: player.enchanted,
-      sunk: wadeDepth(live) * WADE_SINK,
-      ground,
-    });
+    const stance = { enchanted: player.enchanted, sunk: wadeDepth(live) * WADE_SINK, ground };
+    heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), { yaw: input.yaw, ...stance });
     shadowUnder(b.heroSheer, [0, 0, ground], HERO_SHADOW);
+    if (player.attackMs !== undefined) {
+      const sweep = bladeSweep(player.attackMs, layeredPose({ ...tracks, swingMs: undefined }), { yaw: input.yaw });
+      swingTrailMesh(b.heroSheer, sweep, stance);
+    }
     for (const slime of encounter.slimes.slimes) {
       slimeMesh(b.actorSolid, b.actorSheer, slime, live, this.look);
     }
