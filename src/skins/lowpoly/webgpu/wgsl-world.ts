@@ -33,6 +33,7 @@ struct Frame {
   shading: vec4f,
   water: vec4f,
   sim: vec4f,
+  cut: vec4f,
 };
 
 struct Draw {
@@ -60,6 +61,10 @@ const CLIP_WGSL = `
   }
   // Past the horizon the ground hides a body; the mirror draws no ground, so it skips them too.
   if (input.mirror < 0.0 && input.rows > ROLL_ROWS) {
+    discard;
+  }
+  // The window round the hero (\`cutaway.ts\`): land nearer than his foot, inside the oval.
+  if (input.kind == ${Kind.land}u && input.mirror > 0.0 && frame.cut.z > 0.0 && input.ahead < 0.0 && cutAway(input.clip.xy)) {
     discard;
   }`;
 
@@ -99,6 +104,7 @@ struct VertexOut {
   @location(3) planet: vec2f,
   @location(4) @interpolate(flat) kind: u32,
   @location(5) @interpolate(flat) mirror: f32,
+  @location(6) ahead: f32,
 };
 
 fn turned(p: vec2f, rot: vec2f) -> vec2f {
@@ -165,7 +171,18 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   result.planet = input.pos.xy + draw.place.xy + frame.hero.xy;
   result.kind = kind;
   result.mirror = mirror;
+  result.ahead = foot.y + off.y * scale;
   return result;
+}
+
+/** Whether the window takes this device pixel: inside the oval, its rim dithered over the outer fifth. */
+fn cutAway(fragment: vec2f) -> bool {
+  let logical = fragment / frame.hero.zw * frame.view.xy;
+  let distance = length((logical - frame.cut.xy) / frame.cut.zw);
+  var bayer = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+  let cell = vec2u(fragment) % vec2u(4u);
+  let threshold = (bayer[cell.y * 4u + cell.x] + 0.5) / 16.0;
+  return distance < 0.8 || (distance < 1.0 && (1.0 - distance) / 0.2 > threshold);
 }
 
 fn lit(colour: vec3f, normal: vec3f) -> vec3f {

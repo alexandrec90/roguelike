@@ -114,6 +114,10 @@ export class WebGlBackend implements LowpolyBackend {
     gl.bindTexture(gl.TEXTURE_2D, this.reflection.texture);
     this.solid();
     this.drawAll(clipping, scene.grounds);
+    // The land can discard only on a frame with a window in it: elsewhere it keeps the early depth test.
+    const land = frame.cutaway === undefined ? this.solidWorld : clipping;
+    gl.useProgram(land.target);
+    this.drawAll(land, scene.lands);
     gl.useProgram(this.solidWorld.target);
     this.drawAll(this.solidWorld, scene.solids);
     gl.useProgram(clipping.target);
@@ -185,6 +189,8 @@ export class WebGlBackend implements LowpolyBackend {
     gl.uniform3f(at("u_shading"), 0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight);
     gl.uniform2f(at("u_hero"), water.hero[0], water.hero[1]);
     gl.uniform2f(at("u_resolution"), frame.width, frame.height);
+    const cut = frame.cutaway;
+    gl.uniform4f(at("u_cut"), cut?.x ?? 0, cut?.y ?? 0, cut?.radiusX ?? 0, cut?.radiusY ?? 1);
     gl.uniform4f(at("u_water"), water.level, water.wetness, water.rain, water.seconds);
     gl.uniform4fv(at("u_ripples[0]"), water.ripples);
     gl.uniform1i(at("u_puddles"), PUDDLE_UNIT);

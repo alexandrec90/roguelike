@@ -35,11 +35,13 @@ export const Kind = {
   water: 3,
   /** Unlit and bright: fire, a spell. */
   glow: 4,
+  /** A landform: lit as a body, and cut from the window round the hero (`cutaway.ts`). */
+  land: 5,
   /**
    * Jelly: sheer and glossy - lit like a body, plus a highlight and a rim that
    * thickens toward the silhouette, as a drop of liquid does. A slime's skin.
    */
-  liquid: 5,
+  liquid: 6,
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];

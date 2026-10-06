@@ -18,6 +18,7 @@ import { looseSkeleton } from "./hero-sway";
 import { MeshBuilder } from "./mesh";
 import { shadowUnder } from "./scenery-mesh";
 import { slimeGaze, slimeMesh } from "./slime-mesh";
+import { standingHeight } from "./terrain-mesh";
 
 /** How far into a lake the hero's shins go, tiles, at the edge of the deep water. */
 const WADE_SINK = 0.4;
@@ -62,13 +63,15 @@ export class ActorMeshes {
       b[key].reset();
     }
     const { player, live, encounter } = input;
+    const ground = standingHeight(live);
     const tracks = tracksOf(player, input.elapsedMs);
     heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), {
       yaw: input.yaw,
       enchanted: player.enchanted,
       sunk: wadeDepth(live) * WADE_SINK,
+      ground,
     });
-    shadowUnder(b.heroSheer, [0, 0, 0], HERO_SHADOW);
+    shadowUnder(b.heroSheer, [0, 0, ground], HERO_SHADOW);
     const deltaMs = input.elapsedMs - (this.lastMs ?? input.elapsedMs);
     this.lastMs = input.elapsedMs;
     const seen = new Set<number>();

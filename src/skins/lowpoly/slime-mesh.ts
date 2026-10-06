@@ -31,6 +31,7 @@ import { hash01, LOWPOLY } from "./palette";
 import { TOWARD_VIEWER } from "./placement";
 import { smoothBlob } from "./primitives";
 import { shadowUnder } from "./scenery-mesh";
+import { standingHeight } from "./terrain-mesh";
 
 const SLIME_COLOURS: Readonly<Record<SlimeVariant, Rgb>> = {
   green: LOWPOLY.slimeGreen,
@@ -75,7 +76,9 @@ const WOBBLE_MAX = 0.12;
 export interface SlimeBody {
   readonly x: number;
   readonly y: number;
-  /** Tiles above the ground its underside is. */
+  /** Tiles of land under its foot - a landform's lower slope (`standingHeight`); 0 on open ground. */
+  readonly ground: number;
+  /** Tiles above height 0 its underside is: the land under it plus its hop. */
   readonly lift: number;
   readonly wide: number;
   readonly tall: number;
@@ -95,10 +98,12 @@ export function slimeBody(slime: Slime, hero: PlanetPoint, elapsedMs: number): S
   const melt = meltOf(slime);
   const squash = slime.mode === "dying" ? 0 : slime.squash.value;
   const fade = slime.mode === "dying" ? 1 - clamp01((slime.modeMs - MELT_MS) / (DYING_MS - MELT_MS)) : 1;
+  const ground = standingHeight(slime.at);
   return {
     x,
     y,
-    lift: slime.lift / WALL_RISE,
+    ground,
+    lift: ground + slime.lift / WALL_RISE,
     wide: SLIME_RADIUS * (1 - squash * 0.5) * (1 + melt * 0.8),
     tall: SLIME_HEIGHT * (1 + squash) * (1 - melt * 0.85),
     melt,
@@ -173,7 +178,7 @@ export function slimeMesh(solid: MeshBuilder, sheer: MeshBuilder, slime: Slime, 
   const base = SLIME_COLOURS[slime.variant];
   const colour = slime.flashMs > 0 ? mixRgb(base, [1, 1, 1], 0.75) : base;
   const view = viewInPlanet(look.turn);
-  shadowUnder(sheer, [body.x, body.y, 0], body.wide * 0.9 * body.fade);
+  shadowUnder(sheer, [body.x, body.y, body.ground], body.wide * 0.9 * body.fade);
   if (body.fade <= 0) {
     return;
   }
