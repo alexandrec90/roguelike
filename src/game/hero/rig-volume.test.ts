@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { cloudBounds } from "../ink";
-import { HERO_EQUIPPED, HERO_FACE, HERO_MODEL, SWING } from "../models";
+import { HERO_EQUIPPED, HERO_FACE, HERO_MODEL, SWING, SWING_BEATS } from "../models";
 import { samplePose, solveModel, vec3, type RigModel } from "../rig";
 import { boneSpan, modelPrims, projectPoint, renderVolume } from "./rig-volume";
 
@@ -93,8 +93,8 @@ describe("renderVolume", () => {
 
   it("puts the blade behind him at the windup and in front at contact", () => {
     const tip = (ms: number) => boneSpan(renderVolume(HERO_EQUIPPED, samplePose(SWING, BASE, ms)).solved, "sword")?.b.depth;
-    expect(tip(0.3 * SWING.durationMs)).toBeLessThan(0);
-    expect(tip(0.45 * SWING.durationMs)).toBeGreaterThan(0);
+    expect(tip(SWING_BEATS.windup * SWING.durationMs)).toBeLessThan(0);
+    expect(tip(SWING_BEATS.contact * SWING.durationMs)).toBeGreaterThan(0);
   });
 
   it("is deterministic", () => {

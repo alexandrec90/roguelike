@@ -13,11 +13,12 @@
  * tiles, x right, y ahead, z up - `toLocal` is the one conversion.
  */
 
+import type { BladeSample } from "../../game/hero/swing-trail";
 import { HERO_EQUIPPED } from "../../game/models";
 import { orientVector, solveModel, type RigPose, type Vec3 as RigVec3 } from "../../game/rig";
 import { TILE_WIDTH } from "../../game/projection";
 import { SKELETON_DRESS, SKULL_HOLES, STICK_DRESS, type DressPiece } from "./hero-dress";
-import { Kind, MeshBuilder, type Rgb, type Vec3 } from "./mesh";
+import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { blob, frustum } from "./primitives";
 
@@ -112,6 +113,31 @@ function skullHoles(b: MeshBuilder, head: RigVec3 | undefined, yaw: number, lift
     const r = radius / TILE_WIDTH;
     blob(b, centre, [r, r, r], { colour: LOWPOLY.socket, anchor: [0, 0] }, index, 0);
   });
+}
+
+/** How bright the newest strip of the trail is; older strips fade from it. */
+const TRAIL_ALPHA = 0.8;
+
+/**
+ * The swing's trail: a ribbon through the air between the blade's last few
+ * spans (`bladeSweep`), brightest at the blade and fading toward its tail.
+ * Sheer and unlit, white fading to bone - or fire when the blade burns - and depth
+ * tested against him, so the part swept behind his back is hidden by it.
+ */
+export function swingTrailMesh(b: MeshBuilder, sweep: readonly BladeSample[], options: Omit<HeroMeshOptions, "yaw">): void {
+  const lift = (options.ground ?? 0) - options.sunk;
+  const [head, tail] = options.enchanted ? [LOWPOLY.fireCore, LOWPOLY.fire] : [LOWPOLY.trail, LOWPOLY.bone];
+  for (let index = 0; index + 1 < sweep.length; index += 1) {
+    const newer = sweep[index] as BladeSample;
+    const older = sweep[index + 1] as BladeSample;
+    const fade = 1 - newer.age;
+    b.quad(toLocal(newer.a, lift), toLocal(newer.b, lift), toLocal(older.b, lift), toLocal(older.a, lift), {
+      colour: mixRgb(tail, head, fade),
+      kind: Kind.glow,
+      alpha: TRAIL_ALPHA * fade,
+      anchor: [0, 0],
+    });
+  }
 }
 
 /** How tall he stands in the base pose, logical pixels: what centres him in the window. */

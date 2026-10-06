@@ -37,11 +37,17 @@ export const Kind = {
   glow: 4,
   /** A landform: lit as a body, and cut from the window round the hero (`cutaway.ts`). */
   land: 5,
+  /** A body that sways from high up: a tree, a bush (`sway.ts`). Lit as a body. */
+  foliage: 6,
+  /** A blade that bends from its root, and parts round whatever walks through it (`sway.ts`). Lit as a body. */
+  grass: 7,
+  /** A mushroom: nods, stiffer than grass (`sway.ts`). Lit as a body. */
+  sprig: 8,
   /**
    * Jelly: sheer and glossy - lit like a body, plus a highlight and a rim that
    * thickens toward the silhouette, as a drop of liquid does. A slime's skin.
    */
-  liquid: 6,
+  liquid: 9,
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];

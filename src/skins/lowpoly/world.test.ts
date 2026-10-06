@@ -5,12 +5,13 @@ import { planetLandforms } from "../../game/landforms";
 import { PLACED_SPECIES } from "../../game/scenery-features";
 import { PLANET_TILES } from "../../game/planet";
 import { heroHeight } from "../../game/hero-layer";
-import { HERO_EQUIPPED } from "../../game/models";
+import { HERO_EQUIPPED, SWING, SWING_BEATS } from "../../game/models";
 import { EncounterSim } from "../../game/encounter-sim";
 import { HeroDriver } from "../../game/hero/hero-driver";
+import { bladeSweep } from "../../game/hero/swing-trail";
 import { ACTOR_MESH_KEYS, ActorMeshes } from "./actor-frame";
 import { nearestFirst } from "./lowpoly-game";
-import { heroHeightPx, heroMesh } from "./hero-mesh";
+import { heroHeightPx, heroMesh, swingTrailMesh } from "./hero-mesh";
 import { Kind, MeshBuilder, VERTEX_BYTES } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { lightDirection } from "./sky-light";
@@ -108,6 +109,64 @@ describe("the frame's moving meshes", () => {
     expect(actors.bytes("heroSolid").byteLength).toBeGreaterThan(0);
     expect(actors.bytes("heroSheer").byteLength).toBeGreaterThan(0);
     expect(actors.bytes("actorSolid").byteLength).toBe(0);
+  });
+
+  it("leaves a trail through the air mid-swing, and none at rest", () => {
+    const actors = new ActorMeshes();
+    const hero = new HeroDriver({ x: 128, y: 128, turn: 0 });
+    const build = (attackMs: number | undefined) => {
+      actors.build({ player: { ...hero.player, attackMs }, elapsedMs: 0, yaw: 0, live: { x: 128, y: 128 }, turn: 0, encounter: new EncounterSim() });
+      return actors.bytes("heroSheer").byteLength;
+    };
+    const resting = build(undefined);
+    const swinging = build(Math.round(SWING_BEATS.contact * SWING.durationMs));
+    expect(swinging).toBeGreaterThan(resting);
+  });
+});
+
+describe("the swing's trail", () => {
+  const sweep = bladeSweep(Math.round(SWING_BEATS.contact * SWING.durationMs), HERO_EQUIPPED.basePose);
+
+  it("is one sheer, glowing strip between each pair of blade samples", () => {
+    const b = new MeshBuilder();
+    swingTrailMesh(b, sweep, { enchanted: false, sunk: 0 });
+    expect(b.vertexCount).toBe((sweep.length - 1) * 6);
+    const bytes = b.bytesView();
+    for (let vertex = 0; vertex < b.vertexCount; vertex += 1) {
+      expect(bytes[vertex * VERTEX_BYTES + 23]).toBe(Kind.glow);
+      expect(bytes[vertex * VERTEX_BYTES + 27]).toBeLessThan(255);
+    }
+  });
+
+  it("fades toward its tail", () => {
+    const b = new MeshBuilder();
+    swingTrailMesh(b, sweep, { enchanted: false, sunk: 0 });
+    const alpha = (strip: number) => b.bytesView()[strip * 6 * VERTEX_BYTES + 27]!;
+    expect(alpha(0)).toBeGreaterThan(alpha(sweep.length - 2));
+  });
+
+  it("burns when the blade does", () => {
+    const steel = new MeshBuilder();
+    const fire = new MeshBuilder();
+    swingTrailMesh(steel, sweep, { enchanted: false, sunk: 0 });
+    swingTrailMesh(fire, sweep, { enchanted: true, sunk: 0 });
+    expect(fire.bytesView()).not.toEqual(steel.bytesView());
+  });
+
+  it("stands on the slope with him: the land under his foot lifts it as a lake sinks it", () => {
+    const trail = (ground: number, sunk: number) => {
+      const b = new MeshBuilder();
+      swingTrailMesh(b, sweep, { enchanted: false, sunk, ground });
+      return b.bytesView();
+    };
+    expect(trail(0.5, 0)).not.toEqual(trail(0, 0));
+    expect(trail(0.5, 0)).toEqual(trail(0, -0.5));
+  });
+
+  it("draws nothing from fewer than two samples", () => {
+    const b = new MeshBuilder();
+    swingTrailMesh(b, sweep.slice(0, 1), { enchanted: false, sunk: 0 });
+    expect(b.vertexCount).toBe(0);
   });
 });
 

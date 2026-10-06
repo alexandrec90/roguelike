@@ -17,6 +17,7 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon"
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
 import { Kind } from "./mesh";
 import { TOWARD_VIEWER } from "./placement";
+import { MAX_PUSHES, SWAY_GLSL } from "./sway";
 import { WATER_GLSL } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
@@ -38,6 +39,8 @@ uniform vec2 u_depth;    // nearest and farthest depth key
 uniform vec2 u_shake;    // logical pixels
 uniform vec2 u_hero;     // the hero's planet point
 uniform float u_mirror;  // 1, or -1 to draw the world reflected in still water at z = 0
+uniform vec4 u_wind;     // carrier phase, turbulence phase, gust strength (sway.ts)
+uniform vec4 u_pushes[${MAX_PUSHES}];  // planet x, y from the hero, front radius, strength
 
 out vec4 v_colour;
 out vec3 v_normal;
@@ -56,7 +59,7 @@ const float WALL_RISE = ${float(WALL_RISE)};
 vec2 turned(vec2 p) {
   return vec2(p.x * u_rot.x - p.y * u_rot.y, p.x * u_rot.y + p.y * u_rot.x);
 }
-
+${SWAY_GLSL}
 float squash(float row) {
   float r = row / u_roll.z;
   return 1.0 / (1.0 + r * r);
@@ -77,7 +80,9 @@ float shrinkAt(float rows) {
 void main() {
   int kind = int(a_normal.w * 127.0 + 0.5);
   vec2 foot = turned(a_anchor + u_offset);
-  vec2 off = turned(a_pos.xy - a_anchor);
+  vec3 sway = swayOffset(kind, a_anchor + u_offset, a_pos.z);
+  vec2 off = turned(a_pos.xy - a_anchor) + sway.xy;
+  float height = a_pos.z + sway.z;
 
   float groundTop = u_roll.x;
   float affineY = u_view.w - foot.y * TILE_DEPTH;
@@ -93,7 +98,7 @@ void main() {
     ground = groundTop - u_roll.y * lift + sink * scale;
   }
   float x = u_view.z + (foot.x + off.x) * TILE_WIDTH * scale + u_shake.x;
-  float y = ground - (off.y * TILE_DEPTH + a_pos.z * u_mirror * WALL_RISE) * scale + u_shake.y;
+  float y = ground - (off.y * TILE_DEPTH + height * u_mirror * WALL_RISE) * scale + u_shake.y;
 
   // Things lying on the ground sit a hair behind anything standing on the same row.
   float bias = kind == ${Kind.ground} ? 0.06 : (kind == ${Kind.shadow} ? 0.04 : (kind == ${Kind.water} ? 0.03 : 0.0));

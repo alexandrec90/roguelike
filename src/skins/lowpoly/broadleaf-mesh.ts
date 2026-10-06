@@ -11,7 +11,7 @@
  * Coordinates are tiles, x and y on the ground, z up; `at` is the foot.
  */
 
-import { type MeshBuilder, mixRgb, type Rgb, shadeRgb, type Vec3 } from "./mesh";
+import { Kind, type MeshBuilder, mixRgb, type Rgb, shadeRgb, type Vec3 } from "./mesh";
 import { LOWPOLY, hash01, seedOf } from "./palette";
 import { frond, frustum } from "./primitives";
 
@@ -61,7 +61,8 @@ export function broadleafMesh(canopy: Canopy) {
   return (solid: MeshBuilder, at: Vec3, height: number, seed: number): number => {
     const anchor = [at[0], at[1]] as const;
     const rand = (salt: number): number => hash01(seedOf(seed, salt));
-    const wood = { colour: LOWPOLY.bark, anchor };
+    // Wood and leaves alike sway as one body about the foot (`sway.ts`).
+    const wood = { colour: LOWPOLY.bark, kind: Kind.foliage, anchor };
     let reach = 0;
 
     const clump = (centre: Vec3, radius: number, salt: number): void => {
@@ -80,7 +81,7 @@ export function broadleafMesh(canopy: Canopy) {
         frond(
           solid,
           { centre: plate, radius: r, teeth, lift: r * 0.3, droop: r * 0.22, notch: 0.74, phase: rand(salt + tier * 3 + 3) * Math.PI },
-          { colour, anchor },
+          { colour, kind: Kind.foliage, anchor },
           seedOf(seed, salt, tier),
         );
       }
