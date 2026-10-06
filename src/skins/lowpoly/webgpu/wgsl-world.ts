@@ -12,12 +12,14 @@
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horizon";
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
-import { Kind } from "../mesh";
+import { Kind, type Rgb } from "../mesh";
+import { PAINT, PAINT_STEPS } from "../palette";
 import { LAKE_DEPTH_PER_TILE } from "../water-glsl";
 import { LAKE_RANGE_TILES } from "../water-texels";
 import { WAVE_N, WAVE_RES } from "./waves";
 
 const f = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
+const vec3f = (colour: Rgb): string => `vec3f(${colour.map(f).join(", ")})`;
 
 /** Bindings shared by the world and the wave simulation's reading of the water. */
 export const WORLD_BINDINGS = `
@@ -80,6 +82,9 @@ const LAKE_RANGE = ${f(LAKE_RANGE_TILES)};
 const LAKE_DEPTH = ${f(LAKE_DEPTH_PER_TILE)};
 const WAVE_RES = ${f(WAVE_RES)};
 const WAVE_N = ${WAVE_N}i;
+const PAINT_WARM = ${vec3f(PAINT.warm)};
+const PAINT_COOL = ${vec3f(PAINT.cool)};
+const PAINT_DEEP = ${vec3f(PAINT.deep)};
 
 struct VertexIn {
   @location(0) pos: vec3f,
@@ -166,8 +171,28 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   return result;
 }
 
-fn lit(colour: vec3f, normal: vec3f) -> vec3f {
+/** The painted look's stepped light: \`painted\` in \`shaders.ts\`, line for line. */
+fn painted(colour: vec3f, n: vec3f, ground: bool) -> vec3f {
+  let own = fract(sin(dot(colour, vec3f(12.9898, 78.233, 37.719))) * 43758.5453) - 0.5;
+  let facing = dot(n, frame.lightDir.xyz);
+  let nudge = select(${f(PAINT_STEPS.bodyNudge)}, ${f(PAINT_STEPS.groundNudge)}, ground);
+  let level = select(max(facing, 0.0), facing - frame.lightDir.z, ground) * frame.shading.x + own * nudge;
+  let bar = select(vec2f(${f(PAINT_STEPS.bodyShade)}, ${f(PAINT_STEPS.bodyLit)}), vec2f(${f(PAINT_STEPS.groundShade)}, ${f(PAINT_STEPS.groundLit)}), ground);
+  let bright = smoothstep(bar.y - ${f(PAINT_STEPS.edge)}, bar.y + ${f(PAINT_STEPS.edge)}, level);
+  let shade = 1.0 - smoothstep(bar.x - ${f(PAINT_STEPS.edge)}, bar.x + ${f(PAINT_STEPS.edge)}, level);
+  let deep = select(1.0 - smoothstep(-0.3, -0.2, n.z), 0.0, ground);
+  var c = colour * (0.75 + 0.3 * frame.shading.x);
+  c = mix(c, mix(colour, PAINT_WARM, 0.38) * 1.1, bright);
+  c = mix(c, mix(colour, PAINT_COOL, 0.42) * 0.78, shade);
+  c = mix(c, mix(colour, PAINT_DEEP, 0.6) * 0.62, deep);
+  return c * frame.ambient.rgb;
+}
+
+fn lit(colour: vec3f, normal: vec3f, ground: bool) -> vec3f {
   let n = normalize(normal);
+  if (frame.shading.w > 0.5) {
+    return painted(colour, n, ground);
+  }
   let lambert = max(dot(n, frame.lightDir.xyz), 0.0);
   let sky = 0.5 + 0.5 * n.z;
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * frame.shading.x) * frame.ambient.rgb;
@@ -222,10 +247,10 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
   if (input.kind == ${Kind.shadow}u) {
     alpha *= frame.shading.y;
   } else if (input.kind == ${Kind.water}u) {
-    colour = waterColour(input.planet, lit(colour, input.normal) * 0.6, input.clip.xy);
+    colour = waterColour(input.planet, lit(colour, input.normal, true) * 0.6, input.clip.xy);
     alpha = 0.94;
   } else if (input.kind == ${Kind.ground}u) {
-    var ground = lit(colour, input.normal) * (1.0 - 0.18 * wet);
+    var ground = lit(colour, input.normal, true) * (1.0 - 0.18 * wet);
     let water = waterAt(input.planet);
     let depth = water.x;
     ground *= 1.0 - 0.22 * smoothstep(-0.03, 0.0, depth);
@@ -235,7 +260,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
       colour = mix(ground, waterColour(input.planet, bed, input.clip.xy), smoothstep(0.0, 0.012, depth));
     }
   } else if (input.kind != ${Kind.glow}u) {
-    colour = lit(colour, input.normal);
+    colour = lit(colour, input.normal, false);
   }
   let far = clamp(input.rows / ROLL_ROWS, 0.0, 1.0);
   let haze = select(far * far * (3.0 - 2.0 * far) * 0.78, 0.82, input.rows > ROLL_ROWS);

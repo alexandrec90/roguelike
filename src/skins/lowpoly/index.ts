@@ -17,6 +17,7 @@
  * | `terrain-mesh.ts`, `scenery-mesh.ts` | ground, lakes, landforms; each scenery species |
  * | `hero-mesh.ts`, `actor-mesh.ts` | the rigged hero; slimes, fireballs, bursts |
  * | `mesh.ts`, `primitives.ts`, `palette.ts` | flat-shaded triangles, the solids, the skin's colours |
+ * | `look.ts`, `ground-relief.ts` | `?look=`: flat, or painted (stepped hue-shifted light, hills) |
  */
 
 import { FrameClock } from "../../engine/loop";
@@ -26,6 +27,7 @@ import { mouseButtonOf } from "../../game/keybindings";
 import { readSceneOptions } from "../../game/scene-options";
 import { puddleField } from "../../game/water/puddle-field";
 import { backendOrder, parseGpu, parseMsaa, type GpuChoice, type LowpolyBackend } from "./backend";
+import { parseLook } from "./look";
 import { LowpolyGame } from "./lowpoly-game";
 import { backingSize } from "./placement";
 import { WebGlBackend } from "./renderer";
@@ -82,7 +84,7 @@ function webglBackend(canvas: HTMLCanvasElement, samples: number): LowpolyBacken
 }
 
 function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, query: URLSearchParams): void {
-  const game = new LowpolyGame(backend, readSceneOptions(query));
+  const game = new LowpolyGame(backend, readSceneOptions(query), parseLook(query.get("look")));
 
   const fit = (): void => {
     const size = backingSize(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);

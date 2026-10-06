@@ -7,6 +7,7 @@
  * fifty triangles, where a GPU draws millions a frame.
  */
 
+import { FLAT_LOOK, type Look } from "./look";
 import { hash01, faceTint } from "./palette";
 import { MeshBuilder, type FaceStyle, type Vec3 } from "./mesh";
 
@@ -102,21 +103,49 @@ const ICO_RADIUS = Math.hypot(1, PHI);
 /** Faces in a `blob`: twenty, the whole icosahedron. */
 export const BLOB_FACES = ICO_FACES.length;
 
+/** How lumpy a `blob` is, and how it is painted beyond its colour. */
+export interface BlobShape {
+  /** How far each corner is pushed in or out, as a share of its radius; 0.15 unless given. */
+  readonly jitter?: number;
+  readonly look?: Look;
+  /** A crown: drawn up into the look's `peak`, and allowed its accent faces. */
+  readonly crown?: boolean;
+}
+
 /**
  * A lumpy solid: an icosahedron stretched to `radii`, each corner pushed in or
  * out by up to `jitter` of its radius, seeded. A crown, a bush, a boulder, a
- * slime. Each face gets its own small nudge of colour, which is what reads as
- * a facet catching the light differently from its neighbour.
+ * slime. Each face gets its own nudge of colour (`faceTint`), which is what
+ * reads as a facet catching the light differently from its neighbour.
+ *
+ * The look decides how far from a ball it strays: under the painted look the
+ * jitter grows, each axis is stretched by its own seeded share, the top leans
+ * off-centre, and a crown's upper corners are drawn up into a point - the
+ * flame-shaped tree of a flat-colour landscape rather than a dented sphere.
  */
-export function blob(b: MeshBuilder, centre: Vec3, radii: Vec3, style: Style, seed: number, jitter = 0.15): void {
+export function blob(b: MeshBuilder, centre: Vec3, radii: Vec3, style: Style, seed: number, shape: BlobShape = {}): void {
+  const look = shape.look ?? FLAT_LOOK;
+  const spread = (shape.jitter ?? 0.15) * look.jitter;
+  const axis = (n: number): number => 1 + (hash01(seed + 0x5a1 + n) * 2 - 1) * look.stretch;
+  const r: Vec3 = [radii[0] * axis(0), radii[1] * axis(1), radii[2] * axis(2)];
+  const lean = (hash01(seed + 0x5a5) * 2 - 1) * look.stretch;
+  const leanAngle = hash01(seed + 0x5a7) * Math.PI * 2;
+  const peak = shape.crown === true ? look.peak : 0;
   const corners = ICO_VERTICES.map((corner, index): Vec3 => {
-    const k = (1 + (hash01(seed + index * 7919) * 2 - 1) * jitter) / ICO_RADIUS;
-    return [centre[0] + corner[0] * radii[0] * k, centre[1] + corner[1] * radii[1] * k, centre[2] + corner[2] * radii[2] * k];
+    const k = (1 + (hash01(seed + index * 7919) * 2 - 1) * spread) / ICO_RADIUS;
+    // How high this corner sits on the solid, -1..1: the top leans and points, the bottom stays put.
+    const up = Math.max(0, corner[2] / ICO_RADIUS);
+    const shift = lean * up * r[2];
+    return [
+      centre[0] + corner[0] * r[0] * k + Math.cos(leanAngle) * shift,
+      centre[1] + corner[1] * r[1] * k + Math.sin(leanAngle) * shift,
+      centre[2] + corner[2] * r[2] * k * (1 + peak * up),
+    ];
   });
   ICO_FACES.forEach(([i, j, k], face) => {
     b.tri(corners[i]!, corners[j]!, corners[k]!, {
       ...style,
-      colour: faceTint(style.colour, seed + face * 104729),
+      colour: faceTint(style.colour, seed + face * 104729, look, shape.crown === true),
       inside: centre,
     });
   });

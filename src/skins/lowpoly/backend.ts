@@ -15,6 +15,7 @@
  */
 
 import type { Atmosphere } from "../../game/atmosphere";
+import type { Look } from "./look";
 import type { LowpolyView } from "./placement";
 
 /** A buffer of `mesh.ts` vertices on the GPU. */
@@ -59,6 +60,8 @@ export interface FrameUniforms {
   readonly atmosphere: Atmosphere;
   readonly shake: { readonly x: number; readonly y: number };
   readonly water: WaterState;
+  /** `?look=`: the shaders read its `stepped`. */
+  readonly look: Look;
   /** The drawing buffer, device pixels. */
   readonly width: number;
   readonly height: number;

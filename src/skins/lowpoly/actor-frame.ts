@@ -14,6 +14,7 @@ import type { PlayerState } from "../../game/player";
 import { burstMesh, fireballMesh, slimeMesh } from "./actor-mesh";
 import { heroMesh } from "./hero-mesh";
 import { looseSkeleton } from "./hero-sway";
+import { FLAT_LOOK, type Look } from "./look";
 import { MeshBuilder } from "./mesh";
 import { shadowUnder } from "./scenery-mesh";
 import { standingHeight } from "./terrain-mesh";
@@ -46,6 +47,8 @@ export class ActorMeshes {
     actorSheer: new MeshBuilder(),
   };
 
+  constructor(private readonly look: Look = FLAT_LOOK) {}
+
   /** Rebuild all four for this frame. */
   build(input: ActorInput): void {
     const b = this.builders;
@@ -53,7 +56,7 @@ export class ActorMeshes {
       b[key].reset();
     }
     const { player, live, encounter } = input;
-    const ground = standingHeight(live);
+    const ground = standingHeight(live, this.look);
     const tracks = tracksOf(player, input.elapsedMs);
     heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), {
       yaw: input.yaw,
@@ -63,7 +66,7 @@ export class ActorMeshes {
     });
     shadowUnder(b.heroSheer, [0, 0, ground], HERO_SHADOW);
     for (const slime of encounter.slimes.slimes) {
-      slimeMesh(b.actorSolid, b.actorSheer, slime, live);
+      slimeMesh(b.actorSolid, b.actorSheer, slime, live, this.look);
     }
     for (const ball of encounter.fireballs) {
       fireballMesh(b.actorSheer, ball, live);

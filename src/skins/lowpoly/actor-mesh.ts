@@ -18,6 +18,7 @@ import { FIREBALL_HEIGHT, fireballPoint, type Fireball } from "../../game/fire/f
 import { wrapDelta, type PlanetPoint } from "../../game/planet";
 import { WALL_RISE } from "../../game/projection";
 import { Kind, MeshBuilder, mixRgb, rgb, type Rgb, type Vec3 } from "./mesh";
+import { FLAT_LOOK, type Look } from "./look";
 import { LOWPOLY } from "./palette";
 import { blob, disc } from "./primitives";
 import { shadowUnder } from "./scenery-mesh";
@@ -38,17 +39,17 @@ function offsetOf(point: PlanetPoint, hero: PlanetPoint): readonly [number, numb
 }
 
 /** One slime: squashed by its spring, lifted by its hop, melted flat as it dies. */
-export function slimeMesh(solid: MeshBuilder, sheer: MeshBuilder, slime: Slime, hero: PlanetPoint): void {
+export function slimeMesh(solid: MeshBuilder, sheer: MeshBuilder, slime: Slime, hero: PlanetPoint, look: Look = FLAT_LOOK): void {
   const [x, y] = offsetOf(slime.at, hero);
   const melt = slime.mode === "dying" ? Math.min(slime.modeMs / MELT_MS, 1) : 0;
   const squash = slime.mode === "dying" ? 0 : slime.squash.value;
   const wide = SLIME_RADIUS * (1 - squash * 0.5) * (1 + melt * 0.8);
   const tall = SLIME_RADIUS * 0.85 * (1 + squash) * (1 - melt * 0.85);
-  const ground = standingHeight(slime.at);
+  const ground = standingHeight(slime.at, look);
   const lift = ground + slime.lift / WALL_RISE;
   const base = SLIME_COLOURS[slime.variant];
   const colour = slime.flashMs > 0 ? mixRgb(base, [1, 1, 1], 0.75) : base;
-  blob(solid, [x, y, lift + tall * 0.8], [wide, wide, tall], { colour, anchor: [x, y] }, slime.seed, 0.12);
+  blob(solid, [x, y, lift + tall * 0.8], [wide, wide, tall], { colour, anchor: [x, y] }, slime.seed, { jitter: 0.12, look });
   shadowUnder(sheer, [x, y, ground], wide * 0.9);
 }
 
@@ -60,8 +61,8 @@ export function fireballMesh(sheer: MeshBuilder, ball: Fireball, hero: PlanetPoi
   const [x, y] = offsetOf(fireballPoint(ball), hero);
   const z = FIREBALL_HEIGHT / WALL_RISE;
   const spin = Math.floor(ball.ageMs / 40);
-  blob(sheer, [x, y, z], [0.16, 0.16, 0.16], { colour: LOWPOLY.fireCore, kind: Kind.glow, anchor: [x, y] }, spin, 0.2);
-  blob(sheer, [x, y, z], [0.28, 0.28, 0.24], { colour: LOWPOLY.fire, kind: Kind.glow, alpha: 0.55, anchor: [x, y] }, spin + 7, 0.35);
+  blob(sheer, [x, y, z], [0.16, 0.16, 0.16], { colour: LOWPOLY.fireCore, kind: Kind.glow, anchor: [x, y] }, spin, { jitter: 0.2 });
+  blob(sheer, [x, y, z], [0.28, 0.28, 0.24], { colour: LOWPOLY.fire, kind: Kind.glow, alpha: 0.55, anchor: [x, y] }, spin + 7, { jitter: 0.35 });
 }
 
 /** A burst: a fireball's blast swelling and fading, or a nova's ring of frost racing out. */
@@ -71,7 +72,7 @@ export function burstMesh(sheer: MeshBuilder, burst: Burst, hero: PlanetPoint): 
   const fade = 1 - t;
   if (burst.kind === "blast") {
     const r = burst.radius * (0.35 + 0.65 * Math.sqrt(t));
-    blob(sheer, [x, y, r * 0.5], [r, r, r * 0.8], { colour: mixRgb(LOWPOLY.fireCore, LOWPOLY.fire, t), kind: Kind.glow, alpha: 0.7 * fade, anchor: [x, y] }, 3, 0.25);
+    blob(sheer, [x, y, r * 0.5], [r, r, r * 0.8], { colour: mixRgb(LOWPOLY.fireCore, LOWPOLY.fire, t), kind: Kind.glow, alpha: 0.7 * fade, anchor: [x, y] }, 3, { jitter: 0.25 });
     return;
   }
   ring(sheer, [x, y, 0.06], burst.radius * Math.sqrt(t), 0.18, { colour: LOWPOLY.frost, alpha: 0.85 * fade });

@@ -15,10 +15,12 @@
 
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
-import { Kind } from "./mesh";
+import { Kind, type Rgb } from "./mesh";
+import { PAINT, PAINT_STEPS } from "./palette";
 import { WATER_GLSL } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
+const vec3 = (colour: Rgb): string => `vec3(${colour.map(float).join(", ")})`;
 
 export const WORLD_VERTEX = `#version 300 es
 precision highp float;
@@ -141,18 +143,48 @@ flat in int v_kind;
 uniform vec3 u_lightDir;  // toward the light, local frame
 uniform vec3 u_ambient;   // the hour's colour, multiplied over everything lit
 uniform vec3 u_haze;      // the air at the far edge of the world
-uniform vec3 u_shading;   // sun strength, shadow strength, daylight
+uniform vec4 u_shading;   // sun strength, shadow strength, daylight, stepped (look.ts)
 uniform float u_mirror;   // -1 while drawing the reflection
 
 out vec4 outColour;
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
+const vec3 PAINT_WARM = ${vec3(PAINT.warm)};
+const vec3 PAINT_COOL = ${vec3(PAINT.cool)};
+const vec3 PAINT_DEEP = ${vec3(PAINT.deep)};
 
 ${WATER_GLSL}
 
-/** A face lit by the sun and the sky, under the hour's colour. */
-vec3 lit(vec3 colour) {
+/**
+ * The painted look's light (\`look.ts\`): a few flat steps, not a slope. A body
+ * steps by how squarely it faces the sun. The ground steps by how much more or
+ * less than level ground does, so the open field is always the middle step and
+ * only a hill's flanks cross a line. Each face nudges its own lines a little -
+ * read off its colour, which \`faceTint\` already made its own - so the steps
+ * fall unevenly, as a painter's would.
+ */
+vec3 painted(vec3 colour, vec3 n, bool ground) {
+  float own = fract(sin(dot(colour, vec3(12.9898, 78.233, 37.719))) * 43758.5453) - 0.5;
+  float facing = dot(n, u_lightDir);
+  float nudge = ground ? ${float(PAINT_STEPS.groundNudge)} : ${float(PAINT_STEPS.bodyNudge)};
+  float level = (ground ? facing - u_lightDir.z : max(facing, 0.0)) * u_shading.x + own * nudge;
+  vec2 bar = ground ? vec2(${float(PAINT_STEPS.groundShade)}, ${float(PAINT_STEPS.groundLit)}) : vec2(${float(PAINT_STEPS.bodyShade)}, ${float(PAINT_STEPS.bodyLit)});
+  float bright = smoothstep(bar.y - ${float(PAINT_STEPS.edge)}, bar.y + ${float(PAINT_STEPS.edge)}, level);
+  float shade = 1.0 - smoothstep(bar.x - ${float(PAINT_STEPS.edge)}, bar.x + ${float(PAINT_STEPS.edge)}, level);
+  float deep = ground ? 0.0 : 1.0 - smoothstep(-0.3, -0.2, n.z);
+  vec3 c = colour * (0.75 + 0.3 * u_shading.x);
+  c = mix(c, mix(colour, PAINT_WARM, 0.38) * 1.1, bright);
+  c = mix(c, mix(colour, PAINT_COOL, 0.42) * 0.78, shade);
+  c = mix(c, mix(colour, PAINT_DEEP, 0.6) * 0.62, deep);
+  return c * u_ambient;
+}
+
+/** A face lit by the sun and the sky, under the hour's colour; \`ground\` for what lies on it. */
+vec3 lit(vec3 colour, bool ground) {
   vec3 n = normalize(v_normal);
+  if (u_shading.w > 0.5) {
+    return painted(colour, n, ground);
+  }
   float lambert = max(dot(n, u_lightDir), 0.0);
   float sky = 0.5 + 0.5 * n.z;
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x) * u_ambient;
@@ -165,11 +197,11 @@ void main() {${clips ? CLIP_GLSL : ""}
   if (v_kind == ${Kind.shadow}) {
     alpha *= u_shading.y;
   } else if (v_kind == ${Kind.water}) {
-    colour = waterColour(v_planet, lit(colour) * 0.6, u_lightDir);
+    colour = waterColour(v_planet, lit(colour, true) * 0.6, u_lightDir);
     alpha = 0.94;
   } else if (v_kind == ${Kind.ground}) {
     // Soaked ground is darker; standing water is a mirror over it, with a damp rim.
-    vec3 ground = lit(colour) * (1.0 - 0.18 * wet);
+    vec3 ground = lit(colour, true) * (1.0 - 0.18 * wet);
     vec2 water = waterAt(v_planet);
     float depth = water.x;
     float rim = smoothstep(-0.03, 0.0, depth);
@@ -178,7 +210,7 @@ void main() {${clips ? CLIP_GLSL : ""}
     vec3 bed = ground * 0.7 * (1.0 - 0.45 * smoothstep(0.5, 2.5, water.y));
     colour = depth > 0.0 ? mix(ground, waterColour(v_planet, bed, u_lightDir), smoothstep(0.0, 0.012, depth)) : ground;
   } else if (v_kind != ${Kind.glow}) {
-    colour = lit(colour);
+    colour = lit(colour, false);
   }
   float far = clamp(v_rows / ROLL_ROWS, 0.0, 1.0);
   float haze = v_rows > ROLL_ROWS ? 0.82 : far * far * (3.0 - 2.0 * far) * 0.78;

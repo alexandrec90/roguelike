@@ -51,7 +51,31 @@ by point. A new body that forgets its anchor shears apart on the lip.
 
 A body's foot also stands **on the drawn land**, not at height 0: walkable ground runs
 up a landform's lower slope (to `BLOCK_HEIGHT`), so a foot at 0 there is buried in the
-facets. Lift it by `standingHeight`, which reads the facets `landformMesh` draws.
+facets, and the painted look's ground has hills. Lift it by `standingHeight(point, look)`,
+which reads the facets `landformMesh` and `groundMesh` actually draw.
+
+## Two looks, one skin
+
+`?look=painted` (`look.ts`) is a second way to paint the same geometry; the default is
+`flat`. A look is data, handed to every builder and to the shaders - never a branch on
+a global.
+
+| | `flat` | `painted` |
+| --- | --- | --- |
+| Light (`shading.w`) | smooth Lambert plus sky | `painted()` in both shaders: flat steps, lit leaning `PAINT.warm`, shade `PAINT.cool`, undersides `PAINT.deep`; lines in `PAINT_STEPS` |
+| Faces (`faceTint`) | ±4.5% brightness | ±10%, hue drifting to `PAINT.drift`; crowns take a rare `PAINT.accent` |
+| Crowns (`blob`) | dented ball | stretched, leaned, drawn up to a point |
+| Ground (`ground-relief.ts`) | level, a hair of wobble | hills to `hills` tiles; colour by warped patch, not by face |
+
+The ground steps on how much more or less than **level ground** a face is lit, so the
+open field is always the middle step and only a hill's flanks cross a line; a body
+steps on how squarely it faces the sun. Keep the ground's per-face nudge and wobble
+small: a wobble steeper than the hills tips every tile across a step on its own.
+
+**The hills are level wherever something lies flat**: a puddle's basin (water is
+mirrored about height 0), a lake and its shore, and round a landform's foot (its mesh
+starts at 0). `ground-relief.test.ts` holds all three, and `groundSurface` to the very
+triangle drawn.
 
 ## Water
 
@@ -121,10 +145,12 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
-| `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
-| `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `disc` · `BlobShape` |
+| `palette.ts` | `LOWPOLY` · `PAINT` · `PAINT_STEPS` · `faceTint` · `hash01` · `seedOf` |
+| `look.ts` | `Look` · `FLAT_LOOK` · `PAINTED_LOOK` · `parseLook` |
+| `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` · `SceneryLay` · `GroundUnder` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
+| `ground-relief.ts` | `groundVertex` · `groundCell` · `groundSurface` · `SHORE` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
 | `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |

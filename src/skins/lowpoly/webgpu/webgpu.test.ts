@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { atmosphereAt } from "../../../game/atmosphere";
 import { DEFAULT_SKY_FRACTION } from "../../../game/horizon";
 import type { DrawCall, FrameUniforms } from "../backend";
+import { FLAT_LOOK, PAINTED_LOOK } from "../look";
 import { lowpolyView } from "../placement";
 import { WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "../shaders";
 import { DRAW_FLOATS, drawCount, FRAME_FLOATS, packDraws, packFrame } from "./uniform-pack";
@@ -17,6 +18,7 @@ const frame: FrameUniforms = {
   atmosphere: atmosphereAt(13),
   shake: { x: 1, y: -2 },
   water: { hero: [12.5, 40.25], level: 0.7, wetness: 0.4, rain: 0.6, seconds: 3.5, ripples: new Float32Array(64) },
+  look: FLAT_LOOK,
   width: 1280,
   height: 720,
 };
@@ -32,6 +34,11 @@ describe("the WebGPU uniforms", () => {
     expect(floats[35]).toBe(3.5);
     // The hero's wave cell: eight to a tile.
     expect([...floats.slice(36, 38)]).toEqual([100, 322]);
+  });
+
+  it("tell the world shader which look to light in, in shading.w", () => {
+    expect(packFrame(frame)[31]).toBe(0);
+    expect(packFrame({ ...frame, look: PAINTED_LOOK })[31]).toBe(1);
   });
 
   it("number the draws list after list, so a list's first draw is the sum of those before it", () => {
