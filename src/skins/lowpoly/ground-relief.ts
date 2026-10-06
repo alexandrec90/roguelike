@@ -1,7 +1,7 @@
 /**
- * The shape of the ground this skin draws: a lattice of planet points, each
- * jittered off its grid and lifted by the look's hills, and the exact height of
- * the facets between them - which is where a foot stands.
+ * The height field of the ground this skin draws: a lattice of planet points,
+ * each jittered off its grid and lifted by the look's hills. How the points are
+ * joined into faces - and so where a foot stands - is `ground-facets.ts`.
  *
  * The hills are the painted look's (`look.ts`); the flat look keeps the field
  * level but for a hair of relief, exactly as before. Hills are a picture, not
@@ -49,10 +49,14 @@ const LAKE_SETTLE = 4;
 /** Rolling cells a planet lap: the slow swell that makes one hill taller than the next. */
 const ROLL_CELLS = 24;
 
-/** Per lattice point: how tall a hill stands there (0..1), and how free it is to wobble at all. */
+/**
+ * Per lattice point: how tall a hill stands there (0..1), how free it is to
+ * wobble at all, and how far it is from settling for a lake or a landform.
+ */
 interface Relief {
   readonly hill: Float32Array;
   readonly calm: Float32Array;
+  readonly away: Float32Array;
 }
 
 let relief: Relief | undefined;
@@ -118,17 +122,18 @@ function planetRelief(): Relief {
       hill[index] = away[index]! * (1 - smoothstep(DRY_BASIN, WET_BASIN, basin)) * (0.55 + 0.45 * rolling(x, y));
     }
   }
-  relief = { hill, calm };
+  relief = { hill, calm, away };
   return relief;
 }
 
 /**
- * A ground vertex: the lattice point at planet `(px, py)` - whole tiles -
- * jittered by a hash of its *wrapped* coordinates, so the chunk on either side
- * of a seam puts the shared vertex in the same place, and the planet's wrap has
- * no crack. Its height is the look's hill there plus its own wobble.
+ * The lattice point at planet `(px, py)` - whole tiles, unwrapped - jittered by
+ * a hash of its *wrapped* coordinates, so the chunk on either side of a seam
+ * puts the shared point in the same place, and the planet's wrap has no crack.
+ * Its height is the look's hill there plus its own wobble. This is the raw
+ * point; `ground-facets.ts` may slide it onto a merged plane's edge.
  */
-export function groundVertex(px: number, py: number, origin: PlanetPoint, look: Look): Vec3 {
+export function latticeVertex(px: number, py: number, look: Look): Vec3 {
   const wx = wrapTile(px);
   const wy = wrapTile(py);
   const seed = seedOf(wx, wy, 0x9e0);
@@ -139,60 +144,44 @@ export function groundVertex(px: number, py: number, origin: PlanetPoint, look: 
     const index = wy * PLANET_TILES + wx;
     lift = look.hills * hill[index]! + wobble * calm[index]!;
   }
-  return [px - origin.x + (hash01(seed) * 2 - 1) * GROUND_JITTER, py - origin.y + (hash01(seed + 1) * 2 - 1) * GROUND_JITTER, lift];
-}
-
-/** One tile of ground as drawn: its two triangles, and the seed its faces are tinted from. */
-export interface GroundCell {
-  readonly seed: number;
-  readonly halves: readonly (readonly [Vec3, Vec3, Vec3])[];
+  return [px + (hash01(seed) * 2 - 1) * GROUND_JITTER, py + (hash01(seed + 1) * 2 - 1) * GROUND_JITTER, lift];
 }
 
 /**
- * The tile whose lattice corner is planet `(px, py)`, as two triangles. The
- * diagonal alternates by hash, so the field is triangles, not a quilt.
+ * How free the ground at lattice point `(px, py)` is to wobble, 0..1: 0 where
+ * water can stand or beside a lake or a landform, 1 on dry open ground.
  */
-export function groundCell(px: number, py: number, origin: PlanetPoint, look: Look): GroundCell {
-  const a = groundVertex(px, py, origin, look);
-  const b = groundVertex(px + 1, py, origin, look);
-  const c = groundVertex(px + 1, py + 1, origin, look);
-  const d = groundVertex(px, py + 1, origin, look);
-  const seed = seedOf(wrapTile(px), wrapTile(py), 0x7a1);
-  return { seed, halves: hash01(seed) < 0.5 ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]] };
+export function calmAt(px: number, py: number): number {
+  return planetRelief().calm[wrapTile(py) * PLANET_TILES + wrapTile(px)]!;
 }
 
+/** Samples a tile, each way, at which `freeToTilt` asks whether water could stand. */
+const TILT_SAMPLES = 2;
+
 /**
- * How high the drawn ground stands under a planet point, tiles: the height of
- * the very triangle `groundMesh` draws over it. The flat look's wobble is a
- * hair, and a foot has always stood at 0 on it, so it answers 0.
- *
- * A jittered corner can carry a neighbouring tile's triangle over the point, so
- * the tiles round it are searched too; the jitter is under a tile, so the
- * eight neighbours are enough.
+ * Whether the `size`-tile square at lattice point `(x0, y0)` may be drawn as a
+ * plane - or bumped - away from the hills under it: no water can stand anywhere
+ * in it, asked every half tile, since a tilted puddle would mirror the world
+ * displaced; and none of its points is on a landform's foot or a lake's shore,
+ * where the ground is held at 0 - a plane there would stand over the foot. The
+ * band where the ground settles toward one is fine: it is low there already.
  */
-export function groundSurface(point: PlanetPoint, look: Look): number {
-  if (look.hills <= 0) {
-    return 0;
-  }
-  const origin = { x: Math.floor(point.x), y: Math.floor(point.y) };
-  const x = point.x - origin.x;
-  const y = point.y - origin.y;
-  let height = 0;
-  let found = false;
-  for (let j = -1; j <= 1; j += 1) {
-    for (let i = -1; i <= 1; i += 1) {
-      for (const [p, q, r] of groundCell(origin.x + i, origin.y + j, origin, look).halves) {
-        const det = (q[1] - r[1]) * (p[0] - r[0]) + (r[0] - q[0]) * (p[1] - r[1]);
-        const l1 = ((q[1] - r[1]) * (x - r[0]) + (r[0] - q[0]) * (y - r[1])) / det;
-        const l2 = ((r[1] - p[1]) * (x - r[0]) + (p[0] - r[0]) * (y - r[1])) / det;
-        const l3 = 1 - l1 - l2;
-        if (l1 >= -1e-9 && l2 >= -1e-9 && l3 >= -1e-9) {
-          const z = l1 * p[2] + l2 * q[2] + l3 * r[2];
-          height = found ? Math.max(height, z) : z;
-          found = true;
-        }
+export function freeToTilt(x0: number, y0: number, size: number): boolean {
+  const { away } = planetRelief();
+  for (let j = 0; j <= size; j += 1) {
+    for (let i = 0; i <= size; i += 1) {
+      if (away[wrapTile(y0 + j) * PLANET_TILES + wrapTile(x0 + i)]! <= 0) {
+        return false;
       }
     }
   }
-  return height;
+  for (let j = 0; j <= size * TILT_SAMPLES; j += 1) {
+    for (let i = 0; i <= size * TILT_SAMPLES; i += 1) {
+      const point = { x: wrapTile(x0 + i / TILT_SAMPLES), y: wrapTile(y0 + j / TILT_SAMPLES) };
+      if (basinAt(point, terrainAt(point) === "dirt") >= WET_BASIN) {
+        return false;
+      }
+    }
+  }
+  return true;
 }

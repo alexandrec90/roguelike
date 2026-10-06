@@ -49,17 +49,20 @@ export const LOWPOLY = {
 export type LowpolyColour = keyof typeof LOWPOLY;
 
 /**
- * The painted look's colours (`look.ts`). `warm`, `cool` and `deep` are what
- * the lit step, the shade and an underside lean toward - the shaders bake them
- * in - and `drift` the hues a face may wander toward, so a crown is yellow,
- * sage and slate rather than one green. `accent` is the rare complementary dab.
+ * The painted look's colours (`look.ts`). `warm`, `cool` and `deep` are the
+ * colours of light a lit face, a shaded face and an underside lean toward - the
+ * shaders bake them in, and each face picks one of the three by its own seed,
+ * so the sun is yellow on one plane and orange on the next, as a painter lays
+ * it. `drift` is the hues a face may wander toward whatever its light, so a
+ * crown is yellow, sage and slate rather than one green; `accent` is the rare
+ * complementary dab.
  */
 export const PAINT = {
-  warm: rgb("#f2d47c"),
-  cool: rgb("#6c84a6"),
-  deep: rgb("#4a3a2f"),
+  warm: [rgb("#f2d47c"), rgb("#ec9a5a"), rgb("#efbe9a")],
+  cool: [rgb("#6c84a6"), rgb("#4f74b8"), rgb("#5e8f92")],
+  deep: [rgb("#4a3a2f"), rgb("#2e3954"), rgb("#4b3346")],
   accent: rgb("#e2683a"),
-  drift: [rgb("#a3b58a"), rgb("#7f96b2"), rgb("#d8c077")],
+  drift: [rgb("#a3b58a"), rgb("#7f96b2"), rgb("#d8c077"), rgb("#a9c3d8"), rgb("#e9e0c6"), rgb("#c9825a")],
 } as const;
 
 /**
@@ -79,6 +82,10 @@ export const PAINT_STEPS = {
   edge: 0.015,
   bodyNudge: 0.08,
   groundNudge: 0.012,
+  /** How far each step's colour of light is mixed in: lit, shade, underside. */
+  warmMix: 0.55,
+  coolMix: 0.6,
+  deepMix: 0.7,
 } as const;
 
 /**

@@ -62,11 +62,13 @@ a global.
 
 | | `flat` | `painted` |
 | --- | --- | --- |
-| Light (`shading.w`) | smooth Lambert plus sky | `painted()` in both shaders: flat steps, lit leaning `PAINT.warm`, shade `PAINT.cool`, undersides `PAINT.deep`; lines in `PAINT_STEPS` |
+| Light (`shading.w`) | smooth Lambert plus sky | `painted()` in both shaders: flat steps, each face picking its own colour of light from three a step - `PAINT.warm`, `PAINT.cool`, `PAINT.deep`, baked in by `paintConstants`; lines and mixes in `PAINT_STEPS` |
 | Faces (`faceTint`) | ±4.5% brightness | ±10%, hue drifting to `PAINT.drift`; crowns take a rare `PAINT.accent` |
-| Blobs (`blob`) | dented ball | stretched, leaned, drawn up to a point |
-| Foliage (`frond`) | a broadleaf's tiered plates | the same plates, tinted as crowns (hue drift and accent) |
-| Ground (`ground-relief.ts`) | level, a hair of wobble | hills to `hills` tiles; colour by warped patch, not by face |
+| Blobs (`blob`) | dented ball | stretched, leaned, drawn up to a point; some faces split |
+| Foliage (`frond`) | a broadleaf's tiered plates | the same outline, tinted as crowns; some faces split |
+| Split faces (`facet`) | never | three small faces round a middle pushed out (a bump) or in (a dent) |
+| Ground height (`ground-relief.ts`) | level, a hair of wobble | hills to `hills` tiles; colour by warped patch, not by face |
+| Ground faces (`ground-facets.ts`) | two triangles a tile | merged 2×2 and 4×4 planes, split tiles round a bump or a dent |
 
 The ground steps on how much more or less than **level ground** a face is lit, so the
 open field is always the middle step and only a hill's flanks cross a line; a body
@@ -75,8 +77,15 @@ small: a wobble steeper than the hills tips every tile across a step on its own.
 
 **The hills are level wherever something lies flat**: a puddle's basin (water is
 mirrored about height 0), a lake and its shore, and round a landform's foot (its mesh
-starts at 0). `ground-relief.test.ts` holds all three, and `groundSurface` to the very
-triangle drawn.
+starts at 0). A merged plane or a ground bump stands only where `freeToTilt` says no
+water can stand and nothing has settled. `ground-relief.test.ts` holds the height
+field to that.
+
+**A merged plane opens no crack**: a lattice point on its edge is slid onto the edge
+line (`groundVertex`), so the tiles beside it meet the plane exactly. Squares are
+aligned to their own size, which divides `CHUNK_TILES`. `ground-facets.test.ts` holds
+a chunk watertight (its faces' area from above is exactly the area inside its rim) and
+`groundSurface` to the very face drawn.
 
 ## Water
 
@@ -148,13 +157,15 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `frond` · `frondFaces` · `disc` · `BlobShape` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `frond` · `frondFaces` · `facet` · `disc` · `BlobShape` |
+| `shaders.ts` | `WORLD_VERTEX` · `WORLD_FRAGMENT` · `WORLD_FRAGMENT_SOLID` · `paintConstants` |
 | `palette.ts` | `LOWPOLY` · `PAINT` · `PAINT_STEPS` · `faceTint` · `hash01` · `seedOf` |
 | `look.ts` | `Look` · `FLAT_LOOK` · `PAINTED_LOOK` · `parseLook` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` · `SceneryLay` · `GroundUnder` |
 | `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
-| `ground-relief.ts` | `groundVertex` · `groundCell` · `groundSurface` · `SHORE` |
+| `ground-relief.ts` | `latticeVertex` · `calmAt` · `freeToTilt` · `SHORE` |
+| `ground-facets.ts` | `groundVertex` · `groundCell` · `groundSurface` · `GroundCell` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `cutaway.ts` | `heroCutaway` · `heroHidden` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |

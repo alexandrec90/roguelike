@@ -18,7 +18,7 @@ import { PLANET_TILES, wrapDelta, type PlanetPoint } from "../../game/planet";
 import { sceneryNear } from "../../game/scenery-features";
 import { MeshBuilder } from "./mesh";
 import { ROLL_ROWS } from "../../game/horizon";
-import { groundSurface } from "./ground-relief";
+import { groundSurface } from "./ground-facets";
 import { FLAT_LOOK, type Look } from "./look";
 import { sceneryMesh } from "./scenery-mesh";
 import { groundMesh, landformMesh } from "./terrain-mesh";

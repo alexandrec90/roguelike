@@ -30,7 +30,8 @@ import {
 import { PLANET_TILES, wrapDelta, wrapTile, type PlanetPoint } from "../../game/planet";
 import { WALL_RISE } from "../../game/projection";
 import { terrainAt } from "../../game/terrain";
-import { groundCell, groundSurface, SHORE } from "./ground-relief";
+import { groundCell, groundSurface } from "./ground-facets";
+import { SHORE } from "./ground-relief";
 import { FLAT_LOOK, type Look } from "./look";
 import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
 import { faceTint, hash01, LOWPOLY, PAINT, seedOf } from "./palette";
@@ -67,12 +68,16 @@ export function groundColour(point: PlanetPoint, lakes: readonly Lake[]): Rgb {
   return mixRgb(LOWPOLY.grass, LOWPOLY.grassDry, Math.min(dry, 0.7));
 }
 
-/** A `size`-tile square of ground with its corner at `origin`, two faceted triangles a tile. */
+/**
+ * A `size`-tile square of ground with its corner at `origin`: two faceted
+ * triangles a tile, or under the painted look planes and facets of many sizes
+ * (`ground-facets.ts`). `origin` and `size` are whole merged squares.
+ */
 export function groundMesh(solid: MeshBuilder, origin: PlanetPoint, size: number, lakes: readonly Lake[], look: Look = FLAT_LOOK): void {
   for (let j = 0; j < size; j += 1) {
     for (let i = 0; i < size; i += 1) {
-      const { seed, halves } = groundCell(origin.x + i, origin.y + j, origin, look);
-      halves.forEach(([p, q, r], half) => {
+      const { seed, faces } = groundCell(origin.x + i, origin.y + j, origin, look);
+      faces.forEach(([p, q, r], half) => {
         const centre = { x: wrapTile(origin.x + (p[0] + q[0] + r[0]) / 3), y: wrapTile(origin.y + (p[1] + q[1] + r[1]) / 3) };
         const colour = groundFace(groundColour(centre, lakes), centre, seed + half * 17, look);
         solid.tri(p, q, r, { colour, kind: Kind.ground });

@@ -4,7 +4,7 @@
  * | Look | Light | Faces | Ground |
  * | --- | --- | --- | --- |
  * | `flat` (default) | smooth, one colour scaled by the sun | a whisper of tint each | level, a hair of relief |
- * | `painted` | a few flat steps; the lit step leans warm, shade cool, an underside umber | bolder tints drifting in hue, a rare accent, lopsided crowns | rolling hills, flattened wherever water can stand |
+ * | `painted` | a few flat steps, each face taking its own colour of light: lit yellow, orange or peach; shade slate, cobalt or teal; undersides umber, navy or plum | bolder tints drifting in hue, a rare accent, lopsided crowns, some faces split round a bump or a dent | rolling hills of large planes and tiny facets, flattened wherever water can stand |
  *
  * The painted look is the flat-colour landscape painting rather than the
  * brushwork: light and shade as a handful of hard-edged planes of different
@@ -35,6 +35,14 @@ export interface Look {
   readonly hills: number;
   /** How far each ground vertex wanders up or down, tiles. */
   readonly relief: number;
+  /** The chance a 2×2 square of ground tiles is drawn as one plane (`ground-facets.ts`). */
+  readonly merge: number;
+  /** The chance a 4×4 square is, tried first. */
+  readonly mergeLarge: number;
+  /** The chance a ground tile, or a blob's or frond's face, is split into small faces round a new point. */
+  readonly split: number;
+  /** How far that new point is pushed out (a bump) or in (a dent), as a share of the face's size. */
+  readonly bump: number;
 }
 
 export const FLAT_LOOK: Look = {
@@ -48,13 +56,17 @@ export const FLAT_LOOK: Look = {
   peak: 0,
   hills: 0,
   relief: 0.035,
+  merge: 0,
+  mergeLarge: 0,
+  split: 0,
+  bump: 0,
 };
 
 export const PAINTED_LOOK: Look = {
   name: "painted",
   stepped: 1,
   faceSpread: 0.1,
-  hueDrift: 0.32,
+  hueDrift: 0.45,
   accent: 0.025,
   jitter: 1.8,
   stretch: 0.22,
@@ -62,6 +74,10 @@ export const PAINTED_LOOK: Look = {
   hills: 0.9,
   // Small: a wobble steeper than the hills tips each tile across a light step on its own, and the field turns to crumpled paper.
   relief: 0.02,
+  merge: 0.35,
+  mergeLarge: 0.3,
+  split: 0.3,
+  bump: 0.22,
 };
 
 /** `?look=` - `painted`, or anything else for the flat look. */

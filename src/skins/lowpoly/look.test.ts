@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { FLAT_LOOK, PAINTED_LOOK, parseLook } from "./look";
-import { BLOB_FACES, blob, frond } from "./primitives";
-import { MeshBuilder, VERTEX_BYTES } from "./mesh";
+import { BLOB_FACES, blob, facet, frond } from "./primitives";
+import { MeshBuilder, VERTEX_BYTES, type Vec3 } from "./mesh";
 import { faceTint, PAINT } from "./palette";
-import { WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "./shaders";
+import { paintConstants, WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "./shaders";
 import { worldWgsl } from "./webgpu/wgsl-world";
 
 describe("?look=", () => {
@@ -75,13 +75,15 @@ describe("a painted blob", () => {
     expect(flat.bytesView()).toEqual(plain.bytesView());
   });
 
-  it("is a crown drawn up into a point, still twenty faces, and seeded", () => {
+  it("is a crown drawn up into a point, and seeded", () => {
+    // Unsplit, so the corners measured are the icosahedron's own.
+    const whole = { ...PAINTED_LOOK, split: 0 };
     const flat = new MeshBuilder();
     const one = new MeshBuilder();
     const two = new MeshBuilder();
     blob(flat, [0, 0, 0], [1, 1, 1], { colour: [0.5, 0.5, 0.5] }, 7, { jitter: 0 });
-    blob(one, [0, 0, 0], [1, 1, 1], { colour: [0.5, 0.5, 0.5] }, 7, { jitter: 0, look: PAINTED_LOOK, crown: true });
-    blob(two, [0, 0, 0], [1, 1, 1], { colour: [0.5, 0.5, 0.5] }, 7, { jitter: 0, look: PAINTED_LOOK, crown: true });
+    blob(one, [0, 0, 0], [1, 1, 1], { colour: [0.5, 0.5, 0.5] }, 7, { jitter: 0, look: whole, crown: true });
+    blob(two, [0, 0, 0], [1, 1, 1], { colour: [0.5, 0.5, 0.5] }, 7, { jitter: 0, look: whole, crown: true });
     expect(one.vertexCount).toBe(BLOB_FACES * 3);
     expect(one.bytesView()).toEqual(two.bytesView());
     const top = (b: MeshBuilder): number => Math.max(...positions(b).map((p) => p[2]));
@@ -104,13 +106,45 @@ describe("painted foliage", () => {
     expect(flat.bytesView()).toEqual(plain.bytesView());
   });
 
-  it("keeps its shape under the painted look and changes only its faces' colour", () => {
+  it("keeps its outline under the painted look, its faces recoloured and some split round a bump or a dent", () => {
     const flat = new MeshBuilder();
     const painted = new MeshBuilder();
     frond(flat, plate, { colour: [0.3, 0.6, 0.2] }, 11);
     frond(painted, plate, { colour: [0.3, 0.6, 0.2] }, 11, PAINTED_LOOK);
-    expect(positions(painted)).toEqual(positions(flat));
+    // Every corner the flat plate has, the painted one has too: only middles are added.
+    const corners = new Set(positions(painted).map((p) => p.join()));
+    for (const p of positions(flat)) {
+      expect(corners.has(p.join())).toBe(true);
+    }
+    expect(painted.vertexCount).toBeGreaterThanOrEqual(flat.vertexCount);
     expect(painted.bytesView()).not.toEqual(flat.bytesView());
+  });
+});
+
+describe("a split face", () => {
+  const face: [Vec3, Vec3, Vec3] = [[0, 0, 0], [1, 0, 0], [0, 1, 0]];
+  const everyFace = { ...PAINTED_LOOK, split: 1 };
+
+  it("is one face under the flat look", () => {
+    const b = new MeshBuilder();
+    facet(b, face, { colour: [0.5, 0.5, 0.5], inside: [0, 0, -1] }, 3);
+    expect(b.vertexCount).toBe(3);
+  });
+
+  it("is three small faces round a middle pushed out on some seeds and in on others", () => {
+    let out = 0;
+    let dent = 0;
+    for (let seed = 0; seed < 200; seed += 1) {
+      const b = new MeshBuilder();
+      facet(b, face, { colour: [0.5, 0.5, 0.5], inside: [0, 0, -1] }, seed, everyFace);
+      expect(b.vertexCount).toBe(9);
+      const middle = positions(b)[2]!;
+      expect(Math.abs(middle[2])).toBeLessThanOrEqual(PAINTED_LOOK.bump * 1.2 + 1e-6);
+      out += middle[2] > 0.01 ? 1 : 0;
+      dent += middle[2] < -0.01 ? 1 : 0;
+    }
+    expect(out).toBeGreaterThan(50);
+    expect(dent).toBeGreaterThan(50);
   });
 });
 
@@ -125,6 +159,18 @@ describe("the shaders' painted light", () => {
       const source = worldWgsl(clips);
       expect(source).toContain("if (frame.shading.w > 0.5)");
       expect(source).toContain("fn painted(");
+    }
+  });
+
+  it("bakes three colours of light a step into both, from the one palette", () => {
+    const glsl = paintConstants("const vec3", (c) => `vec3(${c.join(", ")})`);
+    expect(glsl.split("\n")).toHaveLength(9);
+    expect(glsl).toContain(`const vec3 PAINT_WARM_1 = vec3(${PAINT.warm[1].join(", ")});`);
+    for (const name of ["WARM", "COOL", "DEEP"]) {
+      for (const i of [0, 1, 2]) {
+        expect(WORLD_FRAGMENT).toContain(`PAINT_${name}_${i} = vec3(`);
+        expect(worldWgsl(false)).toContain(`PAINT_${name}_${i} = vec3f(`);
+      }
     }
   });
 });

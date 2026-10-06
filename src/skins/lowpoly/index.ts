@@ -17,7 +17,7 @@
  * | `terrain-mesh.ts`, `scenery-mesh.ts` | ground, lakes, landforms; each scenery species |
  * | `hero-mesh.ts`, `actor-mesh.ts` | the rigged hero; slimes, fireballs, bursts |
  * | `mesh.ts`, `primitives.ts`, `palette.ts` | flat-shaded triangles, the solids, the skin's colours |
- * | `look.ts`, `ground-relief.ts` | `?look=`: flat, or painted (stepped hue-shifted light, hills) |
+ * | `look.ts`, `ground-relief.ts`, `ground-facets.ts` | `?look=`: flat, or painted (stepped light in many colours, hills of planes and facets) |
  */
 
 import { FrameClock } from "../../engine/loop";

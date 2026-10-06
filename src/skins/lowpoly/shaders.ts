@@ -22,6 +22,18 @@ import { WATER_GLSL } from "./water-glsl";
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
 const vec3 = (colour: Rgb): string => `vec3(${colour.map(float).join(", ")})`;
 
+/**
+ * `PAINT`'s colours of light as constants, `PAINT_WARM_0` to `PAINT_DEEP_2`, in
+ * either shading language: `declare` is `const vec3` or `const`, `spell` its
+ * vector constructor. Shared so the GLSL and the WGSL cannot disagree on one.
+ */
+export function paintConstants(declare: string, spell: (colour: Rgb) => string): string {
+  const steps = { WARM: PAINT.warm, COOL: PAINT.cool, DEEP: PAINT.deep };
+  return Object.entries(steps)
+    .flatMap(([name, colours]) => colours.map((colour, i) => `${declare} PAINT_${name}_${i} = ${spell(colour)};`))
+    .join("\n");
+}
+
 export const WORLD_VERTEX = `#version 300 es
 precision highp float;
 
@@ -158,11 +170,14 @@ uniform float u_mirror;   // -1 while drawing the reflection
 out vec4 outColour;
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
-const vec3 PAINT_WARM = ${vec3(PAINT.warm)};
-const vec3 PAINT_COOL = ${vec3(PAINT.cool)};
-const vec3 PAINT_DEEP = ${vec3(PAINT.deep)};
+${paintConstants("const vec3", vec3)}
 
 ${WATER_GLSL}
+
+/** One of three by a share 0..1: a face's own pick from a step's colours of light. */
+vec3 pick3(vec3 a, vec3 b, vec3 c, float share) {
+  return share < 0.3333 ? a : (share < 0.6667 ? b : c);
+}
 
 /**
  * The painted look's light (\`look.ts\`): a few flat steps, not a slope. A body
@@ -170,10 +185,13 @@ ${WATER_GLSL}
  * less than level ground does, so the open field is always the middle step and
  * only a hill's flanks cross a line. Each face nudges its own lines a little -
  * read off its colour, which \`faceTint\` already made its own - so the steps
- * fall unevenly, as a painter's would.
+ * fall unevenly, as a painter's would; and each picks its own colour of light
+ * from \`PAINT\`'s three a step, so the sun is yellow on one plane and orange on
+ * the next.
  */
 vec3 painted(vec3 colour, vec3 n, bool ground) {
-  float own = fract(sin(dot(colour, vec3(12.9898, 78.233, 37.719))) * 43758.5453) - 0.5;
+  float seed = fract(sin(dot(colour, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  float own = seed - 0.5;
   float facing = dot(n, u_lightDir);
   float nudge = ground ? ${float(PAINT_STEPS.groundNudge)} : ${float(PAINT_STEPS.bodyNudge)};
   float level = (ground ? facing - u_lightDir.z : max(facing, 0.0)) * u_shading.x + own * nudge;
@@ -181,10 +199,13 @@ vec3 painted(vec3 colour, vec3 n, bool ground) {
   float bright = smoothstep(bar.y - ${float(PAINT_STEPS.edge)}, bar.y + ${float(PAINT_STEPS.edge)}, level);
   float shade = 1.0 - smoothstep(bar.x - ${float(PAINT_STEPS.edge)}, bar.x + ${float(PAINT_STEPS.edge)}, level);
   float deep = ground ? 0.0 : 1.0 - smoothstep(-0.3, -0.2, n.z);
+  vec3 warm = pick3(PAINT_WARM_0, PAINT_WARM_1, PAINT_WARM_2, fract(seed * 3.7));
+  vec3 cool = pick3(PAINT_COOL_0, PAINT_COOL_1, PAINT_COOL_2, fract(seed * 7.3));
+  vec3 under = pick3(PAINT_DEEP_0, PAINT_DEEP_1, PAINT_DEEP_2, fract(seed * 11.9));
   vec3 c = colour * (0.75 + 0.3 * u_shading.x);
-  c = mix(c, mix(colour, PAINT_WARM, 0.38) * 1.1, bright);
-  c = mix(c, mix(colour, PAINT_COOL, 0.42) * 0.78, shade);
-  c = mix(c, mix(colour, PAINT_DEEP, 0.6) * 0.62, deep);
+  c = mix(c, mix(colour, warm, ${float(PAINT_STEPS.warmMix)}) * 1.1, bright);
+  c = mix(c, mix(colour, cool, ${float(PAINT_STEPS.coolMix)}) * 0.8, shade);
+  c = mix(c, mix(colour, under, ${float(PAINT_STEPS.deepMix)}) * 0.65, deep);
   return c * u_ambient;
 }
 

@@ -9,7 +9,7 @@
 
 import { FLAT_LOOK, type Look } from "./look";
 import { hash01, faceTint } from "./palette";
-import { MeshBuilder, type FaceStyle, type Vec3 } from "./mesh";
+import { faceNormal, MeshBuilder, type FaceStyle, type Vec3 } from "./mesh";
 
 type Style = Omit<FaceStyle, "inside">;
 
@@ -145,11 +145,37 @@ export function blob(b: MeshBuilder, centre: Vec3, radii: Vec3, style: Style, se
     ];
   });
   ICO_FACES.forEach(([i, j, k], face) => {
-    b.tri(corners[i]!, corners[j]!, corners[k]!, {
-      ...style,
-      colour: faceTint(style.colour, seed + face * 104729, look, shape.crown === true),
-      inside: centre,
-    });
+    const faceSeed = seed + face * 104729;
+    facet(b, [corners[i]!, corners[j]!, corners[k]!], { ...style, colour: faceTint(style.colour, faceSeed, look, shape.crown === true), inside: centre }, faceSeed, look);
+  });
+}
+
+/** How far a split face's three small faces stray in colour from it, either way: enough to light apart. */
+const SPLIT_TINT = 0.06;
+
+/**
+ * One face - or, under a look that splits faces (`look.split` of them, by
+ * seed), three small faces round its middle, the middle pushed out along the
+ * face's normal (a bump) or in (a dent) by up to `look.bump` of the face's
+ * size. So a solid's faces are not all one size, and not all convex. Each small
+ * face is tinted a hair apart, so the shaders pick each its own colour of light.
+ */
+export function facet(b: MeshBuilder, [p, q, r]: readonly [Vec3, Vec3, Vec3], style: FaceStyle, seed: number, look: Look = FLAT_LOOK): void {
+  const normal = look.split > 0 && hash01(seed + 0x5b1) < look.split ? faceNormal(p, q, r) : null;
+  if (normal === null) {
+    b.tri(p, q, r, style);
+    return;
+  }
+  const centroid: Vec3 = [(p[0] + q[0] + r[0]) / 3, (p[1] + q[1] + r[1]) / 3, (p[2] + q[2] + r[2]) / 3];
+  const inside = style.inside;
+  const outward =
+    inside === undefined || normal[0] * (centroid[0] - inside[0]) + normal[1] * (centroid[1] - inside[1]) + normal[2] * (centroid[2] - inside[2]) >= 0 ? 1 : -1;
+  const size = (Math.hypot(...sub(q, p)) + Math.hypot(...sub(r, q)) + Math.hypot(...sub(p, r))) / 3;
+  const push = outward * (hash01(seed + 0x5b3) * 2 - 1) * look.bump * size;
+  const middle: Vec3 = [centroid[0] + normal[0] * push, centroid[1] + normal[1] * push, centroid[2] + normal[2] * push];
+  const tint = { ...look, hueDrift: 0, faceSpread: SPLIT_TINT };
+  [[p, q], [q, r], [r, p]].forEach(([from, to], k) => {
+    b.tri(from!, to!, middle, { ...style, colour: faceTint(style.colour, seed + 0x5c0 + k, tint) });
   });
 }
 
@@ -197,11 +223,8 @@ export function frond(b: MeshBuilder, shape: FrondShape, style: Style, seed: num
     return [centre[0] + Math.cos(angle) * reach, centre[1] + Math.sin(angle) * reach, z];
   });
   rim.forEach((corner, k) => {
-    b.tri(apex, corner, rim[(k + 1) % rim.length]!, {
-      ...style,
-      colour: faceTint(style.colour, seed + k * 104729, look, true),
-      inside: below,
-    });
+    const faceSeed = seed + k * 104729;
+    facet(b, [apex, corner, rim[(k + 1) % rim.length]!], { ...style, colour: faceTint(style.colour, faceSeed, look, true), inside: below }, faceSeed, look);
   });
 }
 
