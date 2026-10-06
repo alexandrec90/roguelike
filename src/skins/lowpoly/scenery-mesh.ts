@@ -50,7 +50,7 @@ export function shadowUnder(sheer: MeshBuilder, at: Vec3, radius: number): void 
 
 /** A five-sided trunk `height` tall, tapering from `radius` to a little over half of it. */
 function trunk(solid: MeshBuilder, at: Vec3, height: number, radius: number, anchor: readonly [number, number]): void {
-  frustum(solid, { from: at, to: [at[0], at[1], at[2] + height], r0: radius, r1: radius * 0.6, sides: 5 }, { colour: LOWPOLY.bark, anchor });
+  frustum(solid, { from: at, to: [at[0], at[1], at[2] + height], r0: radius, r1: radius * 0.6, sides: 5 }, { colour: LOWPOLY.bark, kind: Kind.foliage, anchor });
 }
 
 function conifer(solid: MeshBuilder, at: Vec3, height: number, seed: number): number {
@@ -64,14 +64,14 @@ function conifer(solid: MeshBuilder, at: Vec3, height: number, seed: number): nu
     const radius = height * 0.24 * (1 - share * 0.55);
     const z = at[2] + height * 0.15 + share * (height - base) * 0.75;
     const colour = tier === tiers - 1 ? mixRgb(LOWPOLY.pine, LOWPOLY.snow, 0.35) : LOWPOLY.pine;
-    cone(solid, { base: [at[0], at[1], z], height: base * (1 - share * 0.3), radius, sides: 6, phase: phase + tier }, { colour, anchor });
+    cone(solid, { base: [at[0], at[1], z], height: base * (1 - share * 0.3), radius, sides: 6, phase: phase + tier }, { colour, kind: Kind.foliage, anchor });
   }
   return height * 0.2;
 }
 
 function bush(solid: MeshBuilder, at: Vec3, height: number, seed: number): number {
   const r = height * 0.55;
-  blob(solid, [at[0], at[1], at[2] + r * 0.6], [r, r, r * 0.75], { colour: LOWPOLY.bush, anchor: [at[0], at[1]] }, seed, 0.22);
+  blob(solid, [at[0], at[1], at[2] + r * 0.6], [r, r, r * 0.75], { colour: LOWPOLY.bush, kind: Kind.foliage, anchor: [at[0], at[1]] }, seed, 0.22);
   return r;
 }
 
@@ -89,8 +89,8 @@ function mushrooms(solid: MeshBuilder, at: Vec3, height: number, seed: number): 
     const ring = 0.45;
     const h = height * (0.6 + hash01(seed + i) * 0.4);
     const foot: Vec3 = [at[0] + Math.cos(angle) * ring, at[1] + Math.sin(angle) * ring, at[2]];
-    frustum(solid, { from: foot, to: [foot[0], foot[1], foot[2] + h], r0: 0.05, r1: 0.04, sides: 4 }, { colour: LOWPOLY.mushroomStem, anchor });
-    cone(solid, { base: [foot[0], foot[1], foot[2] + h * 0.9], height: h * 0.4, radius: h * 0.45, sides: 6 }, { colour: LOWPOLY.mushroomCap, anchor });
+    frustum(solid, { from: foot, to: [foot[0], foot[1], foot[2] + h], r0: 0.05, r1: 0.04, sides: 4 }, { colour: LOWPOLY.mushroomStem, kind: Kind.sprig, anchor });
+    cone(solid, { base: [foot[0], foot[1], foot[2] + h * 0.9], height: h * 0.4, radius: h * 0.45, sides: 6 }, { colour: LOWPOLY.mushroomCap, kind: Kind.sprig, anchor });
   }
   return 0.6;
 }

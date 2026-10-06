@@ -26,6 +26,8 @@ import { WetWorld } from "./wet-world";
 import { heroCutaway } from "./cutaway";
 import { heroHeightPx } from "./hero-mesh";
 import { fieldRows, lowpolyView, type LowpolyView } from "./placement";
+import { MAX_PUSHES, windUniform } from "./sway";
+import { pushesOf } from "./sway-pushes";
 import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE, groundInView, MIRROR_ROWS, type ChunkMesh } from "./world-chunks";
 
 /** Where the session opens: the pixel skin's start, so a switch lands in the same field. */
@@ -51,6 +53,7 @@ export class LowpolyGame {
   private readonly chunks: LoadedChunk[] = [];
   private readonly pending: { cx: number; cy: number }[];
   private readonly actors = new ActorMeshes();
+  private readonly pushes = new Float32Array(MAX_PUSHES * 4);
   private readonly dynamic: Record<ActorMeshKey, DrawableHandle>;
   private shownYaw: number;
   view: LowpolyView;
@@ -117,28 +120,33 @@ export class LowpolyGame {
     this.buildActors(live);
     const weather = this.wet.weather;
     const atmosphere = this.clock.atmosphere(weather.overcast);
+    const sway = {
+      wind: windUniform(this.clock.elapsedMs, weather.wind),
+      pushes: pushesOf(
+        { player: this.hero.player, live, slimes: this.encounter.slimes.slimes, fireballs: this.encounter.fireballs, bursts: this.encounter.bursts },
+        this.pushes,
+      ),
+    };
     const shake = this.clock.shake();
     const cut = heroCutaway(this.view, live, this.heroHeight);
     const cutaway = cut === undefined ? undefined : { ...cut, x: cut.x + shake.x, y: cut.y + shake.y };
-    const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), width, height, cutaway };
+    const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), sway, width, height, cutaway };
     const turn = where.turn;
     const chunkCall = (drawable: DrawableHandle, mesh: ChunkMesh): DrawCall => ({ drawable, offset: asPair(chunkOffset(mesh, live)), turn });
     const rows = fieldRows(this.view);
+    const mirrorable = this.chunks.filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows, MIRROR_ROWS));
+    const onField = this.chunks.filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows));
     const actors: DrawCall[] = [
       { drawable: this.dynamic.actorSolid, offset: [0, 0], turn },
       { drawable: this.dynamic.heroSolid, offset: [0, 0], turn: 0 },
     ];
     this.renderer.render(frame, {
       mirrored: [
-        ...this.chunks
-          .filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows, MIRROR_ROWS))
-          .flatMap((chunk) => [chunkCall(chunk.land, chunk.mesh), chunkCall(chunk.solid, chunk.mesh)]),
+        ...mirrorable.flatMap((chunk) => [chunkCall(chunk.land, chunk.mesh), chunkCall(chunk.solid, chunk.mesh)]),
         ...actors,
       ],
       lands: this.chunks.map((chunk) => chunkCall(chunk.land, chunk.mesh)),
-      grounds: this.chunks
-        .filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows))
-        .map((chunk) => chunkCall(chunk.ground, chunk.mesh)),
+      grounds: onField.map((chunk) => chunkCall(chunk.ground, chunk.mesh)),
       solids: [
         ...this.chunks.map((chunk) => chunkCall(chunk.solid, chunk.mesh)),
         { drawable: this.dynamic.actorSolid, offset: [0, 0], turn },
