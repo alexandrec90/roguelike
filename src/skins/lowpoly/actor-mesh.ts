@@ -21,6 +21,7 @@ import { Kind, MeshBuilder, mixRgb, rgb, type Rgb, type Vec3 } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { blob, disc } from "./primitives";
 import { shadowUnder } from "./scenery-mesh";
+import { standingHeight } from "./terrain-mesh";
 
 const SLIME_COLOURS: Readonly<Record<SlimeVariant, Rgb>> = {
   green: rgb("#6cc98a"),
@@ -43,11 +44,12 @@ export function slimeMesh(solid: MeshBuilder, sheer: MeshBuilder, slime: Slime, 
   const squash = slime.mode === "dying" ? 0 : slime.squash.value;
   const wide = SLIME_RADIUS * (1 - squash * 0.5) * (1 + melt * 0.8);
   const tall = SLIME_RADIUS * 0.85 * (1 + squash) * (1 - melt * 0.85);
-  const lift = slime.lift / WALL_RISE;
+  const ground = standingHeight(slime.at);
+  const lift = ground + slime.lift / WALL_RISE;
   const base = SLIME_COLOURS[slime.variant];
   const colour = slime.flashMs > 0 ? mixRgb(base, [1, 1, 1], 0.75) : base;
   blob(solid, [x, y, lift + tall * 0.8], [wide, wide, tall], { colour, anchor: [x, y] }, slime.seed, 0.12);
-  shadowUnder(sheer, [x, y, 0], wide * 0.9);
+  shadowUnder(sheer, [x, y, ground], wide * 0.9);
 }
 
 /** A fireball: a bright faceted core at hand height, a dimmer shell round it. */

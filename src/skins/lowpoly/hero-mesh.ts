@@ -50,12 +50,14 @@ export interface HeroMeshOptions {
   readonly enchanted: boolean;
   /** Tiles he stands below the ground - his shins in a lake. */
   readonly sunk: number;
+  /** Tiles of land under his foot - a landform's lower slope (`standingHeight`); 0 on open ground. */
+  readonly ground?: number;
 }
 
 /** The posed hero, in local tiles round his foot at the origin. */
 export function heroMesh(b: MeshBuilder, pose: RigPose, options: HeroMeshOptions): void {
   const solved = solveModel(HERO_EQUIPPED, pose, { yaw: options.yaw });
-  const lift = -options.sunk;
+  const lift = (options.ground ?? 0) - options.sunk;
   for (const [bone, pieces] of Object.entries(VOLUMES)) {
     const segment = solved[bone];
     if (segment === undefined) {
@@ -122,8 +124,8 @@ const TRAIL_ALPHA = 0.8;
  * Sheer and unlit, white fading to bone - or fire when the blade burns - and depth
  * tested against him, so the part swept behind his back is hidden by it.
  */
-export function swingTrailMesh(b: MeshBuilder, sweep: readonly BladeSample[], options: { readonly enchanted: boolean; readonly sunk: number }): void {
-  const lift = -options.sunk;
+export function swingTrailMesh(b: MeshBuilder, sweep: readonly BladeSample[], options: Omit<HeroMeshOptions, "yaw">): void {
+  const lift = (options.ground ?? 0) - options.sunk;
   const [head, tail] = options.enchanted ? [LOWPOLY.fireCore, LOWPOLY.fire] : [LOWPOLY.trail, LOWPOLY.bone];
   for (let index = 0; index + 1 < sweep.length; index += 1) {
     const newer = sweep[index] as BladeSample;

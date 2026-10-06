@@ -17,6 +17,7 @@ import { heroMesh, swingTrailMesh } from "./hero-mesh";
 import { looseSkeleton } from "./hero-sway";
 import { MeshBuilder } from "./mesh";
 import { shadowUnder } from "./scenery-mesh";
+import { standingHeight } from "./terrain-mesh";
 
 /** How far into a lake the hero's shins go, tiles, at the edge of the deep water. */
 const WADE_SINK = 0.4;
@@ -53,13 +54,14 @@ export class ActorMeshes {
       b[key].reset();
     }
     const { player, live, encounter } = input;
+    const ground = standingHeight(live);
     const tracks = tracksOf(player, input.elapsedMs);
-    const sunk = wadeDepth(live) * WADE_SINK;
-    heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), { yaw: input.yaw, enchanted: player.enchanted, sunk });
-    shadowUnder(b.heroSheer, [0, 0, 0], HERO_SHADOW);
+    const stance = { enchanted: player.enchanted, sunk: wadeDepth(live) * WADE_SINK, ground };
+    heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), { yaw: input.yaw, ...stance });
+    shadowUnder(b.heroSheer, [0, 0, ground], HERO_SHADOW);
     if (player.attackMs !== undefined) {
       const sweep = bladeSweep(player.attackMs, layeredPose({ ...tracks, swingMs: undefined }), { yaw: input.yaw });
-      swingTrailMesh(b.heroSheer, sweep, { enchanted: player.enchanted, sunk });
+      swingTrailMesh(b.heroSheer, sweep, stance);
     }
     for (const slime of encounter.slimes.slimes) {
       slimeMesh(b.actorSolid, b.actorSheer, slime, live);

@@ -64,6 +64,16 @@ describe("the planet in chunks", () => {
     }
   });
 
+  it("keeps the landforms apart from the bodies, so only they can be cut round the hero", () => {
+    const landform = planetLandforms()[0]!;
+    const chunk = buildChunk(Math.floor(landform.x / CHUNK_TILES), Math.floor(landform.y / CHUNK_TILES));
+    const kinds = (bytes: Uint8Array): Set<number> =>
+      new Set(Array.from({ length: bytes.byteLength / VERTEX_BYTES }, (_, i) => bytes[i * VERTEX_BYTES + 23]!));
+    expect(chunk.land.byteLength).toBeGreaterThan(0);
+    expect(kinds(chunk.land)).toEqual(new Set([Kind.land]));
+    expect(kinds(chunk.solid).has(Kind.land)).toBe(false);
+  });
+
   it("meshes every landform coarse enough to be low poly and fine enough for a tower's walls", () => {
     for (const landform of planetLandforms()) {
       const step = landformStep(landform);
@@ -140,6 +150,16 @@ describe("the swing's trail", () => {
     swingTrailMesh(steel, sweep, { enchanted: false, sunk: 0 });
     swingTrailMesh(fire, sweep, { enchanted: true, sunk: 0 });
     expect(fire.bytesView()).not.toEqual(steel.bytesView());
+  });
+
+  it("stands on the slope with him: the land under his foot lifts it as a lake sinks it", () => {
+    const trail = (ground: number, sunk: number) => {
+      const b = new MeshBuilder();
+      swingTrailMesh(b, sweep, { enchanted: false, sunk, ground });
+      return b.bytesView();
+    };
+    expect(trail(0.5, 0)).not.toEqual(trail(0, 0));
+    expect(trail(0.5, 0)).toEqual(trail(0, -0.5));
   });
 
   it("draws nothing from fewer than two samples", () => {
