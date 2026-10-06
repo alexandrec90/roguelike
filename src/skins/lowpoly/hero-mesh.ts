@@ -49,12 +49,14 @@ export interface HeroMeshOptions {
   readonly enchanted: boolean;
   /** Tiles he stands below the ground - his shins in a lake. */
   readonly sunk: number;
+  /** Tiles of land under his foot - a landform's lower slope (`standingHeight`); 0 on open ground. */
+  readonly ground?: number;
 }
 
 /** The posed hero, in local tiles round his foot at the origin. */
 export function heroMesh(b: MeshBuilder, pose: RigPose, options: HeroMeshOptions): void {
   const solved = solveModel(HERO_EQUIPPED, pose, { yaw: options.yaw });
-  const lift = -options.sunk;
+  const lift = (options.ground ?? 0) - options.sunk;
   for (const [bone, pieces] of Object.entries(VOLUMES)) {
     const segment = solved[bone];
     if (segment === undefined) {

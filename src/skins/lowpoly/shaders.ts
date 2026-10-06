@@ -45,6 +45,7 @@ out vec3 v_normal;
 out float v_rows;
 out vec2 v_planet;
 out vec2 v_away;
+out float v_ahead;
 flat out int v_kind;
 flat out float v_flip;
 
@@ -123,6 +124,7 @@ void main() {
   v_rows = rows;
   v_planet = a_pos.xy + u_offset + u_hero;
   v_away = a_pos.xy + u_offset;
+  v_ahead = foot.y + off.y * scale;
   v_kind = kind;
   v_flip = u_flip;
 }
@@ -149,6 +151,10 @@ const CLIP_GLSL = `
   // their sunken images land in the middle of every puddle.
   if (u_mirror < 0.0 && v_rows > ROLL_ROWS) {
     discard;
+  }
+  // The window round the hero (\`cutaway.ts\`): land nearer than his foot, inside the oval.
+  if (v_kind == ${Kind.land} && u_mirror > 0.0 && u_cut.z > 0.0 && v_ahead < 0.0 && cutAway(gl_FragCoord.xy)) {
+    discard;
   }`;
 
 const worldFragment = (clips: boolean): string => `#version 300 es
@@ -159,9 +165,12 @@ in vec3 v_normal;
 in float v_rows;
 in vec2 v_planet;
 in vec2 v_away;
+in float v_ahead;
 flat in int v_kind;
 flat in float v_flip;
 
+uniform vec4 u_view;      // logical width, height, foot x, foot y
+uniform vec4 u_cut;       // the window round the hero, logical pixels: centre, radii; radius 0 for none
 uniform vec3 u_lightDir;  // toward the light, local frame
 uniform vec3 u_ambient;   // the hour's colour, multiplied over everything lit
 uniform vec3 u_haze;      // the air at the far edge of the world
@@ -181,6 +190,17 @@ vec3 lit(vec3 colour) {
   float lambert = max(dot(n, u_lightDir), 0.0);
   float sky = 0.5 + 0.5 * n.z;
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x) * u_ambient;
+}
+
+const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+/** Whether the window takes this device pixel: inside the oval, its rim dithered over the outer fifth. */
+bool cutAway(vec2 fragment) {
+  vec2 logical = vec2(fragment.x / u_resolution.x, 1.0 - fragment.y / u_resolution.y) * u_view.xy;
+  float distance = length((logical - u_cut.xy) / u_cut.zw);
+  ivec2 cell = ivec2(mod(fragment, 4.0));
+  float threshold = (BAYER[cell.y * 4 + cell.x] + 0.5) / 16.0;
+  return distance < 0.8 || (distance < 1.0 && (1.0 - distance) / 0.2 > threshold);
 }
 
 void main() {${clips ? CLIP_GLSL : ""}

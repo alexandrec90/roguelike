@@ -393,3 +393,5 @@ Cross-reference this project's own scoped rules here, one line each.
   its projection twin of the pixel skin's, body anchors on the lip, and its budget.
 - **`/art-check`** (`.claude/skills/art-check/`) — the browser capture ritual that turns
   "the tests are green" into "the picture is right". Every art change ends there.
+- **`/preview`** (`.claude/skills/preview/`) — start this worktree's dev server and hand
+  the user the URL it printed, as links to the game, each skin and the labs.
