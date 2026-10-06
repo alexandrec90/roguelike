@@ -132,10 +132,11 @@ export class WebGpuBackend implements LowpolyBackend {
     if (this.targets.fit(frame.width, frame.height) || this.groups === undefined) {
       this.groups = this.bindGroups();
     }
-    // Mirror pass, then the screen's ground, solids and sheers: draw n is entry n.
+    // Mirror pass, then the screen's ground, land, solids and sheers: draw n is entry n.
     const lists = [
       { calls: scene.mirrored, mirror: -1 },
       { calls: scene.grounds, mirror: 1 },
+      { calls: scene.lands, mirror: 1 },
       { calls: scene.solids, mirror: 1 },
       { calls: scene.sheers, mirror: 1 },
     ];
@@ -171,10 +172,13 @@ export class WebGpuBackend implements LowpolyBackend {
     screen.setPipeline(this.pipelines.worldGround);
     screen.setBindGroup(0, groups[1]);
     drawCalls(screen, scene.grounds, first(1));
+    // The land can discard only on a frame with a window in it: elsewhere it keeps the early depth test.
+    screen.setPipeline(frame.cutaway === undefined ? this.pipelines.worldSolid : this.pipelines.worldGround);
+    drawCalls(screen, scene.lands, first(2));
     screen.setPipeline(this.pipelines.worldSolid);
-    drawCalls(screen, scene.solids, first(2));
+    drawCalls(screen, scene.solids, first(3));
     screen.setPipeline(this.pipelines.worldSheer);
-    drawCalls(screen, scene.sheers, first(3));
+    drawCalls(screen, scene.sheers, first(4));
     if (scene.rain.strength > 0) {
       screen.setPipeline(this.pipelines.rain);
       screen.setBindGroup(0, this.passesGroup);

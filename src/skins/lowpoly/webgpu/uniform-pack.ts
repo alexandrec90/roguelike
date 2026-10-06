@@ -15,8 +15,8 @@ import { DEPTH_FAR, DEPTH_NEAR } from "../placement";
 import { lightDirection } from "../sky-light";
 import { heroCellOf } from "./waves";
 
-/** Floats in `Frame` (WGSL): ten `vec4f`. */
-export const FRAME_FLOATS = 40;
+/** Floats in `Frame` (WGSL): eleven `vec4f`. */
+export const FRAME_FLOATS = 44;
 
 /** Floats per entry of `draws` (WGSL `Draw`): two `vec4f`. */
 export const DRAW_FLOATS = 8;
@@ -36,6 +36,7 @@ export const DRAW_FLOATS = 8;
  * | shading | sun | shadow strength | daylight | - |
  * | water | level | wetness | rain | seconds |
  * | sim | hero cell x | hero cell y | - | - |
+ * | cut | window centre x | centre y | radius x (0: no window) | radius y |
  */
 export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32Array(FRAME_FLOATS)): Float32Array {
   const { view, atmosphere, water } = frame;
@@ -52,6 +53,8 @@ export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32A
   out.set([0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight, 0], 28);
   out.set([water.level, water.wetness, water.rain, water.seconds], 32);
   out.set([heroCellOf(water.hero[0]), heroCellOf(water.hero[1]), 0, 0], 36);
+  const cut = frame.cutaway;
+  out.set(cut === undefined ? [0, 0, 0, 1] : [cut.x, cut.y, cut.radiusX, cut.radiusY], 40);
   return out;
 }
 
