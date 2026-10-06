@@ -37,7 +37,10 @@ describe("sampleClipFrames", () => {
   it("ends a one-shot on its settle pose, and a loop before the seam", () => {
     const swing = sampleClipFrames(HERO_EQUIPPED, SWING, 8);
     const settled = sampleClipFrames(HERO_EQUIPPED, SWING, 1);
-    expect(swing[7]?.rows.join("\n")).not.toBe(swing[0]?.rows.join("\n"));
+    // SWING leaves guard and settles back to it, so its last frame is its first
+    // only if the strip reaches t = 1; stopped short of it, the blade is still dropping.
+    expect(swing[7]?.rows.join("\n")).toBe(swing[0]?.rows.join("\n"));
+    expect(swing[3]?.rows.join("\n")).not.toBe(swing[0]?.rows.join("\n"));
 
     const idle = sampleClipFrames(HERO_EQUIPPED, IDLE, 8);
     expect(idle[7]?.rows.join("\n")).not.toBe(idle[0]?.rows.join("\n"));

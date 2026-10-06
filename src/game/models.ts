@@ -293,39 +293,67 @@ export const WALK: Clip = {
 };
 
 /**
- * The sword swing, through all three axes: raised up and *behind* the head
- * (negative y), then swept fast down and across the front (positive y), with
- * an overshoot and settle. The sword bone is keyed independently of the arm
- * so the blade leads the wrist the way a real swing does.
+ * The swing's beats, as shares of its length: the windup peaks, the blade
+ * crosses dead ahead (when a blow lands), and the follow-through is held.
+ */
+export const SWING_BEATS = { windup: 0.2, contact: 0.45, through: 0.74 } as const;
+
+/**
+ * The sword swing: one flat, horizontal cut at chest height. A short coil to
+ * his right, then the blade is swept level round his front - right, ahead,
+ * left - and held out at his left side before it drops back to guard. About
+ * 200° of arc in under 170 ms, most of it in the middle 90.
+ *
+ * The cut stays in the half circle before him on purpose. Depth runs up and
+ * down the screen in this camera, so blade travel *behind* his shoulder draws
+ * as a vertical streak; kept in front, the whole sweep is one wide, shallow
+ * crescent, and that is what reads as horizontal.
+ *
+ * The sweep is keyed every ~45° because a key is a straight line between two
+ * directions: spaced closer than that, the blade's tip stays on a circle, so
+ * the arc is the arc and the trail it leaves is a clean crescent. The sword is
+ * keyed apart from the arm, so the blade leads the wrist round the cut.
  */
 export const SWING: Clip = {
   id: "swing",
-  durationMs: 520,
+  durationMs: 380,
   loop: false,
   keys: [
-    { t: 0, bones: { "arm-r": vec3(0.9, 0.25, -0.9) } },
+    { t: 0, bones: { "arm-r": vec3(0.9, 0.25, -0.9), sword: vec3(0.9, 0.25, -0.9), torso: vec3(0, 0, 1) } },
     {
-      // Anticipation: wind up high and behind.
-      t: 0.3,
+      // Anticipation: coil to the right, blade level and just behind his side.
+      t: SWING_BEATS.windup,
       bones: {
-        "arm-r": vec3(0.5, -0.7, 0.9),
-        sword: vec3(0.3, -0.9, 0.8),
-        torso: vec3(-0.15, -0.2, 1),
+        "arm-r": vec3(0.85, -0.45, 0),
+        sword: vec3(0.96, -0.29, 0.05),
+        torso: vec3(0.12, -0.12, 1),
+      },
+    },
+    { t: 0.3, bones: { "arm-r": vec3(0.9, 0.45, -0.15), sword: vec3(0.87, 0.5, -0.03) } },
+    { t: 0.375, bones: { "arm-r": vec3(0.55, 0.85, -0.2), sword: vec3(0.42, 0.9, -0.05) } },
+    {
+      // Contact: level and dead ahead, blade ahead of the wrist.
+      t: SWING_BEATS.contact,
+      bones: {
+        "arm-r": vec3(0.15, 1, -0.22),
+        sword: vec3(-0.09, 1, -0.06),
+        torso: vec3(0, 0.15, 1),
+      },
+    },
+    { t: 0.53, bones: { "arm-r": vec3(-0.25, 0.95, -0.28), sword: vec3(-0.71, 0.71, -0.08) } },
+    {
+      // Follow-through: carried round to his left side.
+      t: 0.64,
+      bones: {
+        "arm-r": vec3(-0.45, 0.8, -0.35),
+        sword: vec3(-1, 0.09, -0.12),
+        torso: vec3(-0.12, 0.12, 1),
       },
     },
     {
-      // Contact: fast, in front, blade ahead of the wrist.
-      t: 0.45,
-      bones: {
-        "arm-r": vec3(0.7, 1, -0.2),
-        sword: vec3(0.3, 1, -0.7),
-        torso: vec3(0.15, 0.25, 1),
-      },
-    },
-    {
-      // Overshoot past the target line.
-      t: 0.6,
-      bones: { "arm-r": vec3(0.3, 1, -0.8), sword: vec3(0, 0.9, -1) },
+      // Held a beat as it bleeds off, so the cut reads as finished.
+      t: SWING_BEATS.through,
+      bones: { "arm-r": vec3(-0.42, 0.78, -0.4), sword: vec3(-1, -0.09, -0.16) },
     },
     {
       // Settle back to guard.

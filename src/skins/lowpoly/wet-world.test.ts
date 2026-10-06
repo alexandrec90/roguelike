@@ -101,7 +101,9 @@ describe("the water and rain shaders", () => {
     expect(WATER_GLSL).toContain(`uniform vec4 u_ripples[${MAX_RIPPLES}]`);
     expect(WORLD_FRAGMENT).toContain("waterAt(v_planet)");
     expect(WORLD_FRAGMENT).toContain("texture(u_reflect");
-    expect(WORLD_VERTEX).toContain("a_pos.z * u_mirror");
+    // Height mirrored after the sway has bent it, so a reflection leans with its plant.
+    expect(WORLD_VERTEX).toContain("float height = a_pos.z + sway.z;");
+    expect(WORLD_VERTEX).toContain("height * u_mirror");
   });
 
   it("draw a lake where the ground draws a puddle, from the mask's second channel", () => {

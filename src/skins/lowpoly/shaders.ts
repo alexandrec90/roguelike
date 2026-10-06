@@ -16,6 +16,7 @@
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
 import { Kind } from "./mesh";
+import { MAX_PUSHES, SWAY_GLSL } from "./sway";
 import { TRIP } from "./trip";
 import { TRIP_GLSL } from "./trip-shaders";
 import { WATER_GLSL } from "./water-glsl";
@@ -39,6 +40,8 @@ uniform vec2 u_shake;    // logical pixels
 uniform vec2 u_hero;     // the hero's planet point
 uniform float u_mirror;  // 1, or -1 to draw the world reflected in still water at z = 0
 uniform float u_flip;    // 1 to draw the world again overhead, upside down about the horizon line (the trip's sky)
+uniform vec4 u_wind;     // carrier phase, turbulence phase, gust strength (sway.ts)
+uniform vec4 u_pushes[${MAX_PUSHES}];  // planet x, y from the hero, front radius, strength
 
 out vec4 v_colour;
 out vec3 v_normal;
@@ -61,7 +64,7 @@ const float WALL_RISE = ${float(WALL_RISE)};
 vec2 turned(vec2 p) {
   return vec2(p.x * u_rot.x - p.y * u_rot.y, p.x * u_rot.y + p.y * u_rot.x);
 }
-
+${SWAY_GLSL}
 float squash(float row) {
   float r = row / u_roll.z;
   return 1.0 / (1.0 + r * r);
@@ -86,7 +89,10 @@ void main() {
   float swell = tripSwell(away + u_hero);
   float breath = tripBreath(away);
   vec2 foot = turned(away);
-  vec2 off = turned(a_pos.xy - a_anchor) * breath;
+  // The sway leans the body, and the breath swells it, lean and all, about its foot.
+  vec3 sway = swayOffset(kind, away, a_pos.z);
+  vec2 off = (turned(a_pos.xy - a_anchor) + sway.xy) * breath;
+  float height = a_pos.z + sway.z;
   float curl = tripCurl(foot.x);
 
   float groundTop = u_roll.x;
@@ -105,7 +111,7 @@ void main() {
   }
   float x = u_view.z + (foot.x + off.x) * TILE_WIDTH * scale + u_shake.x;
   // The swell lifts the water as well as what stands in it, so it is not mirrored.
-  float y = ground - (off.y * TILE_DEPTH + (a_pos.z * u_mirror * breath + swell) * WALL_RISE) * scale + u_shake.y;
+  float y = ground - (off.y * TILE_DEPTH + (height * u_mirror * breath + swell) * WALL_RISE) * scale + u_shake.y;
   if (u_flip > 0.0) {
     // Upside down about the horizon line this column's lip reaches.
     y = 2.0 * (groundTop - u_roll.y * (1.0 + curl) + u_shake.y) - y;

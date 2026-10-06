@@ -13,6 +13,7 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horiz
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { Kind } from "../mesh";
+import { MAX_PUSHES, SWAY_WGSL } from "../sway";
 import { TRIP } from "../trip";
 import { TRIP_WGSL } from "../trip-shaders";
 import { LAKE_DEPTH_PER_TILE } from "../water-glsl";
@@ -35,7 +36,9 @@ struct Frame {
   water: vec4f,
   sim: vec4f,
   trip: vec4f,
+  wind: vec4f,
   cut: vec4f,
+  pushes: array<vec4f, ${MAX_PUSHES}>,
 };
 
 struct Draw {
@@ -115,7 +118,7 @@ struct VertexOut {
 fn turned(p: vec2f, rot: vec2f) -> vec2f {
   return vec2f(p.x * rot.x - p.y * rot.y, p.x * rot.y + p.y * rot.x);
 }
-
+${SWAY_WGSL}
 fn squash(row: f32) -> f32 {
   let r = row / frame.roll.z;
   return 1.0 / (1.0 + r * r);
@@ -144,7 +147,10 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   let swell = tripSwell(away + frame.hero.xy);
   let breath = tripBreath(away);
   let foot = turned(away, rot);
-  let off = turned(input.pos.xy - input.anchor, rot) * breath;
+  // The sway leans the body, and the breath swells it, lean and all, about its foot.
+  let sway = swayOffset(kind, away, input.pos.z, rot);
+  let off = (turned(input.pos.xy - input.anchor, rot) + sway.xy) * breath;
+  let height = input.pos.z + sway.z;
   let curl = tripCurl(foot.x);
   let flip = draw.mirror.y;
 
@@ -167,7 +173,7 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   }
   let x = frame.view.z + (foot.x + off.x) * TILE_WIDTH * scale + frame.depthShake.z;
   // The swell lifts the water as well as what stands in it, so it is not mirrored.
-  var y = ground - (off.y * TILE_DEPTH + (input.pos.z * mirror * breath + swell) * WALL_RISE) * scale + frame.depthShake.w;
+  var y = ground - (off.y * TILE_DEPTH + (height * mirror * breath + swell) * WALL_RISE) * scale + frame.depthShake.w;
   if (flip > 0.0) {
     // Upside down about the horizon line this column's lip reaches.
     y = 2.0 * (groundTop - frame.roll.y * (1.0 + curl) + frame.depthShake.w) - y;

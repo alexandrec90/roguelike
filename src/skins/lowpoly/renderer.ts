@@ -213,6 +213,8 @@ export class WebGlBackend implements LowpolyBackend {
     gl.uniform4f(at("u_water"), water.level, water.wetness, water.rain, water.seconds);
     gl.uniform4f(at("u_trip"), frame.trip, water.seconds, frame.fx, 0);
     gl.uniform4fv(at("u_ripples[0]"), water.ripples);
+    gl.uniform4fv(at("u_wind"), frame.sway.wind);
+    gl.uniform4fv(at("u_pushes[0]"), frame.sway.pushes);
     gl.uniform1i(at("u_puddles"), PUDDLE_UNIT);
     gl.uniform1i(at("u_reflect"), REFLECT_UNIT);
     gl.activeTexture(gl.TEXTURE0 + PUDDLE_UNIT);

@@ -34,6 +34,7 @@ water's motion differs, because only WebGPU has compute.
 | the wave step | `webgpu/waves.ts` | - | `webgpu/wave-sim.ts` |
 | the trip (`?trip=`, `?fx=`) | `trip.ts` | `trip-shaders.ts` | `trip-shaders.ts` |
 | the trip's trails | `trailFrame` | `trail-pass.ts` | `webgpu/trail-gpu.ts` |
+| the sway | `sway.ts` `swayOffset` | `sway.ts` `SWAY_GLSL` | `sway.ts` `SWAY_WGSL` |
 
 **Change one, change all.** `placement.test.ts` pins `placeVertex` to the pixel skin's
 `localPlacement` and `waves.test.ts` the wave step's behaviour; a drift between a
@@ -60,6 +61,24 @@ by point. A new body that forgets its anchor shears apart on the lip.
 A body's foot also stands **on the drawn land**, not at height 0: walkable ground runs
 up a landform's lower slope (to `BLOCK_HEIGHT`), so a foot at 0 there is buried in the
 facets. Lift it by `standingHeight`, which reads the facets `landformMesh` draws.
+
+## Wind and pushes
+
+Plants lean in the **vertex shader** (`sway.ts`): a shear about the vertex's anchor,
+growing with its height, so a root never moves. Each swaying kind is a row of `SWAYERS` -
+trees and bushes `foliage`, blades `grass`, mushrooms `sprig` - and the shaders' copy of
+the table is generated from it, so a new plant is a kind and a row. The lean is the
+shared wind (`gustAt` once a frame, its travelling sines in the shader, phases wrapped on
+the CPU) plus up to `MAX_PUSHES` rings - the hero, his swing, bursts, fireballs, the
+nearest slimes - read straight off the shared simulation by `pushesOf`
+(`sway-pushes.ts`). No buffer is rebuilt and no pass added: the chunks stay static.
+
+**Tried and rejected:** a per-vertex tremble and per-face normal flicker on crowns, to
+make leaves ripple. It read as jelly, not leaves; do not bring it back as is.
+
+**Grass blades are off for now.** Two looks were tried and both removed: evenly spread
+three-blade tufts, then meadow patches of five-blade sheaves. `Kind.grass` and its
+`SWAYERS` row stay, tested, so blades can come back as a mesh alone.
 
 ## Water
 
@@ -136,6 +155,8 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
 | `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
+| `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` |
+| `sway-pushes.ts` | `pushesOf` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `cutaway.ts` | `heroCutaway` · `heroHidden` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
@@ -149,7 +170,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `renderer.ts` | `WebGlBackend` |
 | `reflection.ts` | `ReflectionTarget` · `REFLECTION_SCALE` |
 | `rain-pass.ts` | `RainPass` |
-| `hero-mesh.ts` | `heroMesh` · `heroHeightPx` |
+| `hero-mesh.ts` | `heroMesh` · `heroHeightPx` · `swingTrailMesh` |
 | `hero-dress.ts` | `SKELETON_DRESS` · `STICK_DRESS` · `SKULL` · `SKULL_HOLES` · `DressPiece` |
 | `hero-sway.ts` | `looseSkeleton` · `freeOf` · `SwayTracks` |
 | `actor-mesh.ts` | `slimeMesh` · `fireballMesh` · `burstMesh` |
