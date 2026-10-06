@@ -19,6 +19,7 @@
  */
 
 import { PLANET_TILES } from "../../game/planet";
+import { LOWPOLY } from "./palette";
 import { LAKE_RANGE_TILES } from "./water-texels";
 
 /**
@@ -36,6 +37,40 @@ export const RIPPLE_LIFE_S = 1.6;
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
 
+/**
+ * How a water surface is shaded, the same numbers in both backends: only how
+ * it moves differs between them. Water is mostly its own body - the bed seen
+ * through it, going to `LOWPOLY.waterDeep` as it deepens - with the sky laid
+ * over it, never the other way about: a near-total mirror with nothing of its
+ * own reads as polished metal. And a wave shows by how it *tilts*, never by
+ * how high it stands - a crest painted brighter for its height is a bead of
+ * chrome, not a ripple.
+ */
+export const WATER_LOOK = {
+  /** Share of the reflection laid over the water's body. */
+  reflect: 0.5,
+  /** Steepest slope the shading takes: past it a crest would bend the mirror to something tiles away. */
+  slopeCap: 0.7,
+  /** Share of the screen the steepest slope bends the mirror by, across and down. */
+  bendX: 0.006,
+  bendY: 0.01,
+  /**
+   * How much a face tilted toward the viewer darkens the sky it shows, and one
+   * tilted away brightens it - the zenith is deeper than the horizon. One side
+   * of a ring lighter and the other darker is what reads as a ripple.
+   */
+  sheen: 0.6,
+  /** The sun's glint: how tight, and how bright at full sun. */
+  glintPower: 140,
+  glint: 0.45,
+  /** How far a puddle's body goes toward the deep colour, and a lake's middle. */
+  puddleDeep: 0.3,
+  lakeDeep: 0.85,
+} as const;
+
+/** `LOWPOLY.waterDeep` as a shader constant's arguments, for either language. */
+export const WATER_DEEP_ARGS = LOWPOLY.waterDeep.map(float).join(", ");
+
 /** Uniforms and functions shared by the world fragment shader. */
 export const WATER_GLSL = `
 uniform sampler2D u_puddles;   // the basin field, one planet lap, REPEAT
@@ -48,6 +83,15 @@ const float LAP = ${float(PLANET_TILES)};
 const float LAKE_RANGE = ${float(LAKE_RANGE_TILES)};
 const float LAKE_DEPTH = ${float(LAKE_DEPTH_PER_TILE)};
 const float RIPPLE_LIFE = ${float(RIPPLE_LIFE_S)};
+const vec3 WATER_DEEP = vec3(${WATER_DEEP_ARGS});
+const float REFLECT = ${float(WATER_LOOK.reflect)};
+const float SLOPE_CAP = ${float(WATER_LOOK.slopeCap)};
+const vec2 BEND = vec2(${float(WATER_LOOK.bendX)}, -${float(WATER_LOOK.bendY)});
+const float SHEEN = ${float(WATER_LOOK.sheen)};
+const float GLINT_POWER = ${float(WATER_LOOK.glintPower)};
+const float GLINT = ${float(WATER_LOOK.glint)};
+const float PUDDLE_DEEP = ${float(WATER_LOOK.puddleDeep)};
+const float LAKE_DEEP = ${float(WATER_LOOK.lakeDeep)};
 
 /** The shortest way from b to a round the planet. */
 vec2 wrapped(vec2 a, vec2 b) {
@@ -70,9 +114,6 @@ vec4 cellHash(vec2 cell, float salt) {
 float ringWave(float past, float sharp) {
   return exp(-past * past * sharp) * sin(past * 38.0);
 }
-
-/** How bright the rings' crests are here, summed: what makes a ring read as a ring, not a smudge. */
-float g_crest = 0.0;
 
 /** Slope from rain: a lattice of cells, each dropping a ring on its own beat. */
 vec2 rainSlope(vec2 p) {
@@ -104,7 +145,6 @@ vec2 rainSlope(vec2 p) {
       float fade = (1.0 - t) * (1.0 - t);
       float wave = ringWave(past, 900.0) * fade;
       slope += (away / max(dist, 1e-4)) * wave;
-      g_crest += max(wave, 0.0);
     }
   }
   return slope;
@@ -126,25 +166,26 @@ vec2 stepSlope(vec2 p) {
       float past = dist - age * (0.75 - 0.25 * float(ring));
       float wave = ringWave(past, 260.0) * life * life * ripple.w;
       slope += (away / max(dist, 1e-4)) * wave;
-      g_crest += max(wave, 0.0);
     }
   }
   return slope;
 }
 
 /**
- * Water over a bed of colour \`bed\` (already lit): the reflection, bent by the
- * slope, over a glimpse of the bed, and a glint where a ring faces the light.
+ * Water over a bed of colour \`bed\` (already lit), \`deep\` of the way to the
+ * deep colour: the reflection, bent and shaded by the slope, laid over the
+ * water's own body, and a glint where a ring faces the sun. \`WATER_LOOK\`.
  */
-vec3 waterColour(vec2 planet, vec3 bed, vec3 lightDir) {
-  g_crest = 0.0;
+vec3 waterColour(vec2 planet, vec3 bed, vec3 lightDir, float deep) {
   vec2 slope = rainSlope(planet) * 0.6 + stepSlope(planet);
-  vec2 uv = gl_FragCoord.xy / u_resolution + slope * vec2(0.012, -0.02);
-  vec3 mirrored = texture(u_reflect, uv).rgb;
+  slope *= min(1.0, SLOPE_CAP / max(length(slope), 1e-4));
+  vec2 uv = gl_FragCoord.xy / u_resolution + slope * BEND;
+  vec3 mirrored = texture(u_reflect, uv).rgb * (1.0 + SHEEN * slope.y);
   vec3 normal = normalize(vec3(-slope * 0.35, 1.0));
   vec3 halfway = normalize(lightDir + vec3(0.0, -0.45, 0.9));
-  float glint = pow(max(dot(normal, halfway), 0.0), 60.0) * 0.5;
-  return mix(bed, mirrored, 0.72) + glint + min(g_crest, 1.0) * 0.16;
+  float glint = pow(max(dot(normal, halfway), 0.0), GLINT_POWER) * GLINT * u_shading.x;
+  vec3 body = mix(bed, WATER_DEEP * u_ambient, deep);
+  return mix(body, mirrored, REFLECT) + glint * u_ambient;
 }
 
 /**

@@ -13,7 +13,7 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horiz
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { Kind } from "../mesh";
-import { LAKE_DEPTH_PER_TILE } from "../water-glsl";
+import { LAKE_DEPTH_PER_TILE, WATER_DEEP_ARGS, WATER_LOOK } from "../water-glsl";
 import { LAKE_RANGE_TILES } from "../water-texels";
 import { WAVE_N, WAVE_RES } from "./waves";
 
@@ -80,6 +80,15 @@ const LAKE_RANGE = ${f(LAKE_RANGE_TILES)};
 const LAKE_DEPTH = ${f(LAKE_DEPTH_PER_TILE)};
 const WAVE_RES = ${f(WAVE_RES)};
 const WAVE_N = ${WAVE_N}i;
+const WATER_DEEP = vec3f(${WATER_DEEP_ARGS});
+const REFLECT = ${f(WATER_LOOK.reflect)};
+const SLOPE_CAP = ${f(WATER_LOOK.slopeCap)};
+const BEND = vec2f(${f(WATER_LOOK.bendX)}, ${f(WATER_LOOK.bendY)});
+const SHEEN = ${f(WATER_LOOK.sheen)};
+const GLINT_POWER = ${f(WATER_LOOK.glintPower)};
+const GLINT = ${f(WATER_LOOK.glint)};
+const PUDDLE_DEEP = ${f(WATER_LOOK.puddleDeep)};
+const LAKE_DEEP = ${f(WATER_LOOK.lakeDeep)};
 
 struct VertexIn {
   @location(0) pos: vec3f,
@@ -197,21 +206,26 @@ fn waveSlope(planet: vec2f) -> vec3f {
     return vec3f(0.0);
   }
   let surface = textureSampleLevel(waveSurface, repeatSampler, planet * WAVE_RES / f32(WAVE_N), 0.0);
-  return vec3f(surface.yz * 5.0, surface.x);
+  return vec3f(surface.yz * 3.0, surface.x);
 }
 
-/** Water over a lit bed: the mirror bent by the waves, a glint on a crest. */
-fn waterColour(planet: vec2f, bed: vec3f, position: vec2f) -> vec3f {
+/**
+ * Water over a lit bed, \`deep\` of the way to the deep colour: the mirror bent
+ * and shaded by the waves' slope over the water's own body, a glint where a
+ * ring faces the sun - \`waterColour\` in \`water-glsl.ts\`, by \`WATER_LOOK\`.
+ * The height itself never shows: a crest painted for how high it stands reads
+ * as a bead of molten metal.
+ */
+fn waterColour(planet: vec2f, bed: vec3f, position: vec2f, deep: f32) -> vec3f {
   let wave = waveSlope(planet);
-  // A steep crest bends the mirror only so far: past this it would show something tiles away.
-  let steep = length(wave.xy);
-  let slope = wave.xy * min(1.0, 1.2 / max(steep, 1e-4));
-  let uv = position / frame.hero.zw + slope * vec2f(0.012, 0.02);
-  let mirrored = textureSampleLevel(mirrorTexture, clampSampler, uv, 0.0).rgb;
+  let slope = wave.xy * min(1.0, SLOPE_CAP / max(length(wave.xy), 1e-4));
+  let uv = position / frame.hero.zw + slope * BEND;
+  let mirrored = textureSampleLevel(mirrorTexture, clampSampler, uv, 0.0).rgb * (1.0 + SHEEN * slope.y);
   let normal = normalize(vec3f(-slope * 0.35, 1.0));
   let halfway = normalize(frame.lightDir.xyz + vec3f(0.0, -0.45, 0.9));
-  let glint = pow(max(dot(normal, halfway), 0.0), 60.0) * 0.5;
-  return mix(bed, mirrored, 0.72) + glint + clamp(wave.z * 0.6, 0.0, 0.2);
+  let glint = pow(max(dot(normal, halfway), 0.0), GLINT_POWER) * GLINT * frame.shading.x;
+  let body = mix(bed, WATER_DEEP * frame.ambient.rgb, deep);
+  return mix(body, mirrored, REFLECT) + glint * frame.ambient.rgb;
 }
 
 @fragment
@@ -222,7 +236,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
   if (input.kind == ${Kind.shadow}u) {
     alpha *= frame.shading.y;
   } else if (input.kind == ${Kind.water}u) {
-    colour = waterColour(input.planet, lit(colour, input.normal) * 0.6, input.clip.xy);
+    colour = waterColour(input.planet, lit(colour, input.normal) * 0.6, input.clip.xy, 0.5);
     alpha = 0.94;
   } else if (input.kind == ${Kind.ground}u) {
     var ground = lit(colour, input.normal) * (1.0 - 0.18 * wet);
@@ -231,8 +245,8 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
     ground *= 1.0 - 0.22 * smoothstep(-0.03, 0.0, depth);
     colour = ground;
     if (depth > 0.0) {
-      let bed = ground * 0.7 * (1.0 - 0.45 * smoothstep(0.5, 2.5, water.y));
-      colour = mix(ground, waterColour(input.planet, bed, input.clip.xy), smoothstep(0.0, 0.012, depth));
+      let deep = max(PUDDLE_DEEP * smoothstep(0.0, 0.15, depth), LAKE_DEEP * smoothstep(0.3, 3.0, water.y));
+      colour = mix(ground, waterColour(input.planet, ground * 0.7, input.clip.xy, deep), smoothstep(0.0, 0.012, depth));
     }
   } else if (input.kind != ${Kind.glow}u) {
     colour = lit(colour, input.normal);

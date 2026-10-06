@@ -8,7 +8,7 @@ import { WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "../shaders";
 import { DRAW_FLOATS, drawCount, FRAME_FLOATS, packDraws, packFrame } from "./uniform-pack";
 import { freshImpulses, stepsFor, WAVE_WGSL } from "./wave-sim";
 import { SURFACE_WGSL } from "./wave-surface";
-import { MAX_WAVE_STEPS, WAVE_STEP_S } from "./waves";
+import { MAX_WAVE_STEPS, WAVE_RES, WAVE_STEP_S } from "./waves";
 import { RAIN_WGSL, SKY_WGSL, packPasses, PASSES_FLOATS } from "./wgsl-passes";
 import { worldWgsl } from "./wgsl-world";
 
@@ -30,8 +30,8 @@ describe("the WebGPU uniforms", () => {
     expect([...floats.slice(12, 16)]).toEqual([12.5, 40.25, 1280, 720]);
     expect(floats[32]).toBeCloseTo(0.7, 6);
     expect(floats[35]).toBe(3.5);
-    // The hero's wave cell: eight to a tile.
-    expect([...floats.slice(36, 38)]).toEqual([100, 322]);
+    // The hero's wave cell: `WAVE_RES` to a tile.
+    expect([...floats.slice(36, 38)]).toEqual([Math.floor(12.5 * WAVE_RES), Math.floor(40.25 * WAVE_RES)]);
   });
 
   it("number the draws list after list, so a list's first draw is the sum of those before it", () => {
