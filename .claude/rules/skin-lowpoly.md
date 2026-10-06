@@ -50,6 +50,10 @@ placed and shrunk about its foot on the lip, as a sprite is in the pixel skin. T
 ground, water and landforms are anchored at themselves, so they bend over the lip point
 by point. A new body that forgets its anchor shears apart on the lip.
 
+A body's foot also stands **on the drawn land**, not at height 0: walkable ground runs
+up a landform's lower slope (to `BLOCK_HEIGHT`), so a foot at 0 there is buried in the
+facets. Lift it by `standingHeight`, which reads the facets `landformMesh` draws.
+
 ## Wind and pushes
 
 Plants lean in the **vertex shader** (`sway.ts`): a shear about the vertex's anchor,
@@ -139,7 +143,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `primitives.ts` | `frustum` · `cone` · `blob` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
-| `terrain-mesh.ts` | `groundMesh` · `landformMesh` |
+| `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
 | `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` |
 | `sway-pushes.ts` | `pushesOf` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
