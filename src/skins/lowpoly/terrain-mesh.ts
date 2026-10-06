@@ -158,7 +158,7 @@ function latticeHeight(lattice: Lattice, i: number, j: number): number {
 }
 
 /** A landform as a faceted heightfield over its own footprint. */
-export function landformMesh(solid: MeshBuilder, landform: Landform, origin: PlanetPoint): void {
+export function landformMesh(land: MeshBuilder, landform: Landform, origin: PlanetPoint): void {
   const lattice = landformLattice(landform);
   const { field, step, cells, start } = lattice;
   const cx = landform.x - origin.x;
@@ -182,7 +182,7 @@ export function landformMesh(solid: MeshBuilder, landform: Landform, origin: Pla
         const material = sample < 0 ? ROCK : (field.materials[sample] ?? ROCK);
         const colour = faceTint(materialColour(material, landform.kind), seedOf(landform.seed, i, j, r === c ? 0 : 1));
         // A heightfield's normal always has some up in it: face away from a point far below.
-        solid.tri(p, q, r, { colour, kind: Kind.body, inside: [mx + cx, my + cy, -1000] });
+        land.tri(p, q, r, { colour, kind: Kind.land, inside: [mx + cx, my + cy, -1000] });
       }
     }
   }

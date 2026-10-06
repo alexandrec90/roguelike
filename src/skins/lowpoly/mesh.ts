@@ -35,12 +35,14 @@ export const Kind = {
   water: 3,
   /** Unlit and bright: fire, a spell. */
   glow: 4,
+  /** A landform: lit as a body, and cut from the window round the hero (`cutaway.ts`). */
+  land: 5,
   /** A body that sways from high up: a tree, a bush (`sway.ts`). Lit as a body. */
-  foliage: 5,
+  foliage: 6,
   /** A blade that bends from its root, and parts round whatever walks through it (`sway.ts`). Lit as a body. */
-  grass: 6,
+  grass: 7,
   /** A mushroom: nods, stiffer than grass (`sway.ts`). Lit as a body. */
-  sprig: 7,
+  sprig: 8,
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];
@@ -84,7 +86,7 @@ export class MeshBuilder {
       if (normal[0] * out[0]! + normal[1] * out[1]! + normal[2] * out[2]! < 0) {
         normal = [-normal[0], -normal[1], -normal[2]];
       }
-    } else if (style.kind !== undefined && style.kind !== Kind.body && style.kind !== Kind.glow && normal[2] < 0) {
+    } else if ((style.kind === Kind.ground || style.kind === Kind.shadow || style.kind === Kind.water) && normal[2] < 0) {
       // Anything lying on the ground faces the sky, whichever way it was wound.
       normal = [-normal[0], -normal[1], -normal[2]];
     }

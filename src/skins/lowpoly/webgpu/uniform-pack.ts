@@ -16,8 +16,8 @@ import { lightDirection } from "../sky-light";
 import { MAX_PUSHES } from "../sway";
 import { heroCellOf } from "./waves";
 
-/** Floats in `Frame` (WGSL): eleven `vec4f`, then `MAX_PUSHES` more. */
-export const FRAME_FLOATS = 44 + MAX_PUSHES * 4;
+/** Floats in `Frame` (WGSL): twelve `vec4f`, then `MAX_PUSHES` more. */
+export const FRAME_FLOATS = 48 + MAX_PUSHES * 4;
 
 /** Floats per entry of `draws` (WGSL `Draw`): two `vec4f`. */
 export const DRAW_FLOATS = 8;
@@ -38,6 +38,7 @@ export const DRAW_FLOATS = 8;
  * | water | level | wetness | rain | seconds |
  * | sim | hero cell x | hero cell y | - | - |
  * | wind | carrier phase | turbulence phase | gust strength | - |
+ * | cut | window centre x | centre y | radius x (0: no window) | radius y |
  * | pushes[MAX_PUSHES] | planet x from the hero | y | front radius | strength |
  */
 export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32Array(FRAME_FLOATS)): Float32Array {
@@ -56,7 +57,9 @@ export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32A
   out.set([water.level, water.wetness, water.rain, water.seconds], 32);
   out.set([heroCellOf(water.hero[0]), heroCellOf(water.hero[1]), 0, 0], 36);
   out.set(frame.sway.wind, 40);
-  out.set(frame.sway.pushes, 44);
+  const cut = frame.cutaway;
+  out.set(cut === undefined ? [0, 0, 0, 1] : [cut.x, cut.y, cut.radiusX, cut.radiusY], 44);
+  out.set(frame.sway.pushes, 48);
   return out;
 }
 

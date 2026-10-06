@@ -23,6 +23,7 @@ import { RAIN_SLANT } from "../../game/weather";
 import { ACTOR_MESH_KEYS, ActorMeshes, type ActorMeshKey } from "./actor-frame";
 import type { DrawableHandle, DrawCall, LowpolyBackend } from "./backend";
 import { WetWorld } from "./wet-world";
+import { heroCutaway } from "./cutaway";
 import { heroHeightPx } from "./hero-mesh";
 import { fieldRows, lowpolyView, type LowpolyView } from "./placement";
 import { MAX_PUSHES, windUniform } from "./sway";
@@ -39,6 +40,7 @@ interface LoadedChunk {
   readonly mesh: ChunkMesh;
   readonly ground: DrawableHandle;
   readonly solid: DrawableHandle;
+  readonly land: DrawableHandle;
   readonly sheer: DrawableHandle;
 }
 
@@ -94,6 +96,7 @@ export class LowpolyGame {
         mesh,
         ground: this.renderer.createDrawable(mesh.ground),
         solid: this.renderer.createDrawable(mesh.solid),
+        land: this.renderer.createDrawable(mesh.land),
         sheer: this.renderer.createDrawable(mesh.sheer),
       });
     }
@@ -124,7 +127,10 @@ export class LowpolyGame {
         this.pushes,
       ),
     };
-    const frame = { view: this.view, atmosphere, shake: this.clock.shake(), water: this.wet.water(live, this.clock.elapsedMs), sway, width, height };
+    const shake = this.clock.shake();
+    const cut = heroCutaway(this.view, live, this.heroHeight);
+    const cutaway = cut === undefined ? undefined : { ...cut, x: cut.x + shake.x, y: cut.y + shake.y };
+    const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), sway, width, height, cutaway };
     const turn = where.turn;
     const chunkCall = (drawable: DrawableHandle, mesh: ChunkMesh): DrawCall => ({ drawable, offset: asPair(chunkOffset(mesh, live)), turn });
     const rows = fieldRows(this.view);
@@ -136,9 +142,10 @@ export class LowpolyGame {
     ];
     this.renderer.render(frame, {
       mirrored: [
-        ...mirrorable.map((chunk) => chunkCall(chunk.solid, chunk.mesh)),
+        ...mirrorable.flatMap((chunk) => [chunkCall(chunk.land, chunk.mesh), chunkCall(chunk.solid, chunk.mesh)]),
         ...actors,
       ],
+      lands: this.chunks.map((chunk) => chunkCall(chunk.land, chunk.mesh)),
       grounds: onField.map((chunk) => chunkCall(chunk.ground, chunk.mesh)),
       solids: [
         ...this.chunks.map((chunk) => chunkCall(chunk.solid, chunk.mesh)),

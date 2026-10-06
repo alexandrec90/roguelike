@@ -34,9 +34,17 @@ describe("the WebGPU uniforms", () => {
     expect(floats[35]).toBe(3.5);
     // The hero's wave cell: eight to a tile.
     expect([...floats.slice(36, 38)]).toEqual([100, 322]);
-    // The wind, then every push slot, last of all.
+    // The wind.
     expect([...floats.slice(40, 44)]).toEqual([1.5, 2.5, 0.75, 0]);
-    expect([...floats.slice(44)]).toEqual([...frame.sway.pushes]);
+    // No window round the hero: a zero radius the shader reads as none.
+    expect([...floats.slice(44, 48)]).toEqual([0, 0, 0, 1]);
+    // Every push slot, last of all.
+    expect([...floats.slice(48)]).toEqual([...frame.sway.pushes]);
+  });
+
+  it("carry the window round the hero after the wind, before the pushes", () => {
+    const cutaway = { x: 150, y: 90, radiusX: 15, radiusY: 18 };
+    expect([...packFrame({ ...frame, cutaway }).slice(44, 48)]).toEqual([150, 90, 15, 18]);
   });
 
   it("declare the same Frame the packing fills: one vec4f per four floats", () => {
@@ -98,6 +106,13 @@ describe("the shader sources", () => {
     expect(worldWgsl(false)).not.toContain("discard");
     expect(WORLD_FRAGMENT).toContain("discard");
     expect(WORLD_FRAGMENT_SOLID).not.toContain("discard");
+  });
+
+  it("cut the window round the hero only in the build that may discard", () => {
+    expect(worldWgsl(true)).toContain("cutAway(input.clip.xy)");
+    expect(worldWgsl(false)).not.toContain("cutAway(input.clip.xy)");
+    expect(WORLD_FRAGMENT).toContain("cutAway(gl_FragCoord.xy)");
+    expect(WORLD_FRAGMENT_SOLID).not.toContain("cutAway(gl_FragCoord.xy)");
   });
 
   it("read the water from the simulated surface, and mirror height in the vertex stage", () => {
