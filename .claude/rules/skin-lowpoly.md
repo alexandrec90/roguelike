@@ -158,7 +158,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `renderer.ts` | `WebGlBackend` |
 | `reflection.ts` | `ReflectionTarget` · `REFLECTION_SCALE` |
 | `rain-pass.ts` | `RainPass` |
-| `hero-mesh.ts` | `heroMesh` · `heroHeightPx` |
+| `hero-mesh.ts` | `heroMesh` · `heroHeightPx` · `swingTrailMesh` |
 | `hero-dress.ts` | `SKELETON_DRESS` · `STICK_DRESS` · `SKULL` · `SKULL_HOLES` · `DressPiece` |
 | `hero-sway.ts` | `looseSkeleton` · `freeOf` · `SwayTracks` |
 | `actor-mesh.ts` | `slimeMesh` · `fireballMesh` · `burstMesh` |
