@@ -14,25 +14,42 @@
  */
 
 import type { InkId, PixelCloud } from "../ink";
-import { BLADE_SPAN, HERO_EQUIPPED, SWING } from "../models";
+import { BLADE_SPAN, HERO_EQUIPPED, SWING, SWING_BEATS } from "../models";
 import { rampSlice } from "../palette";
-import { samplePose, solveModel, type RenderOptions, type RigPose } from "../rig";
+import { samplePose, solveModel, type RenderOptions, type RigPose, type Vec3 } from "../rig";
 import { ditherThreshold, rampInk } from "../shading";
-import { boneSpan, type ScreenPoint3 } from "./rig-volume";
+import { projectPoint, type ScreenPoint3 } from "./rig-volume";
 
-/** Blade samples kept behind the current one. */
-export const TRAIL_SAMPLES = 7;
-/** Time between samples, ms of swing clock. */
-export const TRAIL_STEP_MS = 16;
+/**
+ * Blade samples kept behind the current one: long enough to hold the whole
+ * sweep at once. A level circle seen by this camera is nearly round (depth is
+ * only foreshortened to `DEPTH_RATIO`), so any quarter of it looks steep; only
+ * the whole crescent, right round to left, reads as horizontal.
+ */
+export const TRAIL_SAMPLES = 24;
+/**
+ * Time between samples, ms of swing clock. Fine enough that the fastest part
+ * of the cut moves the blade under 20° a sample, so the ribbon's edge reads as
+ * a curve rather than a fan of chords.
+ */
+export const TRAIL_STEP_MS = 8;
 /**
  * The trail only exists after the windup peaks: before it the blade is being
- * raised, slowly, and a ribbon there reads as lag rather than speed.
+ * drawn back, and a ribbon there reads as lag rather than speed.
  */
-export const TRAIL_FROM_MS = Math.round(SWING.durationMs * 0.3);
-/** And it is gone once the swing has settled. */
-export const TRAIL_UNTIL_MS = Math.round(SWING.durationMs * 0.78);
+export const TRAIL_FROM_MS = Math.round(SWING.durationMs * SWING_BEATS.windup);
+/** And it stops growing once the follow-through is held. */
+export const TRAIL_UNTIL_MS = Math.round(SWING.durationMs * SWING_BEATS.through);
 /** The ribbon covers the outer part of the blade — the part that moves fastest. */
 const RIBBON_FROM = 0.4;
+
+/** One blade span in rig space (x right, y toward the viewer, z up), turned by the yaw. */
+export interface BladeSample {
+  readonly a: Vec3;
+  readonly b: Vec3;
+  /** 0 is now, 1 is the oldest sample. */
+  readonly age: number;
+}
 
 export interface TrailSegment {
   readonly a: ScreenPoint3;
@@ -44,25 +61,45 @@ export interface TrailSegment {
 const STEEL: readonly InkId[] = rampSlice("metal", 2, 4);
 const FIRE: readonly InkId[] = rampSlice("fire", 3, 6);
 
-/** The blade's outer span at each of the last few swing times, newest first. */
-export function trailSegments(swingMs: number, base: RigPose, options: RenderOptions = {}): TrailSegment[] {
+function lerp3(from: Vec3, to: Vec3, t: number): Vec3 {
+  return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, z: from.z + (to.z - from.z) * t };
+}
+
+/**
+ * The blade's outer span at each of the last few swing times, newest first, in
+ * rig space — what every skin's trail is drawn from. The swing is a clip, so
+ * where the blade was is the clip sampled earlier; nothing is remembered.
+ */
+export function bladeSweep(swingMs: number, base: RigPose, options: RenderOptions = {}): BladeSample[] {
   if (swingMs < TRAIL_FROM_MS || swingMs > TRAIL_UNTIL_MS + TRAIL_SAMPLES * TRAIL_STEP_MS) {
     return [];
   }
-  const segments: TrailSegment[] = [];
+  const samples: BladeSample[] = [];
   const bladeFrom = BLADE_SPAN.from + (BLADE_SPAN.to - BLADE_SPAN.from) * RIBBON_FROM;
   for (let index = 0; index <= TRAIL_SAMPLES; index += 1) {
     const at = swingMs - index * TRAIL_STEP_MS;
     if (at < TRAIL_FROM_MS) {
       break;
     }
-    const solved = solveModel(HERO_EQUIPPED, samplePose(SWING, base, Math.min(at, TRAIL_UNTIL_MS)), options);
-    const span = boneSpan(solved, "sword", bladeFrom, BLADE_SPAN.to);
-    if (span !== undefined) {
-      segments.push({ a: span.a, b: span.b, age: index / TRAIL_SAMPLES });
+    const sword = solveModel(HERO_EQUIPPED, samplePose(SWING, base, Math.min(at, TRAIL_UNTIL_MS)), options)["sword"];
+    if (sword !== undefined) {
+      samples.push({
+        a: lerp3(sword.start, sword.end, bladeFrom),
+        b: lerp3(sword.start, sword.end, BLADE_SPAN.to),
+        age: index / TRAIL_SAMPLES,
+      });
     }
   }
-  return segments;
+  return samples;
+}
+
+/** The same sweep projected to foot-relative screen pixels, for the pixel skin. */
+export function trailSegments(swingMs: number, base: RigPose, options: RenderOptions = {}): TrailSegment[] {
+  return bladeSweep(swingMs, base, options).map((sample) => ({
+    a: projectPoint(sample.a),
+    b: projectPoint(sample.b),
+    age: sample.age,
+  }));
 }
 
 function edge(ax: number, ay: number, bx: number, by: number, px: number, py: number): number {

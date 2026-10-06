@@ -36,6 +36,7 @@ export const LOWPOLY = {
   mushroomStem: rgb("#efe6d2"),
   bone: rgb("#e6dcc0"),
   socket: rgb("#2a2224"),
+  trail: rgb("#f4faff"),
   fire: rgb("#ffb347"),
   fireCore: rgb("#fff1b0"),
   frost: rgb("#bfe9ff"),

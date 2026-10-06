@@ -10,6 +10,7 @@ import {
   HUMANOID_BASE,
   HUMANOID_SKELETON,
   SWING,
+  SWING_BEATS,
   WALK,
 } from "./models";
 import {
@@ -118,10 +119,51 @@ describe("the hero's clips", () => {
   });
 
   it("swings the sword behind at the windup and in front at contact", () => {
-    const windup = samplePose(SWING, HERO_EQUIPPED.basePose, 0.3 * SWING.durationMs);
-    const contact = samplePose(SWING, HERO_EQUIPPED.basePose, 0.45 * SWING.durationMs);
+    const windup = samplePose(SWING, HERO_EQUIPPED.basePose, SWING_BEATS.windup * SWING.durationMs);
+    const contact = samplePose(SWING, HERO_EQUIPPED.basePose, SWING_BEATS.contact * SWING.durationMs);
     expect(windup.bones["sword"]?.y).toBeLessThan(0);
     expect(contact.bones["sword"]?.y).toBeGreaterThan(0);
+  });
+
+  describe("the swing's cut", () => {
+    const sword = (share: number) => samplePose(SWING, HERO_EQUIPPED.basePose, share * SWING.durationMs).bones["sword"]!;
+    const sweep = Array.from({ length: 41 }, (_unused, index) => SWING_BEATS.windup + ((SWING_BEATS.through - SWING_BEATS.windup) * index) / 40);
+
+    it("keeps the blade level from the windup to the follow-through", () => {
+      for (const share of sweep) {
+        const { x, y, z } = sword(share);
+        // Within ~12° of horizontal everywhere along the cut.
+        expect(Math.abs(z) / Math.hypot(x, y, z)).toBeLessThan(0.21);
+      }
+    });
+
+    it("sweeps one way round, right to ahead to left, through more than a half turn", () => {
+      const bearings = sweep.map((share) => Math.atan2(sword(share).y, sword(share).x));
+      // Unwrapped, the bearing never goes back on itself.
+      let total = 0;
+      for (let index = 1; index < bearings.length; index += 1) {
+        let step = bearings[index]! - bearings[index - 1]!;
+        step = Math.atan2(Math.sin(step), Math.cos(step));
+        expect(step).toBeGreaterThanOrEqual(-1e-9);
+        total += step;
+      }
+      expect(total).toBeGreaterThan(Math.PI);
+      expect(sword(SWING_BEATS.windup).x).toBeGreaterThan(0.9);
+      expect(sword(0.64).x).toBeLessThan(-0.9);
+    });
+
+    it("stays in the half circle before him, so the camera never draws it as a vertical streak", () => {
+      for (const share of sweep) {
+        const { x, y } = sword(share);
+        // Never more than ~20° behind his shoulder line.
+        expect(y / Math.hypot(x, y)).toBeGreaterThan(-0.35);
+      }
+    });
+
+    it("is snappy: windup and sweep together are over in a quarter of a second", () => {
+      expect(SWING.durationMs * SWING_BEATS.through).toBeLessThan(300);
+      expect(SWING.durationMs * SWING_BEATS.contact).toBeLessThan(180);
+    });
   });
 
   it("thrusts both palms toward the camera at the cast's release", () => {
