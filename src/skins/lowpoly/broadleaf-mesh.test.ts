@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { broadleafMesh, type Canopy } from "./broadleaf-mesh";
 import { BALL_VERTICES, IMPOSTOR_BYTES, ImpostorBuilder } from "./impostor";
+import { FLAT_LOOK } from "./look";
 import { Kind, MeshBuilder, VERTEX_BYTES } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { sceneryMesh } from "./scenery-mesh";
@@ -86,7 +87,7 @@ describe("a broadleaf", () => {
   it("given impostor leaves, wears a ball where each clump was, and keeps only its wood as mesh", () => {
     const mesh = new MeshBuilder();
     const leaves = new ImpostorBuilder();
-    const shadow = broadleafMesh(CANOPY)(mesh, FOOT, HEIGHT, 5, leaves);
+    const shadow = broadleafMesh(CANOPY)(mesh, FOOT, HEIGHT, 5, FLAT_LOOK, leaves);
     // Three limbs of two twigs, and the heart: a clump each.
     expect(leaves.balls).toBe(CANOPY.limbs * CANOPY.twigs + 1);
     expect(vertices(mesh).every((v) => v.bark)).toBe(true);
@@ -107,7 +108,7 @@ describe("a broadleaf", () => {
   it("gives a bush impostor leaves too: a mound of balls and no faceted blob", () => {
     const solid = new MeshBuilder();
     const leaves = new ImpostorBuilder();
-    sceneryMesh(solid, new MeshBuilder(), "bush", [0, 0, 0], 9, leaves);
+    sceneryMesh(solid, new MeshBuilder(), "bush", [0, 0, 0], 9, { leaves });
     expect(solid.vertexCount).toBe(0);
     expect(leaves.balls).toBe(3);
   });

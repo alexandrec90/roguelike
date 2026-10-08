@@ -31,8 +31,8 @@ export function fireballMesh(sheer: MeshBuilder, ball: Fireball, hero: PlanetPoi
   const [x, y] = offsetOf(fireballPoint(ball), hero);
   const z = FIREBALL_HEIGHT / WALL_RISE;
   const spin = Math.floor(ball.ageMs / 40);
-  blob(sheer, [x, y, z], [0.16, 0.16, 0.16], { colour: LOWPOLY.fireCore, kind: Kind.glow, anchor: [x, y] }, spin, 0.2);
-  blob(sheer, [x, y, z], [0.28, 0.28, 0.24], { colour: LOWPOLY.fire, kind: Kind.glow, alpha: 0.55, anchor: [x, y] }, spin + 7, 0.35);
+  blob(sheer, [x, y, z], [0.16, 0.16, 0.16], { colour: LOWPOLY.fireCore, kind: Kind.glow, anchor: [x, y] }, spin, { jitter: 0.2 });
+  blob(sheer, [x, y, z], [0.28, 0.28, 0.24], { colour: LOWPOLY.fire, kind: Kind.glow, alpha: 0.55, anchor: [x, y] }, spin + 7, { jitter: 0.35 });
 }
 
 /** A burst: a fireball's blast swelling and fading, or a nova's ring of frost racing out. */
@@ -42,7 +42,7 @@ export function burstMesh(sheer: MeshBuilder, burst: Burst, hero: PlanetPoint): 
   const fade = 1 - t;
   if (burst.kind === "blast") {
     const r = burst.radius * (0.35 + 0.65 * Math.sqrt(t));
-    blob(sheer, [x, y, r * 0.5], [r, r, r * 0.8], { colour: mixRgb(LOWPOLY.fireCore, LOWPOLY.fire, t), kind: Kind.glow, alpha: 0.7 * fade, anchor: [x, y] }, 3, 0.25);
+    blob(sheer, [x, y, r * 0.5], [r, r, r * 0.8], { colour: mixRgb(LOWPOLY.fireCore, LOWPOLY.fire, t), kind: Kind.glow, alpha: 0.7 * fade, anchor: [x, y] }, 3, { jitter: 0.25 });
     return;
   }
   ring(sheer, [x, y, 0.06], burst.radius * Math.sqrt(t), 0.18, { colour: LOWPOLY.frost, alpha: 0.85 * fade });

@@ -12,6 +12,7 @@
  */
 
 import type { ImpostorBuilder } from "./impostor";
+import { FLAT_LOOK, type Look } from "./look";
 import { Kind, type MeshBuilder, mixRgb, type Rgb, shadeRgb, type Vec3 } from "./mesh";
 import { LOWPOLY, hash01, seedOf } from "./palette";
 import { frond, frustum } from "./primitives";
@@ -63,7 +64,7 @@ function lean(d: Vec3, theta: number, phi: number): Vec3 {
  * (`impostor.ts`) instead of tiers of plates - the same skeleton, a round crown.
  */
 export function broadleafMesh(canopy: Canopy) {
-  return (solid: MeshBuilder, at: Vec3, height: number, seed: number, leaves?: ImpostorBuilder): number => {
+  return (solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look = FLAT_LOOK, leaves?: ImpostorBuilder): number => {
     const anchor = [at[0], at[1]] as const;
     const rand = (salt: number): number => hash01(seedOf(seed, salt));
     // Wood and leaves alike sway as one body about the foot (`sway.ts`).
@@ -94,6 +95,7 @@ export function broadleafMesh(canopy: Canopy) {
           { centre: plate, radius: r, teeth, lift: r * 0.3, droop: r * 0.22, notch: 0.74, phase: rand(salt + tier * 3 + 3) * Math.PI },
           { colour, kind: Kind.foliage, anchor },
           seedOf(seed, salt, tier),
+          look,
         );
       }
     };

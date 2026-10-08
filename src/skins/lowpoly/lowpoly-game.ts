@@ -23,6 +23,7 @@ import { RAIN_SLANT } from "../../game/weather";
 import type { Atmosphere } from "../../game/atmosphere";
 import { ACTOR_MESH_KEYS, ActorMeshes, type ActorMeshKey } from "./actor-frame";
 import type { DrawableHandle, DrawCall, ImpostorScene, LowpolyBackend } from "./backend";
+import { FLAT_LOOK, type Look } from "./look";
 import { WetWorld } from "./wet-world";
 import { heroCutaway } from "./cutaway";
 import { heroHeightPx } from "./hero-mesh";
@@ -50,7 +51,7 @@ interface LoadedChunk {
   readonly balls: DrawableHandle;
 }
 
-const DEFAULT_LOOK: LookOptions = { resolution: "full", leaves: "mesh", volume: false };
+const DEFAULT_DISPLAY: LookOptions = { resolution: "full", leaves: "mesh", volume: false };
 
 export class LowpolyGame {
   readonly hero: HeroDriver;
@@ -60,7 +61,7 @@ export class LowpolyGame {
   private readonly wet: WetWorld;
   private readonly chunks: LoadedChunk[] = [];
   private readonly pending: { cx: number; cy: number }[];
-  private readonly actors = new ActorMeshes();
+  private readonly actors: ActorMeshes;
   private readonly pushes = new Float32Array(MAX_PUSHES * 4);
   private readonly dynamic: Record<ActorMeshKey, DrawableHandle>;
   /** Rebuilt every frame: the volcano smoke and the clouds, as impostor balls. */
@@ -74,8 +75,11 @@ export class LowpolyGame {
   constructor(
     readonly renderer: LowpolyBackend,
     private readonly options: SceneOptions,
-    private readonly look: LookOptions = DEFAULT_LOOK,
+    private readonly look: Look = FLAT_LOOK,
+    /** The skin's own drawing knobs (`look-options.ts`): resolution, impostor crowns, volumes. */
+    private readonly display: LookOptions = DEFAULT_DISPLAY,
   ) {
+    this.actors = new ActorMeshes(look);
     this.hero = new HeroDriver({ ...dryGround(START), turn: 0 }, options.radius);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
     this.wet = new WetWorld(options.weather === undefined ? undefined : WEATHER_PRESETS[options.weather]);
@@ -107,7 +111,7 @@ export class LowpolyGame {
     const start = performance.now();
     while (this.pending.length > 0 && performance.now() - start < budgetMs) {
       const next = this.pending.shift()!;
-      const mesh = buildChunk(next.cx, next.cy, this.look.leaves);
+      const mesh = buildChunk(next.cx, next.cy, this.look, this.display.leaves);
       this.chunks.push({
         mesh,
         ground: this.renderer.createDrawable(mesh.ground),
@@ -148,7 +152,7 @@ export class LowpolyGame {
     const cut = heroCutaway(this.view, live, this.heroHeight);
     const cutaway = cut === undefined ? undefined : { ...cut, x: cut.x + shake.x, y: cut.y + shake.y };
     const cloudShade = cloudShadeOf(atmosphere);
-    const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), sway, width, height, cutaway, cloudShade };
+    const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), look: this.look, sway, width, height, cutaway, cloudShade };
     const turn = where.turn;
     const chunkCall = (drawable: DrawableHandle, mesh: ChunkMesh): DrawCall => ({ drawable, offset: asPair(chunkOffset(mesh, live)), turn });
     const rows = fieldRows(this.view);
@@ -210,8 +214,8 @@ export class LowpolyGame {
     ] as const;
     const crowns = this.chunks.filter((chunk) => chunk.balls.count > 0);
     return {
-      balls: [...crowns.map((chunk) => chunkCall(chunk.balls, chunk.mesh)), ...(this.look.volume ? [] : soft)],
-      volumes: this.look.volume ? soft : [],
+      balls: [...crowns.map((chunk) => chunkCall(chunk.balls, chunk.mesh)), ...(this.display.volume ? [] : soft)],
+      volumes: this.display.volume ? soft : [],
       mirrored: mirrorable.filter((chunk) => chunk.balls.count > 0).map((chunk) => chunkCall(chunk.balls, chunk.mesh)),
     };
   }

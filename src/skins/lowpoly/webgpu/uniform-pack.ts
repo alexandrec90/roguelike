@@ -34,7 +34,7 @@ export const DRAW_FLOATS = 8;
  * | lightDir | x | y | z | cloud shade r |
  * | ambient | r | g | b | cloud shade g |
  * | haze | r | g | b | cloud shade b |
- * | shading | sun | shadow strength | daylight | - |
+ * | shading | sun | shadow strength | daylight | stepped (`look.ts`) |
  * | water | level | wetness | rain | seconds |
  * | sim | hero cell x | hero cell y | - | - |
  * | wind | carrier phase | turbulence phase | gust strength | - |
@@ -54,7 +54,7 @@ export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32A
   out.set([light[0], light[1], light[2], cloud[0]], 16);
   out.set([ambient[0], ambient[1], ambient[2], cloud[1]], 20);
   out.set([haze[0], haze[1], haze[2], cloud[2]], 24);
-  out.set([0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight, 0], 28);
+  out.set([0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight, frame.look.stepped], 28);
   out.set([water.level, water.wetness, water.rain, water.seconds], 32);
   out.set([heroCellOf(water.hero[0]), heroCellOf(water.hero[1]), 0, 0], 36);
   out.set(frame.sway.wind, 40);

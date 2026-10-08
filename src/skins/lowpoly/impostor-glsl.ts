@@ -108,7 +108,7 @@ uniform vec2 u_depth;       // nearest and farthest depth key
 uniform vec3 u_lightDir;    // toward the light, local frame
 uniform vec3 u_ambient;
 uniform vec3 u_haze;
-uniform vec3 u_shading;     // sun strength, shadow strength, daylight
+uniform vec4 u_shading;     // sun strength, shadow strength, daylight, stepped (look.ts; unread here)
 uniform vec4 u_water;       // .w: the shaders' clock, seconds
 uniform float u_mirror;     // -1 while drawing the reflection
 uniform float u_volume;     // 1: march smoke and clouds as volumes

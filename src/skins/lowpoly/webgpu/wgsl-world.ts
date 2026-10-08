@@ -12,14 +12,17 @@
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horizon";
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
-import { Kind } from "../mesh";
+import { Kind, type Rgb } from "../mesh";
+import { PAINT_STEPS } from "../palette";
 import { TOWARD_VIEWER } from "../placement";
+import { paintConstants } from "../shaders";
 import { MAX_PUSHES, SWAY_WGSL } from "../sway";
 import { LAKE_DEPTH_PER_TILE, WATER_DEEP_ARGS, WATER_LOOK } from "../water-glsl";
 import { LAKE_RANGE_TILES } from "../water-texels";
 import { WAVE_N, WAVE_RES } from "./waves";
 
 const f = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
+const vec3f = (colour: Rgb): string => `vec3f(${colour.map(f).join(", ")})`;
 
 /** Bindings shared by the world and the wave simulation's reading of the water. */
 export const WORLD_BINDINGS = `
@@ -145,6 +148,8 @@ const LAKE_RANGE = ${f(LAKE_RANGE_TILES)};
 const LAKE_DEPTH = ${f(LAKE_DEPTH_PER_TILE)};
 const WAVE_RES = ${f(WAVE_RES)};
 const WAVE_N = ${WAVE_N}i;
+${paintConstants("const", vec3f)}
+const TOWARD_VIEWER = ${vec3f(TOWARD_VIEWER)};
 const WATER_DEEP = vec3f(${WATER_DEEP_ARGS});
 const REFLECT = ${f(WATER_LOOK.reflect)};
 const SLOPE_CAP = ${f(WATER_LOOK.slopeCap)};
@@ -154,7 +159,6 @@ const GLINT_POWER = ${f(WATER_LOOK.glintPower)};
 const GLINT = ${f(WATER_LOOK.glint)};
 const PUDDLE_DEEP = ${f(WATER_LOOK.puddleDeep)};
 const LAKE_DEEP = ${f(WATER_LOOK.lakeDeep)};
-const TOWARD_VIEWER = vec3f(${TOWARD_VIEWER.map(f).join(", ")});
 
 struct VertexIn {
   @location(0) pos: vec3f,
@@ -206,6 +210,32 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   return result;
 }
 
+/** One of three by a share 0..1: \`pick3\` in \`shaders.ts\`. */
+fn pick3(a: vec3f, b: vec3f, c: vec3f, share: f32) -> vec3f {
+  return select(select(c, b, share < 0.6667), a, share < 0.3333);
+}
+
+/** The painted look's stepped light: \`painted\` in \`shaders.ts\`, line for line. */
+fn painted(colour: vec3f, n: vec3f, ground: bool) -> vec3f {
+  let seed = fract(sin(dot(colour, vec3f(12.9898, 78.233, 37.719))) * 43758.5453);
+  let own = seed - 0.5;
+  let facing = dot(n, frame.lightDir.xyz);
+  let nudge = select(${f(PAINT_STEPS.bodyNudge)}, ${f(PAINT_STEPS.groundNudge)}, ground);
+  let level = select(max(facing, 0.0), facing - frame.lightDir.z, ground) * frame.shading.x + own * nudge;
+  let bar = select(vec2f(${f(PAINT_STEPS.bodyShade)}, ${f(PAINT_STEPS.bodyLit)}), vec2f(${f(PAINT_STEPS.groundShade)}, ${f(PAINT_STEPS.groundLit)}), ground);
+  let bright = smoothstep(bar.y - ${f(PAINT_STEPS.edge)}, bar.y + ${f(PAINT_STEPS.edge)}, level);
+  let shade = 1.0 - smoothstep(bar.x - ${f(PAINT_STEPS.edge)}, bar.x + ${f(PAINT_STEPS.edge)}, level);
+  let deep = select(1.0 - smoothstep(-0.3, -0.2, n.z), 0.0, ground);
+  let warm = pick3(PAINT_WARM_0, PAINT_WARM_1, PAINT_WARM_2, fract(seed * 3.7));
+  let cool = pick3(PAINT_COOL_0, PAINT_COOL_1, PAINT_COOL_2, fract(seed * 7.3));
+  let under = pick3(PAINT_DEEP_0, PAINT_DEEP_1, PAINT_DEEP_2, fract(seed * 11.9));
+  var c = colour * (0.75 + 0.3 * frame.shading.x);
+  c = mix(c, mix(colour, warm, ${f(PAINT_STEPS.warmMix)}) * 1.1, bright);
+  c = mix(c, mix(colour, cool, ${f(PAINT_STEPS.coolMix)}) * 0.8, shade);
+  c = mix(c, mix(colour, under, ${f(PAINT_STEPS.deepMix)}) * 0.65, deep);
+  return c * frame.ambient.rgb;
+}
+
 /** Whether the window takes this device pixel: inside the oval, its rim dithered over the outer fifth. */
 fn cutAway(fragment: vec2f) -> bool {
   let logical = fragment / frame.hero.zw * frame.view.xy;
@@ -216,8 +246,11 @@ fn cutAway(fragment: vec2f) -> bool {
   return distance < 0.8 || (distance < 1.0 && (1.0 - distance) / 0.2 > threshold);
 }
 
-fn lit(colour: vec3f, normal: vec3f) -> vec3f {
+fn lit(colour: vec3f, normal: vec3f, ground: bool) -> vec3f {
   let n = normalize(normal);
+  if (frame.shading.w > 0.5) {
+    return painted(colour, n, ground);
+  }
   let lambert = max(dot(n, frame.lightDir.xyz), 0.0);
   let sky = 0.5 + 0.5 * n.z;
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * frame.shading.x) * frame.ambient.rgb;
@@ -230,7 +263,7 @@ fn liquid(colour: vec3f, alpha: f32, normal: vec3f) -> vec4f {
   let rim = (1.0 - facing) * (1.0 - facing);
   let toward = max(dot(n, normalize(frame.lightDir.xyz + TOWARD_VIEWER)), 0.0);
   let glint = (0.9 * pow(toward, 48.0) + 0.15 * pow(toward, 6.0)) * frame.shading.x;
-  let shaded = lit(colour, normal) * (1.0 + 0.35 * rim) + glint * frame.ambient.rgb;
+  let shaded = lit(colour, normal, false) *(1.0 + 0.35 * rim) + glint * frame.ambient.rgb;
   return vec4f(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
 }
 
@@ -288,10 +321,10 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
   if (input.kind == ${Kind.shadow}u) {
     alpha *= frame.shading.y;
   } else if (input.kind == ${Kind.water}u) {
-    colour = waterColour(input.planet, lit(colour, input.normal) * 0.6, input.clip.xy, 0.5);
+    colour = waterColour(input.planet, lit(colour, input.normal, true) * 0.6, input.clip.xy, 0.5);
     alpha = 0.94;
   } else if (input.kind == ${Kind.ground}u) {
-    var ground = lit(colour, input.normal) * (1.0 - 0.18 * wet);
+    var ground = lit(colour, input.normal, true) * (1.0 - 0.18 * wet);
     let water = waterAt(input.planet);
     let depth = water.x;
     ground *= 1.0 - 0.22 * smoothstep(-0.03, 0.0, depth);
@@ -305,7 +338,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
     colour = jelly.rgb;
     alpha = jelly.a;
   } else if (input.kind != ${Kind.glow}u) {
-    colour = lit(colour, input.normal);
+    colour = lit(colour, input.normal, false);
   }
   let far = clamp(input.rows / ROLL_ROWS, 0.0, 1.0);
   let haze = select(far * far * (3.0 - 2.0 * far) * 0.78, 0.82, input.rows > ROLL_ROWS);

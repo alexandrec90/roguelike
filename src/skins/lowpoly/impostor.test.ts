@@ -5,6 +5,7 @@ import { CLOUD_DEPTH, IMPOSTOR_FRAGMENT, IMPOSTOR_VERTEX } from "./impostor-glsl
 import { BALL_VERTICES, IMPOSTOR_BYTES, ImpostorBuilder, QUAD_REACH, SCREEN_RISE, SCREEN_UP } from "./impostor";
 import { Kind } from "./mesh";
 import { TOWARD_VIEWER } from "./placement";
+import { WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
 import { IMPOSTOR_WGSL } from "./webgpu/wgsl-impostor";
 
 interface Corner {
@@ -104,5 +105,18 @@ describe("the impostor shaders", () => {
   it("march only smoke and clouds as volumes, never a crown", () => {
     expect(IMPOSTOR_FRAGMENT).toContain(`u_volume > 0.5 && v_kind != ${Kind.foliage}`);
     expect(IMPOSTOR_WGSL).toContain(`input.volume > 0.5 && input.kind != ${Kind.foliage}u`);
+  });
+
+  it("declare every uniform they share with the world as the world does, since `setWorld` fills both", () => {
+    // A `uniform4f` on a `vec3` is a GL error that leaves the uniform at zero: a ball with no sun.
+    const declared = (source: string): Map<string, string> =>
+      new Map([...source.matchAll(/uniform\s+(\w+)\s+(u_\w+)/g)].map((m) => [m[2]!, m[1]!]));
+    const world = declared(WORLD_VERTEX + WORLD_FRAGMENT);
+    const balls = declared(IMPOSTOR_VERTEX + IMPOSTOR_FRAGMENT);
+    const shared = [...balls.keys()].filter((name) => world.has(name));
+    expect(shared).toContain("u_shading");
+    for (const name of shared) {
+      expect({ name, type: balls.get(name) }).toEqual({ name, type: world.get(name) });
+    }
   });
 });

@@ -30,33 +30,17 @@ import {
 import { PLANET_TILES, wrapDelta, wrapTile, type PlanetPoint } from "../../game/planet";
 import { WALL_RISE } from "../../game/projection";
 import { terrainAt } from "../../game/terrain";
+import { groundCell, groundSurface } from "./ground-facets";
+import { SHORE } from "./ground-relief";
+import { FLAT_LOOK, type Look } from "./look";
 import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
-import { faceTint, hash01, LOWPOLY, seedOf } from "./palette";
-
-/** How far a ground vertex may wander off its lattice point, tiles: enough to break the grid. */
-const GROUND_JITTER = 0.32;
-/** How far up or down, tiles: a whisper of relief so facets catch the light, never enough to float a foot. */
-const GROUND_RELIEF = 0.035;
-/** Shore sand round a lake's water, tiles. */
-const SHORE = 0.9;
+import { faceTint, hash01, LOWPOLY, PAINT, seedOf } from "./palette";
 
 const TAU = Math.PI * 2;
 
-/**
- * A ground vertex: the lattice point at planet `(px, py)`, jittered by a hash
- * of its *wrapped* coordinates - so the chunk on either side of a seam puts the
- * shared vertex in the same place, and the planet's wrap has no crack.
- */
-function groundVertex(px: number, py: number, origin: PlanetPoint): Vec3 {
-  const wx = wrapTile(px);
-  const wy = wrapTile(py);
-  const seed = seedOf(wx, wy, 0x9e0);
-  return [
-    px - origin.x + (hash01(seed) * 2 - 1) * GROUND_JITTER,
-    py - origin.y + (hash01(seed + 1) * 2 - 1) * GROUND_JITTER,
-    (hash01(seed + 2) * 2 - 1) * GROUND_RELIEF,
-  ];
-}
+/** Tiles across a patch of the painted ground's colour. Divides `PLANET_TILES`, so patches close round the wrap. */
+const PATCH_TILES = 4;
+const PATCHES = PLANET_TILES / PATCH_TILES;
 
 /** A slow, seamless variation over the planet, 0..1: where the grass is a little drier. */
 function dryness(point: PlanetPoint): number {
@@ -84,26 +68,42 @@ export function groundColour(point: PlanetPoint, lakes: readonly Lake[]): Rgb {
   return mixRgb(LOWPOLY.grass, LOWPOLY.grassDry, Math.min(dry, 0.7));
 }
 
-/** A `size`-tile square of ground with its corner at `origin`, two faceted triangles a tile. */
-export function groundMesh(solid: MeshBuilder, origin: PlanetPoint, size: number, lakes: readonly Lake[]): void {
+/**
+ * A `size`-tile square of ground with its corner at `origin`: two faceted
+ * triangles a tile, or under the painted look planes and facets of many sizes
+ * (`ground-facets.ts`). `origin` and `size` are whole merged squares.
+ */
+export function groundMesh(solid: MeshBuilder, origin: PlanetPoint, size: number, lakes: readonly Lake[], look: Look = FLAT_LOOK): void {
   for (let j = 0; j < size; j += 1) {
     for (let i = 0; i < size; i += 1) {
-      const px = origin.x + i;
-      const py = origin.y + j;
-      const a = groundVertex(px, py, origin);
-      const b = groundVertex(px + 1, py, origin);
-      const c = groundVertex(px + 1, py + 1, origin);
-      const d = groundVertex(px, py + 1, origin);
-      // Alternate the diagonal by hash, so the field is triangles, not a quilt.
-      const seed = seedOf(wrapTile(px), wrapTile(py), 0x7a1);
-      const halves: [Vec3, Vec3, Vec3][] = hash01(seed) < 0.5 ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]];
-      halves.forEach(([p, q, r], half) => {
+      const { seed, faces } = groundCell(origin.x + i, origin.y + j, origin, look);
+      faces.forEach(([p, q, r], half) => {
         const centre = { x: wrapTile(origin.x + (p[0] + q[0] + r[0]) / 3), y: wrapTile(origin.y + (p[1] + q[1] + r[1]) / 3) };
-        const colour = faceTint(groundColour(centre, lakes), seed + half * 17);
+        const colour = groundFace(groundColour(centre, lakes), centre, seed + half * 17, look);
         solid.tri(p, q, r, { colour, kind: Kind.ground });
       });
     }
   }
+}
+
+/**
+ * A ground face's colour. Under the painted look its hue leans by *patch* - a
+ * few tiles that share one drift colour, edges warped so they are not squares -
+ * rather than by face, so the field reads as broad strokes, not confetti; the
+ * face keeps its own brightness. The accent is the crowns' alone: a tile-sized
+ * dab of it on the ground, every few tiles, was confetti again.
+ */
+function groundFace(colour: Rgb, centre: PlanetPoint, seed: number, look: Look): Rgb {
+  if (look.hueDrift <= 0) {
+    return faceTint(colour, seed, look);
+  }
+  // Whole waves to a lap, so the warp closes on itself at the seam.
+  const wx = centre.x + 1.3 * Math.sin((TAU * 37 * centre.y) / PLANET_TILES);
+  const wy = centre.y + 1.3 * Math.sin((TAU * 29 * centre.x) / PLANET_TILES);
+  const cell = (v: number): number => ((Math.floor(v / PATCH_TILES) % PATCHES) + PATCHES) % PATCHES;
+  const patch = seedOf(cell(wx), cell(wy), 0x9a7);
+  const drift = PAINT.drift[Math.floor(hash01(patch) * PAINT.drift.length)]!;
+  return faceTint(mixRgb(colour, drift, hash01(patch + 1) * look.hueDrift), seed, { ...look, hueDrift: 0 });
 }
 
 /** A landform's surface colour, by the material its field says it is. */
@@ -158,7 +158,7 @@ function latticeHeight(lattice: Lattice, i: number, j: number): number {
 }
 
 /** A landform as a faceted heightfield over its own footprint. */
-export function landformMesh(land: MeshBuilder, landform: Landform, origin: PlanetPoint): void {
+export function landformMesh(land: MeshBuilder, landform: Landform, origin: PlanetPoint, look: Look = FLAT_LOOK): void {
   const lattice = landformLattice(landform);
   const { field, step, cells, start } = lattice;
   const cx = landform.x - origin.x;
@@ -180,7 +180,7 @@ export function landformMesh(land: MeshBuilder, landform: Landform, origin: Plan
         const my = (p[1] + q[1] + r[1]) / 3 - cy;
         const sample = fieldSample(field, mx, my);
         const material = sample < 0 ? ROCK : (field.materials[sample] ?? ROCK);
-        const colour = faceTint(materialColour(material, landform.kind), seedOf(landform.seed, i, j, r === c ? 0 : 1));
+        const colour = faceTint(materialColour(material, landform.kind), seedOf(landform.seed, i, j, r === c ? 0 : 1), look);
         // A heightfield's normal always has some up in it: face away from a point far below.
         land.tri(p, q, r, { colour, kind: Kind.land, inside: [mx + cx, my + cy, -1000] });
       }
@@ -189,16 +189,18 @@ export function landformMesh(land: MeshBuilder, landform: Landform, origin: Plan
 }
 
 /**
- * How high the drawn land stands under a planet point, tiles: 0 on open ground.
+ * How high the drawn land stands under a planet point, tiles: 0 on the flat
+ * look's open ground, the hill under it on the painted look's.
  *
  * The hero may walk onto a landform's lower slope - anything under
  * `BLOCK_HEIGHT` - and the slope is drawn there as facets, so a foot left at
  * height 0 is buried in them. This is where a body's foot goes instead: the
  * facets' own height, read off the lattice and split `landformMesh` draws,
  * not the smoother field between them, so the foot is on what is on screen.
+ * The ground's own facets are read the same way (`groundSurface`).
  */
-export function standingHeight(point: PlanetPoint): number {
-  let tallest = 0;
+export function standingHeight(point: PlanetPoint, look: Look = FLAT_LOOK): number {
+  let tallest = groundSurface(point, look);
   for (const landform of planetLandforms()) {
     const dx = wrapDelta(point.x, landform.x);
     const dy = wrapDelta(point.y, landform.y);

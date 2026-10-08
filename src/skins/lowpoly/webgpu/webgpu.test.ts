@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { atmosphereAt } from "../../../game/atmosphere";
 import { DEFAULT_SKY_FRACTION } from "../../../game/horizon";
 import type { DrawCall, FrameUniforms } from "../backend";
+import { FLAT_LOOK, PAINTED_LOOK } from "../look";
 import { lowpolyView } from "../placement";
 import { WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID } from "../shaders";
 import { MAX_PUSHES } from "../sway";
@@ -18,6 +19,7 @@ const frame: FrameUniforms = {
   atmosphere: atmosphereAt(13),
   shake: { x: 1, y: -2 },
   water: { hero: [12.5, 40.25], level: 0.7, wetness: 0.4, rain: 0.6, seconds: 3.5, ripples: new Float32Array(64) },
+  look: FLAT_LOOK,
   sway: { wind: [1.5, 2.5, 0.75, 0], pushes: Float32Array.from({ length: MAX_PUSHES * 4 }, (_, i) => i + 1) },
   width: 1280,
   height: 720,
@@ -58,6 +60,11 @@ describe("the WebGPU uniforms", () => {
     const struct = worldWgsl(false).match(/struct Frame \{([^}]*)\}/)?.[1] ?? "";
     const vec4s = (struct.match(/: vec4f/g)?.length ?? 0) + Number(struct.match(/array<vec4f, (\d+)>/)?.[1] ?? 0);
     expect(vec4s * 4).toBe(FRAME_FLOATS);
+  });
+
+  it("tell the world shader which look to light in, in shading.w", () => {
+    expect(packFrame(frame)[31]).toBe(0);
+    expect(packFrame({ ...frame, look: PAINTED_LOOK })[31]).toBe(1);
   });
 
   it("number the draws list after list, so a list's first draw is the sum of those before it", () => {
