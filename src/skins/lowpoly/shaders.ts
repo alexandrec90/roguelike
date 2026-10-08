@@ -17,11 +17,12 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon"
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
 import { Kind, type Rgb } from "./mesh";
 import { PAINT, PAINT_STEPS } from "./palette";
+import { TOWARD_VIEWER } from "./placement";
 import { MAX_PUSHES, SWAY_GLSL } from "./sway";
 import { WATER_GLSL } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
-const vec3 = (colour: Rgb): string => `vec3(${colour.map(float).join(", ")})`;
+const vec3 = (v: Rgb): string => `vec3(${v.map(float).join(", ")})`;
 
 /**
  * `PAINT`'s colours of light as constants, `PAINT_WARM_0` to `PAINT_DEEP_2`, in
@@ -179,6 +180,8 @@ ${paintConstants("const vec3", vec3)}
 
 ${WATER_GLSL}
 
+const vec3 TOWARD_VIEWER = ${vec3(TOWARD_VIEWER)};
+
 /** One of three by a share 0..1: a face's own pick from a step's colours of light. */
 vec3 pick3(vec3 a, vec3 b, vec3 c, float share) {
   return share < 0.3333 ? a : (share < 0.6667 ? b : c);
@@ -225,6 +228,21 @@ vec3 lit(vec3 colour, bool ground) {
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x) * u_ambient;
 }
 
+/**
+ * Jelly: lit, plus the sun's highlight where it glances toward the eye, and a
+ * rim that brightens and thickens toward the silhouette - thin where you look
+ * straight through it, as a drop of liquid is.
+ */
+vec4 liquid(vec3 colour, float alpha) {
+  vec3 n = normalize(v_normal);
+  float facing = max(dot(n, TOWARD_VIEWER), 0.0);
+  float rim = (1.0 - facing) * (1.0 - facing);
+  float toward = max(dot(n, normalize(u_lightDir + TOWARD_VIEWER)), 0.0);
+  float glint = (0.9 * pow(toward, 48.0) + 0.15 * pow(toward, 6.0)) * u_shading.x;
+  vec3 shaded = lit(colour, false) *(1.0 + 0.35 * rim) + glint * u_ambient;
+  return vec4(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
+}
+
 const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
 
 /** Whether the window takes this device pixel: inside the oval, its rim dithered over the outer fifth. */
@@ -255,6 +273,10 @@ void main() {${clips ? CLIP_GLSL : ""}
     // A lake's middle is deeper than any puddle, and its bed shows darker.
     vec3 bed = ground * 0.7 * (1.0 - 0.45 * smoothstep(0.5, 2.5, water.y));
     colour = depth > 0.0 ? mix(ground, waterColour(v_planet, bed, u_lightDir), smoothstep(0.0, 0.012, depth)) : ground;
+  } else if (v_kind == ${Kind.liquid}) {
+    vec4 jelly = liquid(colour, alpha);
+    colour = jelly.rgb;
+    alpha = jelly.a;
   } else if (v_kind != ${Kind.glow}) {
     colour = lit(colour, false);
   }

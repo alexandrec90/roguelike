@@ -9,15 +9,17 @@ import type { EncounterSim } from "../../game/encounter-sim";
 import { layeredPose } from "../../game/hero/hero-figure";
 import { tracksOf } from "../../game/hero/hero-look";
 import { bladeSweep } from "../../game/hero/swing-trail";
+import { easeYaw } from "../../game/hero/turn";
 import { wadeDepth } from "../../game/lakes";
 import type { PlanetPoint } from "../../game/planet";
 import type { PlayerState } from "../../game/player";
-import { burstMesh, fireballMesh, slimeMesh } from "./actor-mesh";
+import { burstMesh, fireballMesh } from "./actor-mesh";
 import { heroMesh, swingTrailMesh } from "./hero-mesh";
 import { looseSkeleton } from "./hero-sway";
 import { FLAT_LOOK, type Look } from "./look";
 import { MeshBuilder } from "./mesh";
 import { shadowUnder } from "./scenery-mesh";
+import { slimeGaze, slimeMesh } from "./slime-mesh";
 import { standingHeight } from "./terrain-mesh";
 
 /** How far into a lake the hero's shins go, tiles, at the edge of the deep water. */
@@ -26,6 +28,9 @@ const WADE_SINK = 0.4;
 /** The hero's contact shadow, tiles across. */
 const HERO_SHADOW = 0.32;
 
+/** How long a slime's eyes take to swing round to a new gaze, ms: a glance, not a cut. */
+const GAZE_EASE_MS = 90;
+
 export interface ActorInput {
   readonly player: PlayerState;
   readonly elapsedMs: number;
@@ -33,6 +38,8 @@ export interface ActorInput {
   readonly yaw: number;
   /** His live planet point - what the actors are placed relative to. */
   readonly live: PlanetPoint;
+  /** The world's turn this frame - what the actors' meshes are drawn rotated by. */
+  readonly turn: number;
   readonly encounter: EncounterSim;
 }
 
@@ -47,6 +54,9 @@ export class ActorMeshes {
     actorSolid: new MeshBuilder(),
     actorSheer: new MeshBuilder(),
   };
+  /** Each slime's drawn gaze, by id, chasing `slimeGaze`. Presentation only. */
+  private readonly gazes = new Map<number, number>();
+  private lastMs: number | undefined;
 
   constructor(private readonly look: Look = FLAT_LOOK) {}
 
@@ -66,8 +76,20 @@ export class ActorMeshes {
       const sweep = bladeSweep(player.attackMs, layeredPose({ ...tracks, swingMs: undefined }), { yaw: input.yaw });
       swingTrailMesh(b.heroSheer, sweep, stance);
     }
+    const deltaMs = input.elapsedMs - (this.lastMs ?? input.elapsedMs);
+    this.lastMs = input.elapsedMs;
+    const seen = new Set<number>();
     for (const slime of encounter.slimes.slimes) {
-      slimeMesh(b.actorSolid, b.actorSheer, slime, live, this.look);
+      const target = slimeGaze(slime, live);
+      const gaze = easeYaw(this.gazes.get(slime.id) ?? target, target, deltaMs, GAZE_EASE_MS);
+      this.gazes.set(slime.id, gaze);
+      seen.add(slime.id);
+      slimeMesh(b.actorSolid, b.actorSheer, slime, live, { elapsedMs: input.elapsedMs, turn: input.turn, gaze, paint: this.look });
+    }
+    for (const id of this.gazes.keys()) {
+      if (!seen.has(id)) {
+        this.gazes.delete(id);
+      }
     }
     for (const ball of encounter.fireballs) {
       fireballMesh(b.actorSheer, ball, live);

@@ -171,7 +171,7 @@ describe("the painted look's ground", () => {
     const lowest = (actors: ActorMeshes): number => Math.min(...triangles(actors.bytes("heroSolid")).flat().map((p) => p[2]));
     const build = (look: Look): ActorMeshes => {
       const actors = new ActorMeshes(look);
-      actors.build({ player: new HeroDriver({ ...live, turn: 0 }).player, elapsedMs: 0, yaw: 0, live, encounter: new EncounterSim() });
+      actors.build({ player: new HeroDriver({ ...live, turn: 0 }).player, elapsedMs: 0, yaw: 0, live, turn: 0, encounter: new EncounterSim() });
       return actors;
     };
     expect(lowest(build(PAINTED_LOOK)) - lowest(build(FLAT_LOOK))).toBeCloseTo(surface, 4);
