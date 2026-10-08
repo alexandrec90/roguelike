@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { createSlime, DYING_MS, MELT_MS, type Slime } from "../../game/creatures/slime-brain";
 import type { PlanetPoint } from "../../game/planet";
+import { groundSurface } from "./ground-facets";
+import { PAINTED_LOOK } from "./look";
 import { Kind, MeshBuilder, VERTEX_BYTES } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { TOWARD_VIEWER } from "./placement";
 import { eyeOpen, SKIN_ALPHA, skinPoint, slimeBody, slimeGaze, slimeMesh, viewInPlanet, type SlimeLook } from "./slime-mesh";
+import { standingHeight } from "./terrain-mesh";
 
 const HERO: PlanetPoint = { x: 100, y: 100 };
 /** Two tiles ahead of the hero: in front of him on screen, its face toward the camera. */
@@ -113,6 +116,24 @@ describe("a low-poly slime", () => {
     expect(slimeGaze(slime, HERO)).toBeCloseTo(-Math.PI / 2, 9);
     const fresh = createSlime(2, AHEAD, 9, "green");
     expect(slimeGaze(fresh, HERO)).toBe(slimeGaze(createSlime(3, HERO, 9, "fire"), HERO));
+  });
+
+  it("stands on the painted look's hills, and its shadow with it", () => {
+    let at = { x: 0.5, y: 0.5 };
+    for (let k = 0; groundSurface(at, PAINTED_LOOK) <= 0.4; k += 1) {
+      at = { x: 0.5 + (k % 128) * 2, y: 0.5 + Math.floor(k / 128) * 2 };
+    }
+    const slime = createSlime(1, at, 7, "green");
+    const hill = standingHeight(at, PAINTED_LOOK);
+    expect(slimeBody(slime, at, 0).ground).toBeCloseTo(standingHeight(at), 9);
+    expect(slimeBody(slime, at, 0, PAINTED_LOOK).ground).toBeCloseTo(hill, 9);
+    expect(skinPoint(slimeBody(slime, at, 0, PAINTED_LOOK), [0, 0, -1])[2]).toBeCloseTo(hill, 9);
+    const solid = new MeshBuilder();
+    const sheer = new MeshBuilder();
+    slimeMesh(solid, sheer, slime, at, { ...LOOK, paint: PAINTED_LOOK });
+    const shadow = vertices(sheer).filter((v) => v.kind === Kind.shadow);
+    expect(shadow.length).toBeGreaterThan(0);
+    expect(Math.min(...shadow.map((v) => v.pos[2]!))).toBeGreaterThan(hill);
   });
 
   it("sits its flat foot on the ground and carries it up with a hop", () => {

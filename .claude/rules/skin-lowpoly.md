@@ -52,7 +52,41 @@ by point. A new body that forgets its anchor shears apart on the lip.
 
 A body's foot also stands **on the drawn land**, not at height 0: walkable ground runs
 up a landform's lower slope (to `BLOCK_HEIGHT`), so a foot at 0 there is buried in the
-facets. Lift it by `standingHeight`, which reads the facets `landformMesh` draws.
+facets, and the painted look's ground has hills. Lift it by `standingHeight(point, look)`,
+which reads the facets `landformMesh` and `groundMesh` actually draw.
+
+## Two looks, one skin
+
+`?look=painted` (`look.ts`) is a second way to paint the same geometry; the default is
+`flat`. A look is data, handed to every builder and to the shaders - never a branch on
+a global.
+
+| | `flat` | `painted` |
+| --- | --- | --- |
+| Light (`shading.w`) | smooth Lambert plus sky | `painted()` in both shaders: flat steps, each face picking its own colour of light from three a step - `PAINT.warm`, `PAINT.cool`, `PAINT.deep`, baked in by `paintConstants`; lines and mixes in `PAINT_STEPS` |
+| Faces (`faceTint`) | ±4.5% brightness | ±10%, hue drifting to `PAINT.drift`; crowns take a rare `PAINT.accent` |
+| Blobs (`blob`) | dented ball | stretched, leaned, drawn up to a point; some faces split |
+| Foliage (`frond`) | a broadleaf's tiered plates | the same outline, tinted as crowns; some faces split |
+| Split faces (`facet`) | never | three small faces round a middle pushed out (a bump) or in (a dent) |
+| Ground height (`ground-relief.ts`) | level, a hair of wobble | hills to `hills` tiles; colour by warped patch, not by face |
+| Ground faces (`ground-facets.ts`) | two triangles a tile | merged 2×2 and 4×4 planes, split tiles round a bump or a dent |
+
+The ground steps on how much more or less than **level ground** a face is lit, so the
+open field is always the middle step and only a hill's flanks cross a line; a body
+steps on how squarely it faces the sun. Keep the ground's per-face nudge and wobble
+small: a wobble steeper than the hills tips every tile across a step on its own.
+
+**The hills are level wherever something lies flat**: a puddle's basin (water is
+mirrored about height 0), a lake and its shore, and round a landform's foot (its mesh
+starts at 0). A merged plane or a ground bump stands only where `freeToTilt` says no
+water can stand and nothing has settled. `ground-relief.test.ts` holds the height
+field to that.
+
+**A merged plane opens no crack**: a lattice point on its edge is slid onto the edge
+line (`groundVertex`), so the tiles beside it meet the plane exactly. Squares are
+aligned to their own size, which divides `CHUNK_TILES`. `ground-facets.test.ts` holds
+a chunk watertight (its faces' area from above is exactly the area inside its rim) and
+`groundSurface` to the very face drawn.
 
 **A see-through body is half of one.** The sheer pass is neither mirrored nor depth
 written, and nothing culls back faces. So a slime's `Kind.liquid` skin puts only the
@@ -155,11 +189,15 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` · `TOWARD_VIEWER` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `frond` · `frondFaces` · `disc` |
-| `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
-| `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `frond` · `frondFaces` · `facet` · `disc` · `BlobShape` |
+| `shaders.ts` | `WORLD_VERTEX` · `WORLD_FRAGMENT` · `WORLD_FRAGMENT_SOLID` · `paintConstants` |
+| `palette.ts` | `LOWPOLY` · `PAINT` · `PAINT_STEPS` · `faceTint` · `hash01` · `seedOf` |
+| `look.ts` | `Look` · `FLAT_LOOK` · `PAINTED_LOOK` · `parseLook` |
+| `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` · `SceneryLay` · `GroundUnder` |
 | `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
+| `ground-relief.ts` | `latticeVertex` · `calmAt` · `freeToTilt` · `SHORE` |
+| `ground-facets.ts` | `groundVertex` · `groundCell` · `groundSurface` · `GroundCell` |
 | `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` |
 | `sway-pushes.ts` | `pushesOf` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |

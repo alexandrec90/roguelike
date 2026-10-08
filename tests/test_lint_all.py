@@ -9,8 +9,10 @@ the project's typecheck.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -118,3 +120,39 @@ def test_nothing_to_do_names_the_files_it_had_no_linter_for(
     assert lint_all.main(["--paths", "notes.md"]) == 0
     out = capsys.readouterr().out
     assert "notes.md" in out and "nothing to do" in out
+
+
+def _hooks_imports(script: Path) -> set[str]:
+    """The modules `script` imports that live in `scripts/hooks/`, reached through `sys.path`."""
+    hooks = REPO_ROOT / "scripts" / "hooks"
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    names |= {
+        node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module
+    }
+    return {name for name in names if (hooks / f"{name}.py").is_file()}
+
+
+def test_every_hooks_module_a_script_imports_is_one_mypy_is_told_about():
+    """`lint-all.py --changed` hands mypy a changed script by name, without `scripts/hooks`
+    on its path, so a script importing `toolchain` failed the lint on `import-not-found`
+    for code that imports fine when it runs."""
+    overrides = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"][
+        "mypy"
+    ]["overrides"]
+    declared = {
+        module
+        for entry in overrides
+        if entry.get("ignore_missing_imports")
+        for module in entry["module"]
+    }
+    imported = {
+        name for script in (REPO_ROOT / "scripts").glob("*.py") for name in _hooks_imports(script)
+    }
+    assert imported, "no script imports from scripts/hooks; the override is stale"
+    assert imported <= declared, f"add to [[tool.mypy.overrides]]: {sorted(imported - declared)}"

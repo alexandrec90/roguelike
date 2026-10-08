@@ -186,7 +186,7 @@ export class WebGlBackend implements LowpolyBackend {
     gl.uniform3fv(at("u_lightDir"), lightDirection(atmosphere));
     gl.uniform3fv(at("u_ambient"), rgb(atmosphere.ambient));
     gl.uniform3fv(at("u_haze"), rgb(atmosphere.haze));
-    gl.uniform3f(at("u_shading"), 0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight);
+    gl.uniform4f(at("u_shading"), 0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight, frame.look.stepped);
     gl.uniform2f(at("u_hero"), water.hero[0], water.hero[1]);
     gl.uniform2f(at("u_resolution"), frame.width, frame.height);
     const cut = frame.cutaway;

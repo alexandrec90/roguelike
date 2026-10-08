@@ -16,6 +16,7 @@
 
 import type { Atmosphere } from "../../game/atmosphere";
 import type { LowpolyCutaway } from "./cutaway";
+import type { Look } from "./look";
 import type { LowpolyView } from "./placement";
 import type { SwayState } from "./sway";
 
@@ -61,6 +62,8 @@ export interface FrameUniforms {
   readonly atmosphere: Atmosphere;
   readonly shake: { readonly x: number; readonly y: number };
   readonly water: WaterState;
+  /** `?look=`: the shaders read its `stepped`. */
+  readonly look: Look;
   /** The wind and the pushes that lean grass and foliage (`sway.ts`). */
   readonly sway: SwayState;
   /** The drawing buffer, device pixels. */

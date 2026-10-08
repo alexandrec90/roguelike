@@ -44,3 +44,11 @@ warn_redundant_casts = true
 # and `sync-devkit.py --check` fails if this repo edits it). Type-checking it here
 # only produces errors this repo is not allowed to fix.
 exclude = '^scripts/(hooks/|sync-harness\.py)'
+
+# Modules a top-level script imports from `scripts/hooks/` after putting that directory
+# on `sys.path` at run time. mypy is not told that path (it would then follow into the
+# excluded harness), so without this a run naming the script -- `lint-all.py --changed`
+# -- fails on `import-not-found` for code that imports fine when it runs.
+[[tool.mypy.overrides]]
+module = ["harness_events", "toolchain", "untested_symbols"]
+ignore_missing_imports = true

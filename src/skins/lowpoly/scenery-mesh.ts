@@ -14,6 +14,7 @@
 import { speciesHeight } from "../../game/scenery-features";
 import { WALL_RISE } from "../../game/projection";
 import { broadleafMesh } from "./broadleaf-mesh";
+import { FLAT_LOOK, type Look } from "./look";
 import { Kind, MeshBuilder, mixRgb, type Vec3 } from "./mesh";
 import { LOWPOLY, hash01 } from "./palette";
 import { blob, cone, disc, frustum } from "./primitives";
@@ -28,24 +29,51 @@ const SHADOW_ALPHA = 0.32;
  */
 const DRAWN_SHARE = 0.6;
 
-type SpeciesMesh = (solid: MeshBuilder, at: Vec3, height: number, seed: number) => number;
+type SpeciesMesh = (solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look) => number;
 
-/** Draw one species at `at`, and its shadow under it. Returns nothing; both builders grow. */
-export function sceneryMesh(solid: MeshBuilder, sheer: MeshBuilder, species: string, at: Vec3, seed: number): void {
-  const height = (speciesHeight(species) / WALL_RISE) * DRAWN_SHARE * (0.85 + hash01(seed) * 0.3);
-  const build = SPECIES[species] ?? SPECIES.bush!;
-  const spread = build(solid, at, height, seed);
-  shadowUnder(sheer, at, spread);
+/** The height of the drawn ground under a point of the builder's own frame, tiles. */
+export type GroundUnder = (x: number, y: number) => number;
+
+/** How a body is laid: in which look, and on what ground (omitted, level). */
+export interface SceneryLay {
+  readonly look?: Look;
+  readonly ground?: GroundUnder;
 }
 
-/** A soft dark disc under a body, anchored at its foot so it shrinks with it on the lip. */
-export function shadowUnder(sheer: MeshBuilder, at: Vec3, radius: number): void {
-  disc(sheer, [at[0], at[1], at[2] + 0.01], radius, 8, {
-    colour: LOWPOLY.shadow,
-    kind: Kind.shadow,
-    alpha: SHADOW_ALPHA,
-    anchor: [at[0], at[1]],
+/**
+ * Draw one species at `at`, and its shadow under it, lying on the `ground` it
+ * is laid on. Returns nothing; both builders grow.
+ */
+export function sceneryMesh(solid: MeshBuilder, sheer: MeshBuilder, species: string, at: Vec3, seed: number, lay: SceneryLay = {}): void {
+  const height = (speciesHeight(species) / WALL_RISE) * DRAWN_SHARE * (0.85 + hash01(seed) * 0.3);
+  const build = SPECIES[species] ?? SPECIES.bush!;
+  const spread = build(solid, at, height, seed, lay.look ?? FLAT_LOOK);
+  shadowUnder(sheer, at, spread, lay.ground);
+}
+
+/** Corners round a contact shadow. */
+const SHADOW_SIDES = 8;
+
+/**
+ * A soft dark disc under a body, anchored at its foot so it shrinks with it on
+ * the lip. Given the `ground` under it, each corner lies on the slope rather
+ * than the disc hanging level off a hillside.
+ */
+export function shadowUnder(sheer: MeshBuilder, at: Vec3, radius: number, ground?: GroundUnder): void {
+  const style = { colour: LOWPOLY.shadow, kind: Kind.shadow, alpha: SHADOW_ALPHA, anchor: [at[0], at[1]] as const };
+  if (ground === undefined) {
+    disc(sheer, [at[0], at[1], at[2] + 0.01], radius, SHADOW_SIDES, style);
+    return;
+  }
+  const lie = (x: number, y: number): Vec3 => [x, y, ground(x, y) + 0.01];
+  const centre = lie(at[0], at[1]);
+  const rim = Array.from({ length: SHADOW_SIDES }, (_, i) => {
+    const angle = (i / SHADOW_SIDES) * Math.PI * 2;
+    return lie(at[0] + Math.cos(angle) * radius, at[1] + Math.sin(angle) * radius);
   });
+  for (let i = 0; i < SHADOW_SIDES; i += 1) {
+    sheer.tri(centre, rim[i]!, rim[(i + 1) % SHADOW_SIDES]!, style);
+  }
 }
 
 /** A five-sided trunk `height` tall, tapering from `radius` to a little over half of it. */
@@ -69,15 +97,15 @@ function conifer(solid: MeshBuilder, at: Vec3, height: number, seed: number): nu
   return height * 0.2;
 }
 
-function bush(solid: MeshBuilder, at: Vec3, height: number, seed: number): number {
+function bush(solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look): number {
   const r = height * 0.55;
-  blob(solid, [at[0], at[1], at[2] + r * 0.6], [r, r, r * 0.75], { colour: LOWPOLY.bush, kind: Kind.foliage, anchor: [at[0], at[1]] }, seed, 0.22);
+  blob(solid, [at[0], at[1], at[2] + r * 0.6], [r, r, r * 0.75], { colour: LOWPOLY.bush, kind: Kind.foliage, anchor: [at[0], at[1]] }, seed, { jitter: 0.22, look });
   return r;
 }
 
-function boulder(solid: MeshBuilder, at: Vec3, height: number, seed: number): number {
+function boulder(solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look): number {
   const r = height * 0.55;
-  blob(solid, [at[0], at[1], at[2] + r * 0.45], [r, r * 0.85, r * 0.7], { colour: LOWPOLY.rock, anchor: [at[0], at[1]] }, seed, 0.3);
+  blob(solid, [at[0], at[1], at[2] + r * 0.45], [r, r * 0.85, r * 0.7], { colour: LOWPOLY.rock, anchor: [at[0], at[1]] }, seed, { jitter: 0.3, look });
   return r * 0.9;
 }
 

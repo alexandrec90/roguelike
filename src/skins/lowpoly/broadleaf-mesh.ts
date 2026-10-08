@@ -11,6 +11,7 @@
  * Coordinates are tiles, x and y on the ground, z up; `at` is the foot.
  */
 
+import { FLAT_LOOK, type Look } from "./look";
 import { Kind, type MeshBuilder, mixRgb, type Rgb, shadeRgb, type Vec3 } from "./mesh";
 import { LOWPOLY, hash01, seedOf } from "./palette";
 import { frond, frustum } from "./primitives";
@@ -58,7 +59,7 @@ function lean(d: Vec3, theta: number, phi: number): Vec3 {
 
 /** A broadleaf of this shape: draws it, and returns how far its crown reaches from the foot. */
 export function broadleafMesh(canopy: Canopy) {
-  return (solid: MeshBuilder, at: Vec3, height: number, seed: number): number => {
+  return (solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look = FLAT_LOOK): number => {
     const anchor = [at[0], at[1]] as const;
     const rand = (salt: number): number => hash01(seedOf(seed, salt));
     // Wood and leaves alike sway as one body about the foot (`sway.ts`).
@@ -83,6 +84,7 @@ export function broadleafMesh(canopy: Canopy) {
           { centre: plate, radius: r, teeth, lift: r * 0.3, droop: r * 0.22, notch: 0.74, phase: rand(salt + tier * 3 + 3) * Math.PI },
           { colour, kind: Kind.foliage, anchor },
           seedOf(seed, salt, tier),
+          look,
         );
       }
       reach = Math.max(reach, Math.hypot(centre[0] - at[0], centre[1] - at[1]) + radius);
