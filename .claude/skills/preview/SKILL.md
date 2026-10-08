@@ -27,11 +27,22 @@ From the worktree root, as a **background** Bash task (it never exits on its own
 with its output going to a file in the scratchpad:
 
 ```bash
-npm run dev > "<scratchpad>/dev.log" 2>&1
+NO_COLOR=1 npm run dev > "<scratchpad>/dev.log" 2>&1
 ```
 
-Then read the log until it has the `Local:` line, `http://127.0.0.1:<port>/`. If
-`node_modules` is missing, run `npm ci` first. That is fixing the environment, so it is
+`NO_COLOR=1` is not optional. The session's shell sets `FORCE_COLOR`, so Vite colors
+the log even in a file, and the escape codes split both `Local:` and the port: a grep
+for either never matches, and a wait on it never ends.
+
+Then wait for the `Local:` line, `http://127.0.0.1:<port>/`, with a **second
+background** Bash task (`run_in_background`), never a foreground loop. Its completion
+notice carries the line:
+
+```bash
+until grep -qE "Local: |in use|rror" "<scratchpad>/dev.log"; do sleep 1; done; grep -E "Local: |in use|rror" "<scratchpad>/dev.log"
+```
+
+If `node_modules` is missing, run `npm ci` first. That is fixing the environment, so it is
 in scope.
 
 If the log says the port is in use instead, `strictPort` has refused to start. That
@@ -39,7 +50,7 @@ server could be this checkout's from another session, or another checkout's. You
 tell them apart from the page, so do not reuse it. Start again on a pinned port:
 
 ```bash
-VITE_PORT=<printed port + 50> npm run dev > "<scratchpad>/dev.log" 2>&1
+NO_COLOR=1 VITE_PORT=<printed port + 50> npm run dev > "<scratchpad>/dev.log" 2>&1
 ```
 
 ## 3. Give the user the links
