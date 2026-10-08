@@ -1,5 +1,7 @@
+/// <reference types="vitest/config" />
 import { resolve } from "node:path";
 
+import { isAgent } from "std-env";
 import { defineConfig, loadEnv } from "vite";
 
 import { portOffset } from "./src/worktreePort.ts";
@@ -60,6 +62,18 @@ export default defineConfig(({ mode }) => {
     preview: {
       port: portFrom(env, "VITE_PREVIEW_PORT", PREVIEW_PORT + offset),
       strictPort: true,
+    },
+    test: {
+      // Under a coding agent (std-env's `isAgent`, which Vitest reads too), Vitest swaps
+      // in its `agent` reporter, and that reporter pins `silent: "passed-only"` on
+      // itself, so a passing test's `console.log` never prints and `--silent=false`
+      // cannot bring it back. A probe test whose output is the point then reads empty.
+      // Unset there, the reporter falls back to the `silent` option, so the quiet
+      // default stays and the flag does what its documentation says.
+      ...(isAgent && {
+        silent: "passed-only" as const,
+        reporters: [["agent", { silent: undefined }]],
+      }),
     },
     build: {
       rollupOptions: {

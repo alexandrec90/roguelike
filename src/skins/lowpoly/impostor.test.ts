@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { TILE_DEPTH, WALL_RISE } from "../../game/projection";
 import { CLOUD_DEPTH, IMPOSTOR_FRAGMENT, IMPOSTOR_VERTEX } from "./impostor-glsl";
-import { BALL_VERTICES, IMPOSTOR_BYTES, ImpostorBuilder, QUAD_REACH, SCREEN_RISE, SCREEN_UP, TOWARD_VIEWER } from "./impostor";
+import { BALL_VERTICES, IMPOSTOR_BYTES, ImpostorBuilder, QUAD_REACH, SCREEN_RISE, SCREEN_UP } from "./impostor";
 import { Kind } from "./mesh";
+import { TOWARD_VIEWER } from "./placement";
 import { IMPOSTOR_WGSL } from "./webgpu/wgsl-impostor";
 
 interface Corner {

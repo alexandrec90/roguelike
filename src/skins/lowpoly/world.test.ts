@@ -19,6 +19,7 @@ import { lightDirection } from "./sky-light";
 import { MESHED_SPECIES } from "./scenery-mesh";
 import { WORLD_FRAGMENT, WORLD_VERTEX } from "./shaders";
 import { groundColour, landformStep } from "./terrain-mesh";
+import { worldWgsl } from "./webgpu/wgsl-world";
 import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE } from "./world-chunks";
 
 describe("the planet in chunks", () => {
@@ -117,7 +118,7 @@ describe("the frame's moving meshes", () => {
   it("builds the hero solid with his shadow, and nothing for actors that are not there", () => {
     const actors = new ActorMeshes();
     const hero = new HeroDriver({ x: 128, y: 128, turn: 0 });
-    actors.build({ player: hero.player, elapsedMs: 0, yaw: 0, live: { x: 128, y: 128 }, encounter: new EncounterSim() });
+    actors.build({ player: hero.player, elapsedMs: 0, yaw: 0, live: { x: 128, y: 128 }, turn: 0, encounter: new EncounterSim() });
     expect(ACTOR_MESH_KEYS).toHaveLength(4);
     expect(actors.bytes("heroSolid").byteLength).toBeGreaterThan(0);
     expect(actors.bytes("heroSheer").byteLength).toBeGreaterThan(0);
@@ -128,7 +129,7 @@ describe("the frame's moving meshes", () => {
     const actors = new ActorMeshes();
     const hero = new HeroDriver({ x: 128, y: 128, turn: 0 });
     const build = (attackMs: number | undefined) => {
-      actors.build({ player: { ...hero.player, attackMs }, elapsedMs: 0, yaw: 0, live: { x: 128, y: 128 }, encounter: new EncounterSim() });
+      actors.build({ player: { ...hero.player, attackMs }, elapsedMs: 0, yaw: 0, live: { x: 128, y: 128 }, turn: 0, encounter: new EncounterSim() });
       return actors.bytes("heroSheer").byteLength;
     };
     const resting = build(undefined);
@@ -188,6 +189,14 @@ describe("the shaders and the light", () => {
     expect(WORLD_VERTEX).toContain("const float ROLL_ROWS = 48.0;");
     expect(WORLD_VERTEX).toContain("const float TILE_DEPTH = 12.0;");
     expect(WORLD_FRAGMENT).toContain("discard");
+  });
+
+  it("give jelly its own gloss in both shading languages, looking along the projection's eye", () => {
+    expect(WORLD_FRAGMENT).toContain(`v_kind == ${Kind.liquid}`);
+    expect(WORLD_FRAGMENT).toContain("const vec3 TOWARD_VIEWER = vec3(0.0, -0.8, 0.6);");
+    const wgsl = worldWgsl(true);
+    expect(wgsl).toContain(`input.kind == ${Kind.liquid}u`);
+    expect(wgsl).toContain("const TOWARD_VIEWER = vec3f(0.0, -0.8, 0.6);");
   });
 
   it("lights from the atmosphere's screen direction: left light, lit from the left, always from above", () => {

@@ -24,9 +24,10 @@
  */
 
 import { ROLL_ROWS } from "../../game/horizon";
-import { QUAD_REACH, SCREEN_RISE, SCREEN_UP, TOWARD_VIEWER } from "./impostor";
+import { QUAD_REACH, SCREEN_RISE, SCREEN_UP } from "./impostor";
 import { Kind } from "./mesh";
 import { LOWPOLY } from "./palette";
+import { TOWARD_VIEWER } from "./placement";
 import { PLACE_GLSL } from "./shaders";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);

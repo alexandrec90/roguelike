@@ -44,12 +44,11 @@ export const QUAD_REACH = 1.35;
 export const SCREEN_RISE = Math.hypot(TILE_DEPTH, WALL_RISE);
 
 /**
- * The screen's up axis and the way toward the viewer, as local directions (x
- * right, y ahead, z up): with x they are the frame a ball's per-pixel normal is
- * built in, so it lights in the same local frame as every mesh face.
+ * The screen's up axis, as a local direction (x right, y ahead, z up): with x
+ * and `placement.ts`' `TOWARD_VIEWER` it is the frame a ball's per-pixel normal
+ * is built in, so it lights in the same local frame as every mesh face.
  */
 export const SCREEN_UP: Vec3 = [0, TILE_DEPTH / SCREEN_RISE, WALL_RISE / SCREEN_RISE];
-export const TOWARD_VIEWER: Vec3 = [0, -WALL_RISE / SCREEN_RISE, TILE_DEPTH / SCREEN_RISE];
 
 /** Vertices per ball: two triangles. */
 export const BALL_VERTICES = 6;

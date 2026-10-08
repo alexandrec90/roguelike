@@ -17,6 +17,7 @@
 # Regenerate only when adopting the gate: python scripts/hooks/structure_check.py --seed
 complexity::scripts/lint-all.py::main = 17
 dependency::package.json::@types/node = 1
+dependency::package.json::std-env = 1
 dependency::package.json::typescript = 1
 dependency::package.json::vite = 1
 dependency::package.json::vitest = 1
@@ -38,3 +39,6 @@ swallowed_errors::scripts/notify.py = 1
 #   file_lines::scripts/hooks/enforce-capped-bash.py -> 629
 #   file_lines::scripts/hooks/harness_config.py -> 655
 #   file_lines::scripts/hooks/structure_check.py -> 1042
+
+# 2026-10-08  recorded: std-env: vitest's own agent detection, read in vite.config.ts so the agent reporter honours --silent; already installed as vitest's dependency
+#   dependency::package.json::std-env -> 1

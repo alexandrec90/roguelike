@@ -28,6 +28,19 @@ import { anchorFoot, walkableBand } from "../../game/viewport";
 /** The logical render target: always this many scanlines tall, as wide as the window's shape allows. */
 export const LOGICAL_HEIGHT = 180;
 
+/**
+ * The unit direction from the field toward the eye, local frame (x right, y
+ * ahead, z up). Every point on a screen ray shares `y·TILE_DEPTH + z·WALL_RISE`,
+ * so the ray runs (0, WALL_RISE, −TILE_DEPTH) away from the viewer - one
+ * direction for the whole screen, because the projection is parallel. What a
+ * face turned this way shows; the shaders' gloss reads it too.
+ */
+export const TOWARD_VIEWER: readonly [number, number, number] = [
+  0,
+  -WALL_RISE / Math.hypot(WALL_RISE, TILE_DEPTH),
+  TILE_DEPTH / Math.hypot(WALL_RISE, TILE_DEPTH),
+];
+
 /** Depths the z-buffer spans, in rows ahead of the hero. */
 export const DEPTH_NEAR = -48;
 export const DEPTH_FAR = 272;
