@@ -33,7 +33,7 @@ include = ["roguelike*"]
 # `testpaths` is what keeps `scripts/hooks/tests/` out of the application suite —
 # those are the vendored harness's own stdlib-only tests and run separately.
 testpaths = ["tests/"]
-addopts = "-q -p devkit_temproot"
+addopts = "-p devkit_temproot"
 pythonpath = ["scripts/pytest-plugins"]
 
 [tool.mypy]
@@ -44,3 +44,11 @@ warn_redundant_casts = true
 # and `sync-devkit.py --check` fails if this repo edits it). Type-checking it here
 # only produces errors this repo is not allowed to fix.
 exclude = '^scripts/(hooks/|sync-harness\.py)'
+
+# Top-level scripts import these from `scripts/hooks/` by putting that directory on
+# `sys.path` at run time, which mypy cannot see: a `lint-all.py --changed` run that
+# names such a script (any merge bringing a devkit upgrade) failed on the import alone.
+# `tests/test_mypy_config.py` fails when a script imports one not listed here.
+[[tool.mypy.overrides]]
+module = ["harness_events", "toolchain", "untested_symbols"]
+ignore_missing_imports = true

@@ -35,8 +35,8 @@ const STEP_STRIDE = 512;
 const STEP_FLOATS = (3 + MAX_RIPPLES) * 4;
 
 /** How hard a footstep pushes the surface down, and over how wide a patch, tiles. */
-const IMPULSE_PUSH = 0.3;
-const IMPULSE_RADIUS = 0.11;
+const IMPULSE_PUSH = 0.22;
+const IMPULSE_RADIUS = 0.07;
 
 export const WAVE_WGSL = `
 struct Step {

@@ -1,5 +1,6 @@
 import "./style.css";
 import { isSkinKey } from "./game/keybindings";
+import { attachOptionsPanel } from "./options-panel";
 import { nextSkin, parseSkin, skinHref, type SkinId, type SkinModule } from "./skins/skin";
 
 // Which look to draw the world in (`src/skins/skin.ts`): `?skin=pixel` or
@@ -33,5 +34,8 @@ window.addEventListener("keydown", (event) => {
     window.location.assign(skinHref(window.location.href, nextSkin(skin)));
   }
 });
+
+// Every knob above and in `scene-options.ts`, as controls in the corner (`knobs.ts`).
+attachOptionsPanel(host, skin, window.location);
 
 void SKIN_MODULES[skin]().then((module) => module.mount(host, query));
