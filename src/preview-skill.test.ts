@@ -76,6 +76,28 @@ describe("the /preview skill", () => {
     expect(fallback?.label.toLowerCase().replace("-", "")).toContain(DEFAULT_SKIN);
   });
 
+  it("starts the server with plain output, so the URL line can be found", () => {
+    // A session waited on `grep "Local:"` in a colored log: the escapes split the
+    // word from its colon, the loop never ended, and its 90 s ran out in the foreground.
+    const starts = SKILL.split("\n").filter((line) => line.includes("npm run dev >"));
+    expect(starts.length).toBeGreaterThanOrEqual(2);
+    for (const line of starts) {
+      expect(line, line).toMatch(/^NO_COLOR=1 /);
+    }
+  });
+
+  it("waits for a line Vite really prints, in the background", () => {
+    const wait = /^until grep -qE "([^"]+)" .*; do sleep 1; done;/m.exec(SKILL);
+    expect(wait, "the skill's wait loop").not.toBeNull();
+    const pattern = new RegExp(wait![1]!);
+    // Vite 8's own lines, as `NO_COLOR=1 npm run dev` writes them.
+    expect(pattern.test("  ➜  Local:   http://127.0.0.1:4103/")).toBe(true);
+    expect(pattern.test("error when starting dev server:")).toBe(true);
+    expect(pattern.test("Error: Port 4103 is already in use")).toBe(true);
+    expect(pattern.test("  VITE v8.2.2  ready in 1334 ms")).toBe(false);
+    expect(SKILL).toContain("second\nbackground** Bash task (`run_in_background`)");
+  });
+
   it("names the key that really switches the skin", () => {
     const key = /\*\*(F\d+)\*\* cycles the\s+skin/.exec(SKILL)?.[1];
     expect(SKIN_KEYS).toContain(key);

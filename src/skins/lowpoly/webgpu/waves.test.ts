@@ -8,6 +8,7 @@ import {
   stepWaveGrid,
   WAVE_K,
   WAVE_N,
+  WAVE_RES,
   windowCell,
 } from "./waves";
 
@@ -75,8 +76,8 @@ describe("the toroidal window", () => {
   });
 
   it("finds the hero's cell on the planet, wrapped", () => {
-    expect(heroCellOf(1.5)).toBe(12);
-    expect(heroCellOf(-0.125)).toBe(PLANET_CELLS - 1);
+    expect(heroCellOf(1.5)).toBe(1.5 * WAVE_RES);
+    expect(heroCellOf(-1 / WAVE_RES)).toBe(PLANET_CELLS - 1);
     expect(heroCellOf(256)).toBe(0);
   });
 });

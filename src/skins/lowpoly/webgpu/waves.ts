@@ -23,17 +23,28 @@
 
 import { PLANET_TILES } from "../../../game/planet";
 
-/** Grid cells per tile, each axis. */
-export const WAVE_RES = 8;
+/**
+ * Grid cells per tile, each axis. A ring can be no thinner than a few cells, so
+ * this is what decides whether a disturbance reads as a ring or as a blob: at 8
+ * a footstep's wake was fat, smooth bulges - molten metal, not water.
+ */
+export const WAVE_RES = 16;
 
-/** Cells per side of the grid: 64 tiles of the planet, centred on the hero. */
+/**
+ * Cells per side of the grid: 32 tiles of the planet, centred on the hero -
+ * the whole flat field (`fieldRows`, ±10 tiles across), and the near lip.
+ */
 export const WAVE_N = 512;
 
 /** Cells per side of the planet at this resolution - the grid divides it. */
 export const PLANET_CELLS = PLANET_TILES * WAVE_RES;
 
-/** How fast a ring spreads, tiles a second. */
-export const WAVE_SPEED = 0.9;
+/**
+ * How fast a ring spreads, tiles a second. A slow ring reads as something
+ * thicker than water - molten metal - and a quick one spreads thin before the
+ * damping takes it, so a drop shows as a ring rather than as a dent.
+ */
+export const WAVE_SPEED = 1.6;
 
 /** One step of the simulation, seconds: fixed, so a slow frame takes more steps rather than a bigger one. */
 export const WAVE_STEP_S = 1 / 120;
@@ -54,7 +65,7 @@ export const DROPS_PER_TILE_S = 1.5;
 export const DROP_CHANCE = (DROPS_PER_TILE_S * WAVE_STEP_S) / (WAVE_RES * WAVE_RES);
 
 /** How far a drop pushes its cell down; its neighbours go half as far, the corners a quarter. */
-export const DROP_KICK = 0.12;
+export const DROP_KICK = 0.25;
 
 /** The planet cell, nearest the hero's cell, that buffer index `index` stands for this step. */
 export function windowCell(index: number, heroCell: number, n: number = WAVE_N): number {

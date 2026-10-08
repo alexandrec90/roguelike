@@ -125,10 +125,17 @@ three-blade tufts, then meadow patches of five-blade sheaves. `Kind.grass` and i
 - **What it shows** is the world drawn mirrored, height negated, into a half-size target.
   In a parallel projection that is the exact planar reflection. The mirror draws no
   ground, so it must also skip what the ground would hide: nothing past the horizon line.
+- **How it is shaded** is `WATER_LOOK` (`water-glsl.ts`), one set of numbers for both
+  backends: the water's own body (the bed, going to `LOWPOLY.waterDeep` as it deepens)
+  with at most half the sky over it, and a wave shown by its *tilt*, never by its
+  height. A near-total mirror, or a crest brightened for how high it stands, reads as
+  molten metal (`water-look.test.ts`).
 - **How it moves**, WebGL2: procedural rings as slope (`water-glsl.ts`) - rain cells
   pinned to the planet, and `MAX_RIPPLES` footstep and landing rings from `WetWorld`.
 - **How it moves**, WebGPU: the wave equation on a 512² planet-fixed toroidal grid round
-  the hero (`webgpu/waves.ts`), stepped at a fixed 120 Hz in compute; raindrops are
+  the hero (`webgpu/waves.ts`) - 16 cells a tile, so ±16 tiles: the whole flat field.
+  Do not trade cells per tile for reach: a ring is a few cells wide at least, and at 8
+  a tile a footstep's wake was fat bulges that read as molten metal. Stepped at a fixed 120 Hz in compute; raindrops are
   seeded dimples, footsteps and landings impulses, dry ground holds the surface at zero
   so rings bounce off the shore. A surface pass (`webgpu/wave-surface.ts`) writes height
   and slope to a filterable texture the water samples once.
