@@ -43,6 +43,11 @@ export const Kind = {
   grass: 7,
   /** A mushroom: nods, stiffer than grass (`sway.ts`). Lit as a body. */
   sprig: 8,
+  /**
+   * Jelly: sheer and glossy - lit like a body, plus a highlight and a rim that
+   * thickens toward the silhouette, as a drop of liquid does. A slime's skin.
+   */
+  liquid: 9,
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];
@@ -86,7 +91,7 @@ export class MeshBuilder {
       if (normal[0] * out[0]! + normal[1] * out[1]! + normal[2] * out[2]! < 0) {
         normal = [-normal[0], -normal[1], -normal[2]];
       }
-    } else if ((style.kind === Kind.ground || style.kind === Kind.shadow || style.kind === Kind.water) && normal[2] < 0) {
+    } else if (liesFlat(style.kind) && normal[2] < 0) {
       // Anything lying on the ground faces the sky, whichever way it was wound.
       normal = [-normal[0], -normal[1], -normal[2]];
     }
@@ -94,6 +99,21 @@ export class MeshBuilder {
     for (const vertex of [a, b, c]) {
       this.push(vertex, normal, style);
     }
+  }
+
+  /**
+   * One triangle with a normal per corner, so the shader blends them across it
+   * and the surface reads as curved rather than faceted. For the few things that
+   * are meant to look soft - a slime's jelly - against a faceted world.
+   */
+  smoothTri(a: Vec3, b: Vec3, c: Vec3, normals: readonly [Vec3, Vec3, Vec3], style: Omit<FaceStyle, "inside">): void {
+    if (faceNormal(a, b, c) === null) {
+      return;
+    }
+    this.reserve(3);
+    this.push(a, normals[0], style);
+    this.push(b, normals[1], style);
+    this.push(c, normals[2], style);
   }
 
   /** Two triangles, `a b c` and `a c d`: a quad wound in order. */
@@ -147,6 +167,11 @@ export class MeshBuilder {
     this.floats = new Float32Array(grown);
     this.bytes = new Uint8Array(grown);
   }
+}
+
+/** The kinds that lie on the ground rather than stand on it. */
+function liesFlat(kind: Kind | undefined): boolean {
+  return kind === Kind.ground || kind === Kind.shadow || kind === Kind.water;
 }
 
 /** Unit normal of `a b c` by the right-hand rule, or null for a sliver with no area. */

@@ -1,10 +1,10 @@
 /**
- * What moves, rebuilt every frame: the slimes, the fireballs in flight and the
- * bursts they leave. A few hundred triangles, into one dynamic buffer.
+ * What moves, rebuilt every frame: the fireballs in flight and the bursts
+ * they leave (the slimes are `slime-mesh.ts`). A few hundred triangles, into
+ * one dynamic buffer.
  *
  * All of it reads the shared simulation (`encounter-sim.ts`) and decides
- * nothing: a slime's hop height, squash and melt are the sim's numbers; this
- * file only says they look like a faceted gumdrop.
+ * nothing: a fireball's flight and a burst's age are the sim's numbers.
  *
  * Coordinates are planet tiles from the hero's live position, unrotated - the
  * same frame a chunk is drawn in with its offset at zero.
@@ -12,44 +12,15 @@
 
 import type { Burst } from "../../game/encounter-sim";
 import { BURST_MS } from "../../game/encounter-sim";
-import { MELT_MS, type Slime } from "../../game/creatures/slime-brain";
-import type { SlimeVariant } from "../../game/creatures/slime-palette";
 import { FIREBALL_HEIGHT, fireballPoint, type Fireball } from "../../game/fire/fireball";
 import { wrapDelta, type PlanetPoint } from "../../game/planet";
 import { WALL_RISE } from "../../game/projection";
-import { Kind, MeshBuilder, mixRgb, rgb, type Rgb, type Vec3 } from "./mesh";
+import { Kind, MeshBuilder, mixRgb, type Rgb, type Vec3 } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { blob, disc } from "./primitives";
-import { shadowUnder } from "./scenery-mesh";
-import { standingHeight } from "./terrain-mesh";
-
-const SLIME_COLOURS: Readonly<Record<SlimeVariant, Rgb>> = {
-  green: rgb("#6cc98a"),
-  fire: rgb("#f08a4b"),
-  frost: rgb("#8fd3f0"),
-  arcane: rgb("#a77be0"),
-};
-
-/** A slime's half-width, tiles. */
-const SLIME_RADIUS = 0.3;
 
 function offsetOf(point: PlanetPoint, hero: PlanetPoint): readonly [number, number] {
   return [wrapDelta(point.x, hero.x), wrapDelta(point.y, hero.y)];
-}
-
-/** One slime: squashed by its spring, lifted by its hop, melted flat as it dies. */
-export function slimeMesh(solid: MeshBuilder, sheer: MeshBuilder, slime: Slime, hero: PlanetPoint): void {
-  const [x, y] = offsetOf(slime.at, hero);
-  const melt = slime.mode === "dying" ? Math.min(slime.modeMs / MELT_MS, 1) : 0;
-  const squash = slime.mode === "dying" ? 0 : slime.squash.value;
-  const wide = SLIME_RADIUS * (1 - squash * 0.5) * (1 + melt * 0.8);
-  const tall = SLIME_RADIUS * 0.85 * (1 + squash) * (1 - melt * 0.85);
-  const ground = standingHeight(slime.at);
-  const lift = ground + slime.lift / WALL_RISE;
-  const base = SLIME_COLOURS[slime.variant];
-  const colour = slime.flashMs > 0 ? mixRgb(base, [1, 1, 1], 0.75) : base;
-  blob(solid, [x, y, lift + tall * 0.8], [wide, wide, tall], { colour, anchor: [x, y] }, slime.seed, 0.12);
-  shadowUnder(sheer, [x, y, ground], wide * 0.9);
 }
 
 /** A fireball: a bright faceted core at hand height, a dimmer shell round it. */
