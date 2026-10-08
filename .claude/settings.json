@@ -20,5 +20,8 @@
       ".venv",
       "node_modules"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "chrome-devtools"
+  ]
 }
