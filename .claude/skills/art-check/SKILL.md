@@ -23,15 +23,14 @@ so an animation, a light pass and a hand-drawn prop all reach the lab the same w
 
 ## 2. Serve it
 
-From **this worktree**, never by switching branches under a running server:
-
-```
-npm run dev
-```
+From **this worktree**, never by switching branches under a running server, with
+`/preview` (`.claude/skills/preview/`). It starts the server in the background with plain
+output and waits for the URL in a second background task. A bare dev-server start colors
+its log, so a wait for the URL line never matches.
 
 Each worktree carries its own port lease, so several branches can be up at once and
-compared by switching tabs. Note the port the server prints; the lab is at
-`/lab.html` on it.
+compared by switching tabs. Use the port `/preview` reports the server printed; the lab is
+at `/lab.html` on it.
 
 ## 3. Drive it
 
