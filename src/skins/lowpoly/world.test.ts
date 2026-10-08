@@ -12,6 +12,7 @@ import { bladeSweep } from "../../game/hero/swing-trail";
 import { ACTOR_MESH_KEYS, ActorMeshes } from "./actor-frame";
 import { nearestFirst } from "./lowpoly-game";
 import { heroHeightPx, heroMesh, swingTrailMesh } from "./hero-mesh";
+import { BALL_VERTICES, IMPOSTOR_BYTES } from "./impostor";
 import { Kind, MeshBuilder, VERTEX_BYTES } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { lightDirection } from "./sky-light";
@@ -28,6 +29,19 @@ describe("the planet in chunks", () => {
     expect(one.ground).toEqual(two.ground);
     // Two flat triangles a tile, kept apart from what stands so the mirror never draws them.
     expect(one.ground.byteLength / VERTEX_BYTES).toBe(CHUNK_TILES * CHUNK_TILES * 2 * 3);
+  });
+
+  it("makes crowns impostor balls only when asked, and leaves fewer triangles standing for it", () => {
+    const meshed = buildChunk(3, 5);
+    const balls = buildChunk(3, 5, "impostor");
+    expect(meshed.balls.byteLength).toBe(0);
+    expect(balls.balls.byteLength).toBeGreaterThan(0);
+    expect(balls.balls.byteLength % (IMPOSTOR_BYTES * BALL_VERTICES)).toBe(0);
+    expect(balls.solid.byteLength).toBeLessThan(meshed.solid.byteLength);
+    // Everything else is the same planet.
+    expect(balls.ground).toEqual(meshed.ground);
+    expect(balls.land).toEqual(meshed.land);
+    expect(balls.sheer).toEqual(meshed.sheer);
   });
 
   it("draws each chunk at its image nearest the hero, round the wrap", () => {

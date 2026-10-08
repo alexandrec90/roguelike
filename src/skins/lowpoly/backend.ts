@@ -19,9 +19,23 @@ import type { LowpolyCutaway } from "./cutaway";
 import type { LowpolyView } from "./placement";
 import type { SwayState } from "./sway";
 
-/** A buffer of `mesh.ts` vertices on the GPU. */
+/** A buffer of `mesh.ts` vertices - or of `impostor.ts` ones - on the GPU. */
 export interface DrawableHandle {
   count: number;
+}
+
+/** Which vertex a buffer holds: a flat-shaded triangle's (`mesh.ts`) or an impostor ball's (`impostor.ts`). */
+export type VertexLayout = "mesh" | "impostor";
+
+/**
+ * The impostor draws of a frame (`impostor.ts`): balls written into the depth
+ * buffer, volumes blended over everything far to near, and the balls that
+ * show in the water.
+ */
+export interface ImpostorScene {
+  readonly balls: readonly DrawCall[];
+  readonly volumes: readonly DrawCall[];
+  readonly mirrored: readonly DrawCall[];
 }
 
 /** One draw: a buffer, where its origin is from the hero, and the turn it is drawn at. */
@@ -68,6 +82,8 @@ export interface FrameUniforms {
   readonly height: number;
   /** The window round the hero, shake included; absent when no land stands over him. */
   readonly cutaway?: LowpolyCutaway;
+  /** The hour's cloud shade tone (`cloudTones`), for the side of a cloud away from the sun. */
+  readonly cloudShade: readonly [number, number, number];
 }
 
 /**
@@ -87,13 +103,14 @@ export interface FrameScene {
   /** The solids near enough that their reflection can land in water on screen (`MIRROR_ROWS`). */
   readonly mirrored: readonly DrawCall[];
   readonly sheers: readonly DrawCall[];
+  readonly impostors: ImpostorScene;
   readonly rain: RainState;
 }
 
 export interface LowpolyBackend {
   readonly kind: GpuKind;
   /** A buffer for geometry, filled now (static) or every frame (`update`). */
-  createDrawable(bytes?: Uint8Array): DrawableHandle;
+  createDrawable(bytes?: Uint8Array, layout?: VertexLayout): DrawableHandle;
   update(drawable: DrawableHandle, bytes: Uint8Array): void;
   render(frame: FrameUniforms, scene: FrameScene): void;
 }
@@ -107,9 +124,12 @@ export type GpuChoice = GpuKind | "auto";
  * `?msaa=` - samples per pixel on screen: 4 by default, smoothing every faceted
  * edge, or 1 to turn it off. Multisampling is paid in memory traffic on every
  * full-screen layer, which an integrated GPU sharing system memory feels most.
+ * `fallback` is what nothing (or nonsense) asks for: 1 at `?res=low`, where a
+ * smoothed edge would blur the very pixels the mode is for.
  */
-export function parseMsaa(raw: string | null): 1 | 4 {
-  return raw?.trim() === "1" ? 1 : 4;
+export function parseMsaa(raw: string | null, fallback: 1 | 4 = 4): 1 | 4 {
+  const value = raw?.trim();
+  return value === "1" ? 1 : value === "4" ? 4 : fallback;
 }
 
 export function parseGpu(raw: string | null): GpuChoice {

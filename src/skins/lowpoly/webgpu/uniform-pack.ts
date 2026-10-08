@@ -31,9 +31,9 @@ export const DRAW_FLOATS = 8;
  * | roll | ground top | roll height | knee | atan(rows / knee) |
  * | depthShake | near | far | shake x | shake y |
  * | hero | planet x | planet y | buffer width | buffer height |
- * | lightDir | x | y | z | - |
- * | ambient | r | g | b | - |
- * | haze | r | g | b | - |
+ * | lightDir | x | y | z | cloud shade r |
+ * | ambient | r | g | b | cloud shade g |
+ * | haze | r | g | b | cloud shade b |
  * | shading | sun | shadow strength | daylight | - |
  * | water | level | wetness | rain | seconds |
  * | sim | hero cell x | hero cell y | - | - |
@@ -50,9 +50,10 @@ export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32A
   out.set([view.layout.groundTop, view.layout.rollHeight, view.knee, view.atanRows], 4);
   out.set([DEPTH_NEAR, DEPTH_FAR, frame.shake.x, frame.shake.y], 8);
   out.set([water.hero[0], water.hero[1], frame.width, frame.height], 12);
-  out.set([light[0], light[1], light[2], 0], 16);
-  out.set([ambient[0], ambient[1], ambient[2], 0], 20);
-  out.set([haze[0], haze[1], haze[2], 0], 24);
+  const cloud = frame.cloudShade;
+  out.set([light[0], light[1], light[2], cloud[0]], 16);
+  out.set([ambient[0], ambient[1], ambient[2], cloud[1]], 20);
+  out.set([haze[0], haze[1], haze[2], cloud[2]], 24);
   out.set([0.35 + 0.65 * atmosphere.daylight, atmosphere.shadowStrength, atmosphere.daylight, 0], 28);
   out.set([water.level, water.wetness, water.rain, water.seconds], 32);
   out.set([heroCellOf(water.hero[0]), heroCellOf(water.hero[1]), 0, 0], 36);
@@ -63,10 +64,11 @@ export function packFrame(frame: FrameUniforms, out: Float32Array = new Float32A
   return out;
 }
 
-/** One run of draws, all mirrored (-1) or all not (1). */
+/** One run of draws, all mirrored (-1) or all not (1); `volume` marks the impostors' volume pass. */
 export interface DrawList {
   readonly calls: readonly DrawCall[];
   readonly mirror: number;
+  readonly volume?: boolean;
 }
 
 /** Entries the lists need in all. */
@@ -77,15 +79,15 @@ export function drawCount(lists: readonly DrawList[]): number {
 /**
  * A frame's draws, list after list in the order the passes issue them, so draw
  * `n` is entry `n` and each list starts where the last ended. Each entry is its
- * offset, the cosine and sine of its turn, and the mirror.
+ * offset, the cosine and sine of its turn, the mirror, and 1 in a volume pass.
  */
 export function packDraws(lists: readonly DrawList[], out?: Float32Array): Float32Array {
   const count = drawCount(lists);
   const target = out !== undefined && out.length >= count * DRAW_FLOATS ? out : new Float32Array(count * DRAW_FLOATS);
   let at = 0;
-  for (const { calls, mirror } of lists) {
+  for (const { calls, mirror, volume } of lists) {
     for (const call of calls) {
-      target.set([call.offset[0], call.offset[1], Math.cos(call.turn), Math.sin(call.turn), mirror, 0, 0, 0], at);
+      target.set([call.offset[0], call.offset[1], Math.cos(call.turn), Math.sin(call.turn), mirror, volume === true ? 1 : 0, 0, 0], at);
       at += DRAW_FLOATS;
     }
   }

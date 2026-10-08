@@ -172,6 +172,7 @@ export function landformShape(landform: Landform): (dx: number, dy: number) => n
   const outline = angular(seed, 9);
   const crags = angular(seed ^ 0x5a, 23);
   const bumps = rugged(seed ^ 0x77);
+  const volcano = isVolcano(landform);
   switch (landform.kind) {
     case "mountain": {
       // A main peak and two shoulders, each a cone whose radius wanders with
@@ -200,7 +201,8 @@ export function landformShape(landform: Landform): (dx: number, dy: number) => n
         }
         const ridge = Math.abs(Math.sin(theta * spurs + twist + r * 0.35));
         const valley = 1 - 0.22 * (1 - ridge) * clamp01(r / (R * 0.25));
-        return h * valley * (0.92 + 0.1 * crags(theta) + 0.08 * bumps(dx * 0.8, dy * 0.8));
+        const rough = h * valley * (0.92 + 0.1 * crags(theta) + 0.08 * bumps(dx * 0.8, dy * 0.8));
+        return volcano ? crater(rough, r, R, H) : rough;
       };
     }
     case "mesa":
@@ -376,6 +378,30 @@ function materialOf(landform: Landform, h: number, steepness: number): Material 
     case "tower":
       return isRoofed(landform) && h > landform.height + 0.5 ? ROOF : WALL;
   }
+}
+
+/** Share of mountains that are volcanoes: their summit is a crater, and it smokes (`volcanoes.ts`). */
+export const VOLCANO_SHARE = 0.35;
+
+/** A volcano's summit is cut off at this share of its height... */
+export const CRATER_RIM = 0.86;
+
+/** ...and its crater sinks this share of its height below the rim, at the vent. */
+const CRATER_DEPTH = 0.12;
+
+/** The crater's radius, as a share of the mountain's footprint. */
+export const CRATER_RADIUS = 0.15;
+
+/** Whether a landform is a volcano: a seeded share of the mountains. */
+export function isVolcano(landform: Landform): boolean {
+  return landform.kind === "mountain" && hashUnit(9, 9, landform.seed ^ 0x7a1c) < VOLCANO_SHARE;
+}
+
+/** A mountain's height `h` at `r` tiles from its centre, with the summit cut into a crater. */
+function crater(h: number, r: number, R: number, H: number): number {
+  const rim = H * CRATER_RIM;
+  const bowl = clamp01(1 - r / (R * CRATER_RADIUS));
+  return Math.min(h, rim) - H * CRATER_DEPTH * bowl * bowl * (3 - 2 * bowl);
 }
 
 /** Half the towers wear a pointed roof; the rest are crenellated. */

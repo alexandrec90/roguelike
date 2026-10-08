@@ -26,6 +26,7 @@ import { mouseButtonOf } from "../../game/keybindings";
 import { readSceneOptions } from "../../game/scene-options";
 import { puddleField } from "../../game/water/puddle-field";
 import { backendOrder, parseGpu, parseMsaa, type GpuChoice, type LowpolyBackend } from "./backend";
+import { lowResCanvas, readLookOptions, type LookOptions } from "./look-options";
 import { LowpolyGame } from "./lowpoly-game";
 import { backingSize } from "./placement";
 import { WebGlBackend } from "./renderer";
@@ -33,17 +34,18 @@ import { WebGpuBackend } from "./webgpu/webgpu-renderer";
 
 
 export function mount(host: HTMLElement, query: URLSearchParams): void {
-  const choice = { gpu: parseGpu(query.get("gpu")), samples: parseMsaa(query.get("msaa")) };
-  void createBackend(host, choice).then(({ canvas, backend }) => start(host, canvas, backend, query));
+  const look = readLookOptions(query);
+  const choice = { gpu: parseGpu(query.get("gpu")), samples: parseMsaa(query.get("msaa"), look.resolution === "low" ? 1 : 4) };
+  void createBackend(host, choice, look).then(({ canvas, backend }) => start(host, canvas, backend, query, look));
 }
 
-/** A full-window canvas for the skin. */
-function makeCanvas(host: HTMLElement): HTMLCanvasElement {
+/** A full-window canvas for the skin; at `?res=low`, its pixels blown up whole rather than smoothed. */
+function makeCanvas(host: HTMLElement, look: LookOptions): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.style.inset = "0";
   canvas.style.width = "100%";
   canvas.style.height = "100%";
-  canvas.style.imageRendering = "auto";
+  canvas.style.imageRendering = look.resolution === "low" ? "pixelated" : "auto";
   host.appendChild(canvas);
   return canvas;
 }
@@ -56,10 +58,11 @@ function makeCanvas(host: HTMLElement): HTMLCanvasElement {
 async function createBackend(
   host: HTMLElement,
   choice: { gpu: GpuChoice; samples: number },
+  look: LookOptions,
 ): Promise<{ canvas: HTMLCanvasElement; backend: LowpolyBackend }> {
   const reasons: string[] = [];
   for (const kind of backendOrder(choice.gpu, "gpu" in navigator)) {
-    const canvas = makeCanvas(host);
+    const canvas = makeCanvas(host, look);
     try {
       const backend =
         kind === "webgpu" ? await WebGpuBackend.create(canvas, puddleField(), choice.samples) : webglBackend(canvas, choice.samples);
@@ -81,10 +84,20 @@ function webglBackend(canvas: HTMLCanvasElement, samples: number): LowpolyBacken
   return new WebGlBackend(gl, puddleField());
 }
 
-function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, query: URLSearchParams): void {
-  const game = new LowpolyGame(backend, readSceneOptions(query));
+function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, query: URLSearchParams, look: LookOptions): void {
+  const game = new LowpolyGame(backend, readSceneOptions(query), look);
 
   const fit = (): void => {
+    if (look.resolution === "low") {
+      // One logical pixel to one buffer pixel, blown up by a whole factor: the canvas overhangs by under a pixel.
+      const size = lowResCanvas(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);
+      canvas.width = size.width;
+      canvas.height = size.height;
+      canvas.style.width = `${size.cssWidth}px`;
+      canvas.style.height = `${size.cssHeight}px`;
+      game.resize(size.width / size.height, size.height);
+      return;
+    }
     const size = backingSize(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);
     canvas.width = size.width;
     canvas.height = size.height;

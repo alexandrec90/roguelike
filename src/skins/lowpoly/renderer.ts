@@ -6,7 +6,9 @@
  * A frame is four passes. The world **mirrored** - what stands, height flipped -
  * into a half-size target. Then the sky; the **solid** pass, where the ground
  * reads its puddles, its lakes and the mirror; the **sheer** pass of shadows and
- * spell light, blended without writing depth; and the **rain** over all of it.
+ * spell light, blended without writing depth; the **impostors** - crowns, smoke
+ * and clouds as balls (`impostor-pass.ts`), then any volumes over them; and the
+ * **rain** over all of it.
  * Its water moves by procedural rings (`water-glsl.ts`); WebGPU's simulates.
  *
  * Budget: the static geometry twice (once mirrored, at a quarter of the pixels),
@@ -14,8 +16,10 @@
  */
 
 import { FIELD_SIZE } from "../../game/water/puddle-field";
-import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend } from "./backend";
+import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend, VertexLayout } from "./backend";
 import { program, Uniforms } from "./gl-util";
+import { IMPOSTOR_BYTES } from "./impostor";
+import { ImpostorProgram } from "./impostor-pass";
 import { rgb, VERTEX_BYTES } from "./mesh";
 import { DEPTH_FAR, DEPTH_NEAR } from "./placement";
 import { RainPass } from "./rain-pass";
@@ -27,6 +31,8 @@ import { waterTexels } from "./water-texels";
 interface Drawable extends DrawableHandle {
   readonly vao: WebGLVertexArrayObject;
   readonly buffer: WebGLBuffer;
+  /** Bytes a vertex: a mesh's or an impostor's. */
+  readonly stride: number;
 }
 
 /** Texture units: the puddle field (with the lakes) and the mirror. */
@@ -44,6 +50,7 @@ export class WebGlBackend implements LowpolyBackend {
   private readonly puddles: WebGLTexture;
   private readonly reflection: ReflectionTarget;
   private readonly rain: RainPass;
+  private readonly impostor: ImpostorProgram;
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
@@ -52,31 +59,29 @@ export class WebGlBackend implements LowpolyBackend {
     this.world = new Uniforms(gl, program(gl, WORLD_VERTEX, WORLD_FRAGMENT));
     this.solidWorld = new Uniforms(gl, program(gl, WORLD_VERTEX, WORLD_FRAGMENT_SOLID));
     this.sky = new Uniforms(gl, program(gl, SKY_VERTEX, SKY_FRAGMENT));
+    this.impostor = new ImpostorProgram(gl);
     this.skyVao = gl.createVertexArray();
     this.puddles = puddleTexture(gl, puddleField);
     this.reflection = new ReflectionTarget(gl);
     this.rain = new RainPass(gl);
   }
 
-  createDrawable(bytes?: Uint8Array): DrawableHandle {
+  createDrawable(bytes?: Uint8Array, layout: VertexLayout = "mesh"): DrawableHandle {
     const gl = this.gl;
     const vao = gl.createVertexArray();
     const buffer = gl.createBuffer();
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, VERTEX_BYTES, 0);
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, VERTEX_BYTES, 12);
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 4, gl.BYTE, true, VERTEX_BYTES, 20);
-    gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 24);
+    if (layout === "impostor") {
+      ImpostorProgram.attributes(gl);
+    } else {
+      meshAttributes(gl);
+    }
     gl.bindVertexArray(null);
-    const drawable: Drawable = { vao, buffer, count: 0 };
+    const drawable: Drawable = { vao, buffer, count: 0, stride: layout === "impostor" ? IMPOSTOR_BYTES : VERTEX_BYTES };
     if (bytes !== undefined) {
       gl.bufferData(gl.ARRAY_BUFFER, bytes, gl.STATIC_DRAW);
-      drawable.count = bytes.byteLength / VERTEX_BYTES;
+      drawable.count = bytes.byteLength / drawable.stride;
     }
     return drawable;
   }
@@ -86,18 +91,24 @@ export class WebGlBackend implements LowpolyBackend {
     const drawable = handle as Drawable;
     gl.bindBuffer(gl.ARRAY_BUFFER, drawable.buffer);
     gl.bufferData(gl.ARRAY_BUFFER, bytes, gl.DYNAMIC_DRAW);
-    drawable.count = bytes.byteLength / VERTEX_BYTES;
+    drawable.count = bytes.byteLength / drawable.stride;
   }
 
   render(frame: FrameUniforms, scene: FrameScene): void {
     const gl = this.gl;
     const clipping = this.world;
+    const balls = this.impostor.uniforms;
     // What stands near enough to be seen in water, mirrored.
+    this.setWorld(balls, frame, -1);
     this.setWorld(this.solidWorld, frame, 1);
     this.setWorld(clipping, frame, -1);
     this.reflection.bind(frame.width, frame.height, stillSky(frame.atmosphere));
     this.solid();
     this.drawAll(clipping, scene.mirrored);
+    if (scene.impostors.mirrored.length > 0) {
+      this.impostor.begin(false, -1, frame.cloudShade);
+      this.drawAll(balls, scene.impostors.mirrored);
+    }
 
     // Then the world itself, over the sky: the ground first, so it hides what stands behind it.
     this.reflection.unbind();
@@ -123,6 +134,13 @@ export class WebGlBackend implements LowpolyBackend {
     gl.useProgram(clipping.target);
     this.sheer();
     this.drawAll(clipping, scene.sheers);
+    // The balls write their own depth; the volumes blend over everything, far to near.
+    this.impostor.begin(false, 1, frame.cloudShade);
+    this.drawAll(balls, scene.impostors.balls);
+    if (scene.impostors.volumes.length > 0) {
+      this.impostor.begin(true, 1, frame.cloudShade);
+      this.drawAll(balls, scene.impostors.volumes);
+    }
     this.rain.draw({ ...scene.rain, width: frame.view.width, height: frame.view.height });
   }
 
@@ -203,6 +221,18 @@ export class WebGlBackend implements LowpolyBackend {
     gl.activeTexture(gl.TEXTURE0 + REFLECT_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
+}
+
+/** Point the bound vertex array at a mesh buffer's fields (`mesh.ts`); the buffer must be bound. */
+function meshAttributes(gl: WebGL2RenderingContext): void {
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, VERTEX_BYTES, 0);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, VERTEX_BYTES, 12);
+  gl.enableVertexAttribArray(2);
+  gl.vertexAttribPointer(2, 4, gl.BYTE, true, VERTEX_BYTES, 20);
+  gl.enableVertexAttribArray(3);
+  gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 24);
 }
 
 /**

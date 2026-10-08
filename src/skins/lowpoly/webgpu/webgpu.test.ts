@@ -21,6 +21,7 @@ const frame: FrameUniforms = {
   sway: { wind: [1.5, 2.5, 0.75, 0], pushes: Float32Array.from({ length: MAX_PUSHES * 4 }, (_, i) => i + 1) },
   width: 1280,
   height: 720,
+  cloudShade: [0.25, 0.5, 0.75],
 };
 
 describe("the WebGPU uniforms", () => {
@@ -40,6 +41,12 @@ describe("the WebGPU uniforms", () => {
     expect([...floats.slice(44, 48)]).toEqual([0, 0, 0, 1]);
     // Every push slot, last of all.
     expect([...floats.slice(48)]).toEqual([...frame.sway.pushes]);
+  });
+
+  it("ride the cloud shade in the spare w of the light, the ambient and the haze", () => {
+    const floats = packFrame(frame);
+    expect([floats[19], floats[23], floats[27]]).toEqual([0.25, 0.5, 0.75]);
+    expect(worldWgsl(false)).toContain("lightDir: vec4f");
   });
 
   it("carry the window round the hero after the wind, before the pushes", () => {
@@ -66,6 +73,18 @@ describe("the WebGPU uniforms", () => {
     expect(floats[DRAW_FLOATS * 2 + 4]).toBe(1);
     expect(floats[4]).toBe(-1);
     expect(floats[3]).toBeCloseTo(1, 9);
+    // Neither list is a volume pass.
+    expect(floats[5]).toBe(0);
+    expect(floats[DRAW_FLOATS * 2 + 5]).toBe(0);
+  });
+
+  it("mark each draw of the impostors' volume pass, and only those", () => {
+    const call: DrawCall = { drawable: { count: 6 }, offset: [0, 0], turn: 0 };
+    const floats = packDraws([
+      { calls: [call], mirror: 1 },
+      { calls: [call, call], mirror: 1, volume: true },
+    ]);
+    expect([floats[5], floats[DRAW_FLOATS + 5], floats[DRAW_FLOATS * 2 + 5]]).toEqual([0, 1, 1]);
   });
 
   it("pack the sky and rain block", () => {

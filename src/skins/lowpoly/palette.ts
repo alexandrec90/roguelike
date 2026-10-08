@@ -40,6 +40,8 @@ export const LOWPOLY = {
   fire: rgb("#ffb347"),
   fireCore: rgb("#fff1b0"),
   frost: rgb("#bfe9ff"),
+  smoke: rgb("#7a7471"),
+  ember: rgb("#ff7d3a"),
   shadow: rgb("#1c2030"),
 } as const satisfies Record<string, Rgb>;
 

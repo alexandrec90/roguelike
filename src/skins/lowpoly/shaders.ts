@@ -21,14 +21,12 @@ import { WATER_GLSL } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
 
-export const WORLD_VERTEX = `#version 300 es
-precision highp float;
-
-layout(location = 0) in vec3 a_pos;
-layout(location = 1) in vec2 a_anchor;
-layout(location = 2) in vec4 a_normal;
-layout(location = 3) in vec4 a_colour;
-
+/**
+ * The projection as a GLSL function, with the uniforms it reads: `placement.ts`
+ * line for line. Shared by the world's vertex shader and the impostors'
+ * (`impostor-glsl.ts`), so a ball lands exactly where a mesh vertex would.
+ */
+export const PLACE_GLSL = `
 uniform vec2 u_offset;   // planet tiles from the hero to this draw's origin
 uniform vec2 u_rot;      // cos, sin of the turn: planet to local
 uniform vec4 u_view;     // logical width, height, foot x, foot y
@@ -39,13 +37,6 @@ uniform vec2 u_hero;     // the hero's planet point
 uniform float u_mirror;  // 1, or -1 to draw the world reflected in still water at z = 0
 uniform vec4 u_wind;     // carrier phase, turbulence phase, gust strength (sway.ts)
 uniform vec4 u_pushes[${MAX_PUSHES}];  // planet x, y from the hero, front radius, strength
-
-out vec4 v_colour;
-out vec3 v_normal;
-out float v_rows;
-out vec2 v_planet;
-out float v_ahead;
-flat out int v_kind;
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
 const float HORIZON_SCALE = ${float(HORIZON_SCALE)};
@@ -75,13 +66,13 @@ float shrinkAt(float rows) {
   return HORIZON_SCALE + (1.0 - HORIZON_SCALE) * sqrt(share);
 }
 
-void main() {
-  int kind = int(a_normal.w * 127.0 + 0.5);
-  vec2 foot = turned(a_anchor + u_offset);
-  vec3 sway = swayOffset(kind, a_anchor + u_offset, a_pos.z);
-  vec2 off = turned(a_pos.xy - a_anchor) + sway.xy;
-  float height = a_pos.z + sway.z;
-
+/**
+ * Where a point of a body lands: \`foot\` its body's foot and \`off\` the point
+ * from it, both local tiles, and \`rise\` its height in tiles (negated in the
+ * mirror). Returns the logical pixel, shake included, the body's scale and its
+ * rows past the field.
+ */
+vec4 place(vec2 foot, vec2 off, float rise) {
   float groundTop = u_roll.x;
   float affineY = u_view.w - foot.y * TILE_DEPTH;
   float ground = affineY;
@@ -96,17 +87,48 @@ void main() {
     ground = groundTop - u_roll.y * lift + sink * scale;
   }
   float x = u_view.z + (foot.x + off.x) * TILE_WIDTH * scale + u_shake.x;
-  float y = ground - (off.y * TILE_DEPTH + height * u_mirror * WALL_RISE) * scale + u_shake.y;
+  float y = ground - (off.y * TILE_DEPTH + rise * WALL_RISE) * scale + u_shake.y;
+  return vec4(x, y, scale, rows);
+}
+
+/** A depth key, rows ahead, as clip-space z. */
+float clipDepth(float depth) {
+  return clamp((depth - u_depth.x) / (u_depth.y - u_depth.x), 0.0, 1.0) * 2.0 - 1.0;
+}
+`;
+
+export const WORLD_VERTEX = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec2 a_anchor;
+layout(location = 2) in vec4 a_normal;
+layout(location = 3) in vec4 a_colour;
+${PLACE_GLSL}
+out vec4 v_colour;
+out vec3 v_normal;
+out float v_rows;
+out vec2 v_planet;
+out float v_ahead;
+flat out int v_kind;
+
+void main() {
+  int kind = int(a_normal.w * 127.0 + 0.5);
+  vec2 foot = turned(a_anchor + u_offset);
+  vec3 sway = swayOffset(kind, a_anchor + u_offset, a_pos.z);
+  vec2 off = turned(a_pos.xy - a_anchor) + sway.xy;
+  float height = a_pos.z + sway.z;
+  vec4 placed = place(foot, off, height * u_mirror);
+  float scale = placed.z;
 
   // Things lying on the ground sit a hair behind anything standing on the same row.
   float bias = kind == ${Kind.ground} ? 0.06 : (kind == ${Kind.shadow} ? 0.04 : (kind == ${Kind.water} ? 0.03 : 0.0));
   float depth = foot.y + off.y * scale + bias;
-  float z = clamp((depth - u_depth.x) / (u_depth.y - u_depth.x), 0.0, 1.0) * 2.0 - 1.0;
 
-  gl_Position = vec4(x / u_view.x * 2.0 - 1.0, 1.0 - y / u_view.y * 2.0, z, 1.0);
+  gl_Position = vec4(placed.x / u_view.x * 2.0 - 1.0, 1.0 - placed.y / u_view.y * 2.0, clipDepth(depth), 1.0);
   v_colour = a_colour;
   v_normal = vec3(turned(a_normal.xy), a_normal.z);
-  v_rows = rows;
+  v_rows = placed.w;
   v_planet = a_pos.xy + u_offset + u_hero;
   v_ahead = foot.y + off.y * scale;
   v_kind = kind;

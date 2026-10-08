@@ -43,6 +43,10 @@ export const Kind = {
   grass: 7,
   /** A mushroom: nods, stiffer than grass (`sway.ts`). Lit as a body. */
   sprig: 8,
+  /** A puff of volcano smoke: an impostor ball that billows and thins with age (`impostor.ts`). */
+  smoke: 9,
+  /** A puff of a cloud in the sky: an impostor placed on screen, not on the planet (`sky-puffs.ts`). */
+  cloud: 10,
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];
