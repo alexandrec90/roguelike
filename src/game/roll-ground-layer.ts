@@ -37,6 +37,7 @@
 import type { Scene } from "../engine";
 
 import type { CameraFrame, LocalBounds } from "./camera";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import { terrainFarLooks } from "./far-looks";
 import type { FrameContext } from "./frame-context";
 import { groundKey } from "./ground/ground-plan";
@@ -57,7 +58,7 @@ import { HORIZON_DEPTH, TILE_DEPTH } from "./projection";
 import type { Puddle } from "./puddles";
 import type { FarLook } from "./roll-far";
 import { gridTexels, lipBounds, rollGroundPixels, type TileTexels } from "./roll-ground";
-import { packCloud, tuftBounds, type PackedCloud } from "./roll-grass";
+import { packCloud, tuftBounds, TuftOverlay, type PackedCloud } from "./roll-grass";
 import { LipState, type LipArt } from "./roll-ground-state";
 import { LipWater, puddleOnLip } from "./roll-water";
 import { unlitHaze } from "./sky-paint";
@@ -123,6 +124,15 @@ export class RollGroundLayer {
   private atmosphereKey = "";
   /** The last frame's cost, ms - read it from the console when profiling. */
   lastFrameMs = 0;
+  /** The grass and sway switches the lip was last drawn under, and an overlay that never holds a tuft. */
+  private switches = "";
+  private bare: TuftOverlay = new TuftOverlay(this.grassBounds);
+
+  /**
+   * The lip is the field's grass carried on, so it reads the field's switches
+   * every frame: `grass` off lays in and reads no tuft, `sway` off bends none.
+   */
+  constructor(private readonly effects: EffectSwitches = ALL_EFFECTS) {}
 
   /** `gpu` draws the lip in a shader (`roll-ground-gpu.ts`); the CPU paints it otherwise. */
   create(scene: Scene, frame: CameraFrame, width: number, field: LocalBounds, gpu = false): void {
@@ -146,6 +156,7 @@ export class RollGroundLayer {
     this.field = field;
     this.bounds = lipBounds(flat, this.width);
     this.grassBounds = tuftBounds(flat, this.width);
+    this.bare = new TuftOverlay(this.grassBounds);
     this.liveMaxY = Math.floor((flat.footY - flat.groundTop) / TILE_DEPTH) + LIVE_ROWS;
     this.state = undefined;
     this.ahead = undefined;
@@ -167,9 +178,19 @@ export class RollGroundLayer {
    */
   update(ctx: FrameContext, puddleScale = 1): void {
     const started = performance.now();
+    const grass = this.effects.on("grass");
+    // Without sway no row is live: every tuft out here stands upright, laid in once.
+    const live = grass && this.effects.on("sway") ? this.liveMaxY : Number.NEGATIVE_INFINITY;
+    const switches = `${grass}|${live}`;
+    if (switches !== this.switches) {
+      // Flipped mid-run: begin the lip afresh, or the rows that were swaying stay caught mid-bend.
+      this.state = undefined;
+      this.ahead = undefined;
+      this.switches = switches;
+    }
     if (this.gpu !== undefined) {
       const state = this.stateFor(ctx.pose);
-      this.gpu.render(ctx, state, this.waterFor(ctx, puddleScale), this.liveMaxY, unlitHaze(ctx.atmosphere));
+      this.gpu.render(ctx, state, this.waterFor(ctx, puddleScale), live, unlitHaze(ctx.atmosphere), grass);
       this.lastFrameMs = performance.now() - started;
       return;
     }
@@ -179,9 +200,10 @@ export class RollGroundLayer {
     }
     const state = this.stateFor(ctx.pose);
     // The swaying rows are stamped afresh; everything past them is still in.
-    state.grass.forget(state.grass.bounds.minY, this.liveMaxY);
-    const look = state.look(this.waterFor(ctx, puddleScale), this.liveMaxY, ctx);
-    surface.buffer.data.set(rollGroundPixels(ctx.frame, this.width, look, unlitHaze(ctx.atmosphere)));
+    state.grass.forget(state.grass.bounds.minY, live);
+    const look = state.look(this.waterFor(ctx, puddleScale), live, ctx);
+    const shown = grass ? look : { ...look, tuft: () => null, grass: this.bare };
+    surface.buffer.data.set(rollGroundPixels(ctx.frame, this.width, shown, unlitHaze(ctx.atmosphere)));
     surface.touch().commit();
     this.lastFrameMs = performance.now() - started;
   }
@@ -207,6 +229,7 @@ export class RollGroundLayer {
           () => (this.aheadWater?.pose === pose ? this.aheadWater.water : undefined),
           this.frame,
           this.liveMaxY,
+          this.effects.on("grass"),
         ),
       ];
     }

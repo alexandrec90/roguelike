@@ -92,6 +92,9 @@ export interface SwayState {
   readonly pushes: Float32Array;
 }
 
+/** No wind at all: what the frame carries when the sway is switched off (`?off=sway`). */
+export const STILL_WIND: SwayState["wind"] = [0, 0, 0, 0];
+
 /** The wind's phases and its strength for a world time - `gustAt`'s envelope times the weather's wind. */
 export function windUniform(elapsedMs: number, weatherWind: number): SwayState["wind"] {
   const seconds = elapsedMs / 1000;
@@ -215,6 +218,24 @@ vec3 swayOffset(int kind, vec2 foot, float z) {
   }
   float bend = z * (row.x + z * row.y);
   return vec3(lean * bend, -z * row.w * min(dot(lean, lean), 1.0));
+}
+`;
+
+/**
+ * `swayOffset` with the sway switched off (`?off=sway`), in either language:
+ * nothing leans, and none of the wind's or the pushes' arithmetic is compiled
+ * into the vertex shader, so a frame without sway costs what it would if the
+ * sway had never been written.
+ */
+export const SWAY_STILL_GLSL = `
+vec3 swayOffset(int kind, vec2 foot, float z) {
+  return vec3(0.0);
+}
+`;
+
+export const SWAY_STILL_WGSL = `
+fn swayOffset(kind: u32, foot: vec2f, z: f32, rot: vec2f) -> vec3f {
+  return vec3f(0.0);
 }
 `;
 

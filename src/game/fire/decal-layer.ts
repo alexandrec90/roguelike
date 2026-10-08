@@ -17,6 +17,7 @@
 import type { Scene } from "../../engine";
 
 import { localFoot, scrollOffset, type CameraFrame } from "../camera";
+import { ALL_EFFECTS, type EffectSwitches } from "../effects";
 import type { FrameContext } from "../frame-context";
 import { PixelSurface } from "../pixel-surface";
 import { toLocal, type PlanetPoint, type PlanetPose } from "../planet";
@@ -47,6 +48,12 @@ export class DecalLayer {
   private paintedVersion = -1;
   private paintedTick = -1;
 
+  /**
+   * `decals` is read every frame: off, nothing is stamped and nothing painted,
+   * and the marks already down are put away.
+   */
+  constructor(private readonly effects: EffectSwitches = ALL_EFFECTS) {}
+
   create(scene: Scene, width: number, height: number): void {
     this.surface = new PixelSurface(scene, width + MARGIN * 2, height + MARGIN * 2, "decals");
     this.surface.image.setDepth(DECAL_DEPTH).setVisible(false);
@@ -54,11 +61,21 @@ export class DecalLayer {
 
   /** Lay a mark on the planet now. `seed` decides its shape. */
   stamp(at: PlanetPoint, kind: DecalKind, seed: number, radius?: number): void {
-    stampDecal(this.field, createDecal(at, kind, seed, this.nowMs, radius));
+    if (this.effects.on("decals")) {
+      stampDecal(this.field, createDecal(at, kind, seed, this.nowMs, radius));
+    }
   }
 
   update(ctx: FrameContext): void {
     this.nowMs = ctx.elapsedMs;
+    if (!this.effects.on("decals")) {
+      if (this.field.decals.length > 0) {
+        this.field.decals.length = 0;
+        this.field.version += 1;
+      }
+      this.surface.image.setVisible(false);
+      return;
+    }
     pruneDecals(this.field, ctx.elapsedMs);
     const any = this.field.decals.length > 0;
     this.surface.image.setVisible(any);

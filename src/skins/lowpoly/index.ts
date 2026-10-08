@@ -20,21 +20,26 @@
  */
 
 import { FrameClock } from "../../engine/loop";
+import type { EffectSwitches } from "../../game/effects";
 import { aimAt, pressButton, pressKey, releaseAll, releaseButton, releaseKey } from "../../game/controls";
 import { HelpOverlay } from "../../game/help-overlay";
 import { mouseButtonOf } from "../../game/keybindings";
-import { readSceneOptions } from "../../game/scene-options";
+import { readSceneOptions, type SceneOptions } from "../../game/scene-options";
 import { puddleField } from "../../game/water/puddle-field";
-import { backendOrder, parseGpu, parseMsaa, type GpuChoice, type LowpolyBackend } from "./backend";
+import { backendOrder, parseGpu, parseMsaa, shaderFeatures, type GpuChoice, type LowpolyBackend, type ShaderFeatures } from "./backend";
 import { LowpolyGame } from "./lowpoly-game";
 import { backingSize } from "./placement";
 import { WebGlBackend } from "./renderer";
 import { WebGpuBackend } from "./webgpu/webgpu-renderer";
 
 
-export function mount(host: HTMLElement, query: URLSearchParams): void {
-  const choice = { gpu: parseGpu(query.get("gpu")), samples: parseMsaa(query.get("msaa")) };
-  void createBackend(host, choice).then(({ canvas, backend }) => start(host, canvas, backend, query));
+export function mount(host: HTMLElement, query: URLSearchParams, effects: EffectSwitches): void {
+  // The page's live effect switches, not the query's copy: the panel flips them mid-run.
+  const options = { ...readSceneOptions(query), effects };
+  // An effect switched off that lives in a shader is left out of it (`ShaderFeatures`);
+  // these are the first shaders built, and a switch later swaps in another build.
+  const choice = { gpu: parseGpu(query.get("gpu")), samples: parseMsaa(query.get("msaa")), features: shaderFeatures(options.effects) };
+  void createBackend(host, choice).then(({ canvas, backend }) => start(host, canvas, backend, options));
 }
 
 /** A full-window canvas for the skin. */
@@ -55,14 +60,16 @@ function makeCanvas(host: HTMLElement): HTMLCanvasElement {
  */
 async function createBackend(
   host: HTMLElement,
-  choice: { gpu: GpuChoice; samples: number },
+  choice: { gpu: GpuChoice; samples: number; features: ShaderFeatures },
 ): Promise<{ canvas: HTMLCanvasElement; backend: LowpolyBackend }> {
   const reasons: string[] = [];
   for (const kind of backendOrder(choice.gpu, "gpu" in navigator)) {
     const canvas = makeCanvas(host);
     try {
       const backend =
-        kind === "webgpu" ? await WebGpuBackend.create(canvas, puddleField(), choice.samples) : webglBackend(canvas, choice.samples);
+        kind === "webgpu"
+          ? await WebGpuBackend.create(canvas, puddleField(), choice.samples, choice.features)
+          : webglBackend(canvas, choice.samples, choice.features);
       console.info(`Low-poly skin: drawing with ${kind}${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
       return { canvas, backend };
     } catch (error) {
@@ -73,16 +80,16 @@ async function createBackend(
   throw new Error(`The low-poly skin has no way to draw: ${reasons.join("; ")}`);
 }
 
-function webglBackend(canvas: HTMLCanvasElement, samples: number): LowpolyBackend {
+function webglBackend(canvas: HTMLCanvasElement, samples: number, features: ShaderFeatures): LowpolyBackend {
   const gl = canvas.getContext("webgl2", { antialias: samples > 1, alpha: false, depth: true, powerPreference: "low-power" });
   if (gl === null) {
     throw new Error("no WebGL2 context");
   }
-  return new WebGlBackend(gl, puddleField());
+  return new WebGlBackend(gl, puddleField(), features);
 }
 
-function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, query: URLSearchParams): void {
-  const game = new LowpolyGame(backend, readSceneOptions(query));
+function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, options: SceneOptions): void {
+  const game = new LowpolyGame(backend, options);
 
   const fit = (): void => {
     const size = backingSize(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);

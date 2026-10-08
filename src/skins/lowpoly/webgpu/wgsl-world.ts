@@ -12,9 +12,10 @@
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horizon";
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
+import { ALL_FEATURES, type ShaderFeatures } from "../backend";
 import { Kind } from "../mesh";
 import { TOWARD_VIEWER } from "../placement";
-import { MAX_PUSHES, SWAY_WGSL } from "../sway";
+import { MAX_PUSHES, SWAY_STILL_WGSL, SWAY_WGSL } from "../sway";
 import { LAKE_DEPTH_PER_TILE, WATER_DEEP_ARGS, WATER_LOOK } from "../water-glsl";
 import { LAKE_RANGE_TILES } from "../water-texels";
 import { WAVE_N, WAVE_RES } from "./waves";
@@ -71,10 +72,19 @@ const CLIP_WGSL = `
     discard;
   }`;
 
-/** The world shader: `clips` for the ground, the mirror and the sheer pass; without, for what stands on screen. */
-export function worldWgsl(clips: boolean): string {
-  return WORLD_SOURCE.replace("/*CLIP*/", clips ? CLIP_WGSL : "");
+/**
+ * The world shader: `clips` for the ground, the mirror and the sheer pass;
+ * without, for what stands on screen. `features` leaves the sway or the
+ * waves' slope out of the source (`ShaderFeatures`).
+ */
+export function worldWgsl(clips: boolean, features: ShaderFeatures = ALL_FEATURES): string {
+  return WORLD_SOURCE.replace("/*CLIP*/", () => (clips ? CLIP_WGSL : ""))
+    .replace("/*SWAY*/", () => (features.sway ? SWAY_WGSL : SWAY_STILL_WGSL))
+    .replace(WAVE_SLOPE, () => (features.ripples ? WAVE_SLOPE : "let wave = vec3f(0.0);"));
 }
+
+/** The one line of `waterColour` the simulated waves enter by. */
+const WAVE_SLOPE = "let wave = waveSlope(planet);";
 
 const WORLD_SOURCE = `${WORLD_BINDINGS}
 
@@ -122,7 +132,7 @@ struct VertexOut {
 fn turned(p: vec2f, rot: vec2f) -> vec2f {
   return vec2f(p.x * rot.x - p.y * rot.y, p.x * rot.y + p.y * rot.x);
 }
-${SWAY_WGSL}
+/*SWAY*/
 fn squash(row: f32) -> f32 {
   let r = row / frame.roll.z;
   return 1.0 / (1.0 + r * r);

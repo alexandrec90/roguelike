@@ -28,6 +28,7 @@ import { atmosphereAt, clockHours } from "./atmosphere";
 import { scrollOffset, type CameraFrame } from "./camera";
 import { CLEAR_SKY } from "./cloud-shadow";
 import { hexToInt } from "./color";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import type { FrameContext } from "./frame-context";
 import { clearPool, createPool, particleCloud, stepParticles, type ParticlePool } from "./fx/particles";
 import { createImpulse, impulseSink } from "./impulse";
@@ -79,7 +80,11 @@ export class WeatherLayer {
   private mistKey = "";
   private rainShown = false;
 
-  constructor(seed: number, override?: WeatherState) {
+  constructor(
+    seed: number,
+    override?: WeatherState,
+    private readonly effects: EffectSwitches = ALL_EFFECTS,
+  ) {
     this.seed = seed;
     this.override = override;
     this.field = createRainField(420, seed ^ 0x1d87);
@@ -128,11 +133,32 @@ export class WeatherLayer {
    */
   update(ctx: FrameContext, water?: RainCatcher): void {
     const state = this.weatherState(ctx.elapsedMs);
+    // The ground soaks whatever is drawn: wetness is the world's, not the rain's picture.
     this.wet = stepWetness(this.wet, ctx.rain, ctx.deltaMs);
     water?.setWeather(ctx.rain, this.wet);
-    const strike = stormLightningAt(ctx.elapsedMs, this.seed, state);
-    this.strike(strike, ctx);
-    water?.setStrike(strike.active ? strike.alpha : 0);
+    // Each switch is read every frame; one turned off puts its sheet away at once.
+    if (this.effects.on("lightning")) {
+      const strike = stormLightningAt(ctx.elapsedMs, this.seed, state);
+      this.strike(strike, ctx);
+      water?.setStrike(strike.active ? strike.alpha : 0);
+    } else {
+      this.flashLevel = 0;
+      this.flash.setVisible(false);
+      this.boltSurface.image.setVisible(false);
+      water?.setStrike(0);
+    }
+    if (this.effects.on("mist")) {
+      this.paintMist(ctx.rain, ctx.atmosphere.daylight, ctx.frame.groundTop);
+    } else {
+      // Forgotten, so it is painted afresh the frame it comes back.
+      this.mistKey = "";
+      this.mistSurface.image.setVisible(false);
+    }
+    const raining = this.effects.on("rain");
+    this.rainSurface.image.setVisible(raining);
+    if (!raining) {
+      return;
+    }
 
     const slant = RAIN_SLANT * state.wind * (0.85 + 0.3 * Math.min(gustAt(ctx.elapsedMs, ctx.wind), 1));
     const env: RainEnv = {
@@ -150,7 +176,6 @@ export class WeatherLayer {
     // rain is a cooler, darker step of the ramp rather than the same streak greyed.
     const light = Math.max(0.6 + 0.4 * ctx.atmosphere.daylight, this.flashLevel);
     this.paint(ctx.frame, slant, light);
-    this.paintMist(ctx.rain, ctx.atmosphere.daylight, ctx.frame.groundTop);
   }
 
   /**

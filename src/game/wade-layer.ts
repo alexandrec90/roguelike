@@ -16,8 +16,9 @@
 import type { Scene } from "../engine";
 
 import { scrollOffset } from "./camera";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import type { FrameContext } from "./frame-context";
-import { createPool, emit, particleCloud, stepParticles, type ParticlePool } from "./fx/particles";
+import { clearPool, createPool, emit, particleCloud, stepParticles, type ParticlePool } from "./fx/particles";
 import { nearLake, wadeDepth } from "./lakes";
 import type { PlanetPoint } from "./planet";
 import { PixelSurface } from "./pixel-surface";
@@ -66,7 +67,17 @@ export class WadeLayer {
   /** The rows the spray was last painted over, `to` exclusive. */
   private painted: { from: number; to: number } | undefined;
 
-  constructor(seed: number) {
+  /** Whether the spray was on last frame. */
+  private spraying = true;
+
+  /**
+   * `spray` is read every frame: off, none is thrown, stepped or painted, and
+   * what was in the air when it went off is cleared.
+   */
+  constructor(
+    seed: number,
+    private readonly effects: EffectSwitches = ALL_EFFECTS,
+  ) {
     this.spray = createPool(64, seed);
   }
 
@@ -78,6 +89,7 @@ export class WadeLayer {
   /** One frame: each wader's footfall, if one fell, rings the water and throws spray; then the spray flies. */
   update(ctx: FrameContext, water: RingWater, waders: readonly Wader[]): void {
     const offset = scrollOffset(ctx.frame);
+    const sprays = this.effects.on("spray");
     for (const wader of waders) {
       let wake = this.wakes.get(wader.id);
       if (wake === undefined) {
@@ -89,7 +101,9 @@ export class WadeLayer {
       if (beat?.kind === "step") {
         const foot = { x: wader.foot.x + beat.side * STANCE, y: wader.foot.y };
         water.ring(foot, ctx.frame, STEP_RING.lifeMs, STEP_RING.radius);
-        emit(this.spray, SPRAY_SPEC, SPRAY_COUNT, foot.x - offset.x, foot.y - offset.y - 1);
+        if (sprays) {
+          emit(this.spray, SPRAY_SPEC, SPRAY_COUNT, foot.x - offset.x, foot.y - offset.y - 1);
+        }
       } else if (beat?.kind === "lap") {
         water.ring(wader.foot, ctx.frame, IDLE_RING.lifeMs, IDLE_RING.radius);
       }
@@ -100,8 +114,15 @@ export class WadeLayer {
         this.wakes.delete(id);
       }
     }
-    stepParticles(this.spray, ctx.deltaMs);
-    this.paint(offset.x, offset.y);
+    if (sprays) {
+      stepParticles(this.spray, ctx.deltaMs);
+      this.paint(offset.x, offset.y);
+    } else if (this.spraying) {
+      // Off this frame: drop what was in the air, and paint the empty pool once to wipe it.
+      clearPool(this.spray);
+      this.paint(offset.x, offset.y);
+    }
+    this.spraying = sprays;
   }
 
   /** Clear and upload only the rows the spray covers now and covered last frame. */

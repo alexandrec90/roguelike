@@ -8,7 +8,19 @@ import { DEFAULT_SKY_FRACTION } from "./game/horizon";
 import { wantsMap } from "./game/map-overlay";
 import { DEFAULT_STRAFE_RADIUS } from "./game/planet";
 import { DEFAULT_SCENE_OPTIONS, readSceneOptions, type SceneOptions } from "./game/scene-options";
-import { hrefReset, hrefWith, KNOB_GROUPS, knobApplies, knobChecked, KNOBS, knobsFor, knobValue, type Knob } from "./knobs";
+import { EFFECTS, effectsFor, formatEffectsOff } from "./game/effects";
+import {
+  hrefReset,
+  hrefWith,
+  KNOB_GROUPS,
+  knobApplies,
+  knobChecked,
+  KNOBS,
+  knobsFor,
+  knobValue,
+  switchesFor,
+  type Knob,
+} from "./knobs";
 import { parseGpu, parseMsaa } from "./skins/lowpoly/backend";
 import { DEFAULT_SKIN, parseSkin, SKINS } from "./skins/skin";
 
@@ -65,6 +77,11 @@ describe("the knob table", () => {
   it("has a fallback that is one of the values it offers", () => {
     for (const candidate of KNOBS) {
       const { control } = candidate;
+      if (control.kind === "switches") {
+        // Its fallback is the empty list: every switch on.
+        expect(candidate.fallback, candidate.key).toBe("");
+        continue;
+      }
       const values = control.kind === "select" ? control.options.map((o) => o.value) : [control.checked, control.unchecked];
       expect(values, candidate.key).toContain(candidate.fallback);
       expect(new Set(values).size, `${candidate.key} offers a value twice`).toBe(values.length);
@@ -118,6 +135,40 @@ describe("the knob table", () => {
     expect(msaa.kind === "toggle" && parseMsaa(msaa.unchecked)).toBe(1);
     const map = knob("map").control;
     expect(map.kind === "toggle" && wantsMap(map.checked)).toBe(true);
+  });
+});
+
+describe("the effect switches", () => {
+  const off = (): Knob => knob("off");
+
+  it("offer every effect in the table, each skin only its own", () => {
+    const control = off().control;
+    expect(control.kind === "switches" && control.switches.map((option) => option.value)).toEqual(EFFECTS.map((effect) => effect.id));
+    for (const skin of SKINS) {
+      expect(switchesFor(off(), skin.id).map((option) => option.value)).toEqual(effectsFor(skin.id).map((effect) => effect.id));
+    }
+    expect(switchesFor(knob("weather"), "pixel")).toEqual([]);
+  });
+
+  // What the panel's "All off" does: flip the shown skin's switches, then write the list.
+  it("keep a switch the shown skin does not draw when the rest are flipped together", () => {
+    const effects = readSceneOptions(new URLSearchParams("off=grass")).effects;
+    for (const option of switchesFor(off(), "lowpoly")) {
+      effects.set(option.value, false);
+    }
+    const href = hrefWith("http://h/?skin=lowpoly&off=grass", off(), formatEffectsOff(effects.off));
+    const written = new URL(href).searchParams.get("off")!.split(",");
+    expect(written).toEqual(expect.arrayContaining(["grass", ...effectsFor("lowpoly").map((effect) => effect.id)]));
+  });
+
+  it("write the list through hrefWith, and leave the key out with nothing off", () => {
+    expect(new URL(hrefWith("http://h/?skin=pixel", off(), "rain,shake")).searchParams.get("off")).toBe("rain,shake");
+    expect(new URL(hrefWith("http://h/?skin=pixel&off=rain", off(), "")).searchParams.has("off")).toBe(false);
+  });
+
+  it("read a typed list the way the skins do", () => {
+    expect(knobValue(off(), new URLSearchParams("off=SHAKE,%20rain,bloom"))).toBe("rain,shake");
+    expect(readSceneOptions(new URLSearchParams("off=rain")).effects.on("rain")).toBe(false);
   });
 });
 

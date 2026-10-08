@@ -23,6 +23,8 @@
  * so a load pays only for the skin it shows.
  */
 
+import type { EffectSwitches } from "../game/effects";
+
 export type SkinId = "pixel" | "lowpoly";
 
 export interface SkinInfo {
@@ -43,9 +45,11 @@ export const DEFAULT_SKIN: SkinId = "lowpoly";
 /**
  * What a skin module exports: one function that builds the game into `host`
  * from the page's query. It owns its canvas, its loop and its input wiring.
+ * `effects` is the page's one set of effect switches, flipped live by the
+ * Options panel: the skin reads it every frame rather than the query's copy.
  */
 export interface SkinModule {
-  mount(host: HTMLElement, query: URLSearchParams): void;
+  mount(host: HTMLElement, query: URLSearchParams, effects: EffectSwitches): void;
 }
 
 /** Read `?skin=`; anything unknown falls back to the default rather than blanking the page. */

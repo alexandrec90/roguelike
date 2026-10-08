@@ -14,6 +14,7 @@ import type { Scene } from "../engine";
 import type { Strike } from "./combat";
 import { SlimeLayer } from "./creatures/slime-layer";
 import type { SlimeEvents } from "./creatures/slime-sim";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import { CampfireLayer } from "./fire/campfire-layer";
 import { DecalLayer } from "./fire/decal-layer";
 import { SpellLayer } from "./fire/spell-layer";
@@ -26,11 +27,18 @@ import { WildfireLayer } from "./wildfire-layer";
 const KINDLE_SHARE = 0.6;
 
 export class Encounter {
-  readonly decals = new DecalLayer();
-  readonly campfire = new CampfireLayer();
+  readonly decals: DecalLayer;
+  readonly campfire: CampfireLayer;
   readonly spells = new SpellLayer();
-  readonly slimes = new SlimeLayer();
+  readonly slimes: SlimeLayer;
   readonly wildfire = new WildfireLayer();
+
+  /** `effects` is read every frame by each layer: ground marks, particles and shadows. */
+  constructor(effects: EffectSwitches = ALL_EFFECTS) {
+    this.decals = new DecalLayer(effects);
+    this.campfire = new CampfireLayer(effects);
+    this.slimes = new SlimeLayer({ effects });
+  }
 
   create(scene: Scene, width: number, height: number, campfireAt: PlanetPoint): void {
     this.decals.create(scene, width, height);

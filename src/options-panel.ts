@@ -3,30 +3,40 @@
  * top-right corner until it is opened.
  *
  * Like the controls reminder it is plain DOM over the canvas, never pixels in
- * the world. Each knob is read once at load, so a change reloads the page under
- * the new address - exactly what typing it would do - and the panel stays open
- * across that reload (per tab, in `sessionStorage`) so a run of changes does not
- * mean re-opening it each time.
+ * the world. Most knobs are read once at load, so a change reloads the page
+ * under the new address - exactly what typing it would do - and the panel stays
+ * open across that reload (per tab, in `sessionStorage`) so a run of changes
+ * does not mean re-opening it each time. The effect switches are the
+ * exception: they flip the running game at once, and only rewrite the address.
  *
  * A game key pressed while one of its controls has focus is handed to the game
  * instead: the arrows would otherwise step a dropdown (and reload the page) and
  * Space would tick a box, rather than walk and swing.
  */
 
+import { formatEffectsOff, type EffectSwitches } from "./game/effects";
 import { actionForKey, isHelpKey, isSkinKey } from "./game/keybindings";
-import { hrefReset, hrefWith, KNOB_GROUPS, knobApplies, knobChecked, knobsFor, knobValue, type Knob } from "./knobs";
+import { hrefReset, hrefWith, KNOB_GROUPS, knobApplies, knobChecked, knobsFor, knobValue, switchesFor, type Knob } from "./knobs";
 import type { SkinId } from "./skins/skin";
 
 const OPEN_KEY = "options-panel-open";
 
-/** Fold the panel into the corner of `host`, for the knobs `skin` reads. */
-export function attachOptionsPanel(host: HTMLElement, skin: SkinId, location: Location): HTMLElement {
+/**
+ * Fold the panel into the corner of `host`, for the knobs `skin` reads.
+ * `effects` is the page's live set of switches, shared with the skin.
+ */
+export function attachOptionsPanel(host: HTMLElement, skin: SkinId, location: Location, effects: EffectSwitches): HTMLElement {
   const doc = host.ownerDocument;
   const query = new URLSearchParams(location.search);
   const go = (href: string): void => {
     if (href !== location.href) {
       location.assign(href);
     }
+  };
+  // The address follows a live switch without a reload; anything else reloads under it.
+  const remember = (knob: Knob) => (): void => {
+    const history = doc.defaultView?.history;
+    history?.replaceState(history.state, "", hrefWith(location.href, knob, formatEffectsOff(effects.off)));
   };
 
   const panel = doc.createElement("details");
@@ -53,7 +63,13 @@ export function attachOptionsPanel(host: HTMLElement, skin: SkinId, location: Lo
     const fieldset = doc.createElement("fieldset");
     const legend = doc.createElement("legend");
     legend.textContent = group;
-    fieldset.append(legend, ...members.map((knob) => knobRow(doc, knob, query, (value) => go(hrefWith(location.href, knob, value)))));
+    fieldset.append(legend);
+    for (const knob of members) {
+      const change = (value: string): void => go(hrefWith(location.href, knob, value));
+      fieldset.append(
+        ...(knob.control.kind === "switches" ? switchRows(doc, knob, skin, effects, remember(knob)) : [knobRow(doc, knob, query, change)]),
+      );
+    }
     panel.append(fieldset);
   }
 
@@ -66,6 +82,53 @@ export function attachOptionsPanel(host: HTMLElement, skin: SkinId, location: Lo
 
   host.append(panel);
   return panel;
+}
+
+/**
+ * A checkbox per switch the skin draws, and a pair of buttons that turn them
+ * all on or all off - the bare world, for a baseline to add effects back to.
+ *
+ * These take effect at once: each flips `effects` in place, which the skin
+ * reads every frame, and `remember` writes the new list into the address
+ * without reloading, so a reload or a copied link opens the same way.
+ */
+function switchRows(doc: Document, knob: Knob, skin: SkinId, effects: EffectSwitches, remember: () => void): HTMLElement[] {
+  const switches = switchesFor(knob, skin);
+  const boxes = switches.map((option) => {
+    const box = doc.createElement("input");
+    box.type = "checkbox";
+    box.checked = effects.on(option.value);
+    box.addEventListener("change", () => {
+      effects.set(option.value, box.checked);
+      remember();
+    });
+    return box;
+  });
+  const rows = switches.map((option, index) => {
+    const row = doc.createElement("label");
+    row.className = "options-panel__row";
+    row.title = option.what;
+    const name = doc.createElement("span");
+    name.textContent = option.label;
+    row.append(name, boxes[index]!);
+    return row;
+  });
+  const all = doc.createElement("div");
+  all.className = "options-panel__all";
+  for (const [label, on] of [["All on", true], ["All off", false]] as const) {
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      switches.forEach((option, index) => {
+        effects.set(option.value, on);
+        boxes[index]!.checked = on;
+      });
+      remember();
+    });
+    all.append(button);
+  }
+  return [...rows, all];
 }
 
 function knobRow(doc: Document, knob: Knob, query: URLSearchParams, change: (value: string) => void): HTMLElement {
@@ -87,6 +150,9 @@ function knobRow(doc: Document, knob: Knob, query: URLSearchParams, change: (val
     return row;
   }
 
+  if (control.kind === "switches") {
+    throw new Error(`Knob ${knob.key} is a set of switches, drawn by switchRows`);
+  }
   const select = doc.createElement("select");
   const current = knobValue(knob, query);
   const options = control.options.some((option) => option.value === current)

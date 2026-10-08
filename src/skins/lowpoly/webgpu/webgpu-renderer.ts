@@ -13,7 +13,7 @@
  * (`index.ts`) falls back to WebGL2 when it does.
  */
 
-import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend } from "../backend";
+import { ALL_FEATURES, featuresKey, type DrawableHandle, type DrawCall, type FrameScene, type FrameUniforms, type LowpolyBackend, type ShaderFeatures } from "../backend";
 import { VERTEX_BYTES } from "../mesh";
 import { stillSky } from "../sky-light";
 import { FIELD_SIZE } from "../../../game/water/puddle-field";
@@ -39,7 +39,9 @@ const MAX_FRAME_S = 0.1;
 
 export class WebGpuBackend implements LowpolyBackend {
   readonly kind = "webgpu";
-  private readonly pipelines: Pipelines;
+  private pipelines: Pipelines;
+  /** Each build of the pipelines asked for so far, by `featuresKey`; all share one pair of layouts. */
+  private readonly builds = new Map<string, Pipelines>();
   private readonly targets: GpuTargets;
   private readonly waves: WaveSim;
   private readonly surface: WaveSurface;
@@ -59,7 +61,12 @@ export class WebGpuBackend implements LowpolyBackend {
   private lastSeconds: number | undefined;
 
   /** Ask the browser for a device and build everything, or throw so the caller can fall back. */
-  static async create(canvas: HTMLCanvasElement, puddleField: Uint8Array, samples: number): Promise<WebGpuBackend> {
+  static async create(
+    canvas: HTMLCanvasElement,
+    puddleField: Uint8Array,
+    samples: number,
+    features: ShaderFeatures = ALL_FEATURES,
+  ): Promise<WebGpuBackend> {
     const adapter = await navigator.gpu?.requestAdapter({ powerPreference: "low-power" });
     if (adapter === null || adapter === undefined) {
       throw new Error("No WebGPU adapter");
@@ -73,7 +80,7 @@ export class WebGpuBackend implements LowpolyBackend {
     const format = navigator.gpu.getPreferredCanvasFormat();
     context.configure({ device, format, alphaMode: "opaque" });
     device.pushErrorScope("validation");
-    const backend = new WebGpuBackend(device, context, format, puddleField, samples);
+    const backend = new WebGpuBackend(device, context, format, puddleField, samples, features);
     const error = await device.popErrorScope();
     if (error !== null) {
       device.destroy();
@@ -85,11 +92,13 @@ export class WebGpuBackend implements LowpolyBackend {
   private constructor(
     private readonly device: GPUDevice,
     private readonly context: GPUCanvasContext,
-    format: GPUTextureFormat,
+    private readonly format: GPUTextureFormat,
     puddleField: Uint8Array,
-    samples: number,
+    private readonly samples: number,
+    private features: ShaderFeatures,
   ) {
-    this.pipelines = createPipelines(device, format, samples);
+    this.pipelines = createPipelines(device, format, samples, features);
+    this.builds.set(featuresKey(features), this.pipelines);
     this.targets = new GpuTargets(device, format, samples);
     this.repeat = device.createSampler({ magFilter: "linear", minFilter: "linear", addressModeU: "repeat", addressModeV: "repeat" });
     this.clamp = device.createSampler({ magFilter: "linear", minFilter: "linear" });
@@ -102,6 +111,21 @@ export class WebGpuBackend implements LowpolyBackend {
     this.passesBuffer = uniform(PASSES_FLOATS);
     this.passesGroup = device.createBindGroup({ layout: this.pipelines.passesLayout, entries: [{ binding: 0, resource: { buffer: this.passesBuffer } }] });
     this.draws = this.drawBuffer(INITIAL_DRAWS);
+  }
+
+  setFeatures(features: ShaderFeatures): void {
+    const key = featuresKey(features);
+    if (key === featuresKey(this.features)) {
+      return;
+    }
+    let built = this.builds.get(key);
+    if (built === undefined) {
+      // The same layouts as the first build, so the bind groups made for it still fit.
+      built = createPipelines(this.device, this.format, this.samples, features, this.pipelines);
+      this.builds.set(key, built);
+    }
+    this.pipelines = built;
+    this.features = features;
   }
 
   createDrawable(bytes?: Uint8Array): DrawableHandle {
@@ -146,7 +170,8 @@ export class WebGpuBackend implements LowpolyBackend {
     device.queue.writeBuffer(this.passesBuffer, 0, packPasses(frame, scene.rain, this.passesFloats));
 
     const encoder = device.createCommandEncoder();
-    if (this.waves.encode(encoder, this.frameSeconds(frame.water.seconds), frame.water)) {
+    // Without ripples the water is never stepped: no compute pass, and a shader that never samples it.
+    if (this.features.ripples && this.waves.encode(encoder, this.frameSeconds(frame.water.seconds), frame.water)) {
       this.surface.encode(encoder, this.waves.latestSlot());
     }
     const groups = this.groups ?? this.bindGroups();

@@ -27,6 +27,7 @@ import type { Scene } from "../engine";
 
 import { atmosphereAt, clockHours, type Atmosphere } from "./atmosphere";
 import { localFoot, localReach, scrollOffset, visibleLocal, type CameraFrame } from "./camera";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import type { FrameContext } from "./frame-context";
 import type { PixelCloud } from "./ink";
 import { PixelSurface } from "./pixel-surface";
@@ -34,7 +35,7 @@ import { LAKE_MAX_REACH, LAKE_SPREAD, lakesNear, planetLakes, type Lake } from "
 import { fromLocal, toLocal, type LocalPoint, type PlanetPoint, type PlanetPose } from "./planet";
 import { DEPTH_RATIO, TILE_DEPTH, TILE_WIDTH, type ScreenPoint } from "./projection";
 import { createPuddle, PUDDLE_SPREAD, puddleHolds, rainImpact, type Puddle } from "./puddles";
-import { createRippleField, spawnRipple, stepRipples, type RippleField } from "./ripples";
+import { createRippleField, resetRipples, spawnRipple, stepRipples, type RippleField } from "./ripples";
 import { MAX_STEP_MS, type EmitterState } from "./spark-emitter";
 import { puddlesNear } from "./terrain";
 import { bodyPlan } from "./water/body";
@@ -197,6 +198,14 @@ export class WaterLayer {
   /** The mask rows holding water, and the rows the surface last painted. */
   private band: Rows | undefined;
   private painted: Rows | undefined;
+  /** Whether the ripples were on last frame. */
+  private ringing = true;
+  /**
+   * Read every frame: `reflections` off mirrors nothing and paints no glint;
+   * `ripples` off spawns, steps and paints no ring, and clears the rings that
+   * were open when it went off.
+   */
+  constructor(private readonly effects: EffectSwitches = ALL_EFFECTS) {}
 
   /** The two surfaces. What is on them arrives with the first `update`. */
   create(scene: Scene, width = 320, height = 180): void {
@@ -233,7 +242,7 @@ export class WaterLayer {
    * the pool was full.
    */
   ring(point: Foot, frame: CameraFrame, lifeMs: number, radius: number): boolean {
-    if (!this.holdsWater(point, frame)) {
+    if (!this.effects.on("ripples") || !this.holdsWater(point, frame)) {
       return false;
     }
     const offset = scrollOffset(frame);
@@ -320,7 +329,10 @@ export class WaterLayer {
     if (impact === null) {
       return false;
     }
-    spawnRipple(this.ripples, impact.x, impact.y);
+    // Caught either way: a drop that went into water throws no splash, ringed or not.
+    if (this.effects.on("ripples")) {
+      spawnRipple(this.ripples, impact.x, impact.y);
+    }
     return true;
   }
 
@@ -390,14 +402,23 @@ export class WaterLayer {
     deltaMs: number,
     actors: WaterActors,
   ): void {
-    stepRipples(this.ripples, Math.min(Math.max(deltaMs, 0), 40));
+    const rings = this.effects.on("ripples");
+    const reflects = this.effects.on("reflections");
+    if (rings) {
+      stepRipples(this.ripples, Math.min(Math.max(deltaMs, 0), 40));
+    } else if (this.ringing) {
+      // Off this frame: the rings that were open close, once.
+      resetRipples(this.ripples);
+    }
+    this.ringing = rings;
     const offset = scrollOffset(frame);
     this.body.image.setPosition(offset.x - MARGIN, offset.y - MARGIN);
     this.surface.image.setPosition(offset.x - MARGIN, offset.y - MARGIN);
 
     const scene: WaterScene = { puddles: this.puddles, mask: this.mask, sky: this.sky };
     this.bake(atmosphere, scene);
-    if (this.puddles.length === 0) {
+    // With reflections and ripples both off, only a strike ever lights the surface.
+    if (this.puddles.length === 0 || (!reflects && !rings && this.strike <= 0)) {
       this.blankSurface();
       return;
     }
@@ -412,10 +433,11 @@ export class WaterLayer {
     // cleared and uploaded, not the whole screen.
     const rows = joinRows(this.band, this.painted);
     this.surface.clearRows(rows.from, rows.to);
-    paintSurface(this.surface.buffer, { ...scene, sky: this.sky }, this.ripples, reflect, {
+    paintSurface(this.surface.buffer, { ...scene, sky: this.sky }, this.ripples, reflects ? reflect : [], {
       elapsedMs,
       rain: this.rain,
       strike: this.strike,
+      glints: reflects,
     });
     this.surface.touch().commit(rows);
     this.painted = this.band;

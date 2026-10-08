@@ -5,6 +5,7 @@ import { visibleLocal, type CameraFrame, type LocalBounds } from "./camera";
 import { CaveRealm } from "./cave-realm-layer";
 import { cloudShade, cloudShadowsAt } from "./cloud-shadow";
 import { DisplayGroup } from "./display-group";
+import type { EffectSwitches } from "./effects";
 import { beginFrame, type FrameContext } from "./frame-context";
 import { GroundLayer } from "./ground-layer";
 import { HeroLayer, heroHeight } from "./hero-layer";
@@ -76,9 +77,11 @@ export class DemoScene extends Scene {
 
   private readonly hero: HeroLayer;
   private readonly sky: SkyLayer;
-  private readonly rollGround = new RollGroundLayer();
+  private readonly rollGround: RollGroundLayer;
   private readonly ground = new GroundLayer();
   private readonly renderPath: RenderPath;
+  /** The visual effects drawn this load; one that is off is never stepped or drawn (`effects.ts`). */
+  private readonly effects: EffectSwitches;
   /** Everything put away underground: what stands, grows, flows and falls on the overworld. */
   private readonly overworld: Overworld;
   private readonly lighting = new LightingLayer();
@@ -108,12 +111,15 @@ export class DemoScene extends Scene {
     super();
     this.skyFraction = options.skyFraction;
     this.renderPath = options.render;
-    this.sky = new SkyLayer(options.sky);
-    this.hero = new HeroLayer({ ...dryGround(START), turn: 0 }, options.radius, this.caves.blocked);
+    this.effects = options.effects;
+    this.sky = new SkyLayer(options.sky, options.effects);
+    this.rollGround = new RollGroundLayer(options.effects);
+    this.hero = new HeroLayer({ ...dryGround(START), turn: 0 }, options.radius, this.caves.blocked, options.effects);
     this.clock = new WorldClock(options.pinnedHours, options.dayMs);
     this.overworld = new Overworld(
       STORM_SEED,
       options.weather === undefined ? undefined : WEATHER_PRESETS[options.weather],
+      options.effects,
     );
   }
 
@@ -265,7 +271,7 @@ export class DemoScene extends Scene {
         ? []
         : [
             () => this.ground.prefetch(pose),
-            () => this.overworld.vegetation.prefetch(pose),
+            ...(this.effects.on("grass") ? [() => this.overworld.vegetation.prefetch(pose)] : []),
             () => this.overworld.water.prefetchFor(ctx, pose),
             ...this.rollGround.prefetchTasks(ctx, pose, this.overworld.water.sizeScale()),
           ],
@@ -279,13 +285,14 @@ export class DemoScene extends Scene {
   private light(ctx: FrameContext): void {
     this.lighting.draw({
       ambient: ctx.atmosphere.ambient,
-      lights: ctx.lights,
+      // Off, the pass is the hour's ambient alone: no pool is stamped and no halo drawn.
+      lights: this.effects.on("lights") ? ctx.lights : [],
       flash: 0,
       night: 1 - ctx.atmosphere.daylight,
-      clouds: this.clouds(ctx),
+      clouds: this.clouds(ctx.elapsedMs, ctx.atmosphere),
       skyRows: this.layout.horizonY,
     });
-    const shake = this.clock.shake();
+    const shake = this.effects.on("shake") ? this.clock.shake() : { x: 0, y: 0 };
     this.cameras.main.setScroll(shake.x, shake.y);
   }
 
@@ -304,16 +311,17 @@ export class DemoScene extends Scene {
       // No rain falls in a cave.
       rain: this.caves.share() < 0.5 ? sky.rain : 0,
       // The lighting pass is offset by its shake margin; the sampler reads the same pixel.
-      shade: cloudShade(cloudShadowsAt(this.odometer, this.clock.elapsedMs, atmosphere), MAX_SHAKE),
+      shade: cloudShade(this.clouds(this.clock.elapsedMs, atmosphere), MAX_SHAKE),
       width: WIDTH,
       height: HEIGHT,
       impulse: this.clock.sink,
     });
   }
 
-  /** Where the cloud shadows are this frame: the one answer the pass and the sampler share. */
-  private clouds(ctx: FrameContext): ReturnType<typeof cloudShadowsAt> {
-    return cloudShadowsAt(this.odometer, ctx.elapsedMs, ctx.atmosphere);
+  /** Where the cloud shadows are, for the pass and the sampler alike; switched off, none (`CLEAR_SKY`). */
+  private clouds(elapsedMs: number, atmosphere: Atmosphere): ReturnType<typeof cloudShadowsAt> {
+    const clouds = cloudShadowsAt(this.odometer, elapsedMs, atmosphere);
+    return this.effects.on("cloud-shadows") ? clouds : { ...clouds, strength: 0 };
   }
 
   /**

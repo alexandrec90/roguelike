@@ -34,6 +34,15 @@ water's motion differs, because only WebGPU has compute.
 | the wave step | `webgpu/waves.ts` | - | `webgpu/wave-sim.ts` |
 | the sway | `sway.ts` `swayOffset` | `sway.ts` `SWAY_GLSL` | `sway.ts` `SWAY_WGSL` |
 
+**An effect switched off is left out of the source, not zeroed.** `ShaderFeatures`
+(`backend.ts`, from `?off=`) builds the world shaders without the sway or the water's
+rings, in GLSL and WGSL alike; a uniform at zero would still run the arithmetic on every
+vertex and water pixel. The switches flip mid-run, so `LowpolyGame` hands the backend the
+features every frame (`setFeatures`) and each backend compiles a variant the first time
+it is asked for and keeps it (`featuresKey`); WebGPU's builds share one pair of bind
+group layouts (`createLayouts`), so the bind groups need no remaking. A new effect that
+lives in a shader gets a feature the same way.
+
 **Change one, change all.** `placement.test.ts` pins `placeVertex` to the pixel skin's
 `localPlacement` and `waves.test.ts` the wave step's behaviour; a drift between a
 reference and its shader only shows on screen. WGSL clip depth runs 0..1 where GLSL's
@@ -152,7 +161,8 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 
 | Module | Symbols |
 | --- | --- |
-| `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
+| `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` · `ShaderFeatures` · `shaderFeatures` · `ALL_FEATURES` · `featuresKey` |
+| `shaders.ts` | `worldVertex` · `worldFragment` · `WORLD_VERTEX` · `WORLD_FRAGMENT` · `WORLD_FRAGMENT_SOLID` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` · `TOWARD_VIEWER` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
 | `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `frond` · `frondFaces` · `disc` |
@@ -160,12 +170,12 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
 | `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
-| `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` |
+| `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` · `STILL_WIND` · `SWAY_STILL_GLSL` · `SWAY_STILL_WGSL` |
 | `sway-pushes.ts` | `pushesOf` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `cutaway.ts` | `heroCutaway` · `heroHidden` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
-| `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
+| `water-glsl.ts` | `WATER_GLSL` · `waterGlsl` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
 | `ripples.ts` | `RippleRing` |
 | `sky-light.ts` | `lightDirection` · `stillSky` |
 | `renderer.ts` | `WebGlBackend` |
@@ -182,7 +192,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `webgpu/wave-sim.ts` | `WaveSim` · `stepsFor` · `freshImpulses` |
 | `webgpu/wave-surface.ts` | `WaveSurface` |
 | `webgpu/uniform-pack.ts` | `packFrame` · `packDraws` · `drawCount` |
-| `webgpu/pipelines.ts` | `createPipelines` · `DEFAULT_SAMPLES` |
+| `webgpu/pipelines.ts` | `createPipelines` · `createLayouts` · `PipelineLayouts` · `DEFAULT_SAMPLES` |
 
 A new species is one entry in `scenery-mesh.ts`'s table; `world.test.ts` fails if the
 planet places a species this skin has no body for. A broadleaf is a `Canopy` - trunk,

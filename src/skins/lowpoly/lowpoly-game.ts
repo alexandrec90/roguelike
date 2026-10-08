@@ -21,12 +21,12 @@ import { fromLocal, type PlanetPoint } from "../../game/planet";
 import { WEATHER_PRESETS } from "../../game/water/schedule";
 import { RAIN_SLANT } from "../../game/weather";
 import { ACTOR_MESH_KEYS, ActorMeshes, type ActorMeshKey } from "./actor-frame";
-import type { DrawableHandle, DrawCall, LowpolyBackend } from "./backend";
+import { shaderFeatures, type DrawableHandle, type DrawCall, type LowpolyBackend } from "./backend";
 import { WetWorld } from "./wet-world";
 import { heroCutaway } from "./cutaway";
 import { heroHeightPx } from "./hero-mesh";
 import { fieldRows, lowpolyView, type LowpolyView } from "./placement";
-import { MAX_PUSHES, windUniform } from "./sway";
+import { MAX_PUSHES, STILL_WIND, windUniform } from "./sway";
 import { pushesOf } from "./sway-pushes";
 import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE, groundInView, MIRROR_ROWS, type ChunkMesh } from "./world-chunks";
 
@@ -120,31 +120,41 @@ export class LowpolyGame {
     this.buildActors(live, where.turn);
     const weather = this.wet.weather;
     const atmosphere = this.clock.atmosphere(weather.overcast);
-    const sway = {
-      wind: windUniform(this.clock.elapsedMs, weather.wind),
-      pushes: pushesOf(
-        { player: this.hero.player, live, slimes: this.encounter.slimes.slimes, fireballs: this.encounter.fireballs, bursts: this.encounter.bursts },
-        this.pushes,
-      ),
-    };
-    const shake = this.clock.shake();
+    // Off, the shaders were built without the sway (`ShaderFeatures`), so nothing reads these.
+    const sway = this.options.effects.on("sway")
+      ? {
+          wind: windUniform(this.clock.elapsedMs, weather.wind),
+          pushes: pushesOf(
+            { player: this.hero.player, live, slimes: this.encounter.slimes.slimes, fireballs: this.encounter.fireballs, bursts: this.encounter.bursts },
+            this.pushes,
+          ),
+        }
+      : { wind: STILL_WIND, pushes: this.pushes };
+    const fx = this.options.effects;
+    // The switches are live: the backend swaps in the shader build they ask for (kept once built).
+    this.renderer.setFeatures(shaderFeatures(fx));
+    const shake = fx.on("shake") ? this.clock.shake() : { x: 0, y: 0 };
     const cut = heroCutaway(this.view, live, this.heroHeight);
     const cutaway = cut === undefined ? undefined : { ...cut, x: cut.x + shake.x, y: cut.y + shake.y };
     const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), sway, width, height, cutaway };
     const turn = where.turn;
     const chunkCall = (drawable: DrawableHandle, mesh: ChunkMesh): DrawCall => ({ drawable, offset: asPair(chunkOffset(mesh, live)), turn });
     const rows = fieldRows(this.view);
-    const mirrorable = this.chunks.filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows, MIRROR_ROWS));
     const onField = this.chunks.filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows));
     const actors: DrawCall[] = [
       { drawable: this.dynamic.actorSolid, offset: [0, 0], turn },
       { drawable: this.dynamic.heroSolid, offset: [0, 0], turn: 0 },
     ];
     this.renderer.render(frame, {
-      mirrored: [
-        ...mirrorable.flatMap((chunk) => [chunkCall(chunk.land, chunk.mesh), chunkCall(chunk.solid, chunk.mesh)]),
-        ...actors,
-      ],
+      // Off, the mirror pass draws nothing: the water shows the sky it was cleared to.
+      mirrored: fx.on("reflections")
+        ? [
+            ...this.chunks
+              .filter((chunk) => groundInView(chunkOffset(chunk.mesh, live), turn, rows, MIRROR_ROWS))
+              .flatMap((chunk) => [chunkCall(chunk.land, chunk.mesh), chunkCall(chunk.solid, chunk.mesh)]),
+            ...actors,
+          ]
+        : [],
       lands: this.chunks.map((chunk) => chunkCall(chunk.land, chunk.mesh)),
       grounds: onField.map((chunk) => chunkCall(chunk.ground, chunk.mesh)),
       solids: [
@@ -153,12 +163,14 @@ export class LowpolyGame {
         { drawable: this.dynamic.heroSolid, offset: [0, 0], turn: 0 },
       ],
       sheers: [
-        ...this.chunks.map((chunk) => chunkCall(chunk.sheer, chunk.mesh)),
+        // A chunk's sheer mesh is its scenery's shadows and nothing else.
+        ...(fx.on("shadows") ? this.chunks.map((chunk) => chunkCall(chunk.sheer, chunk.mesh)) : []),
         { drawable: this.dynamic.actorSheer, offset: [0, 0], turn },
         { drawable: this.dynamic.heroSheer, offset: [0, 0], turn: 0 },
       ],
       rain: {
-        strength: weather.rain,
+        // No strength, no pass: both backends skip the rain overlay.
+        strength: fx.on("rain") ? weather.rain : 0,
         seconds: this.clock.elapsedMs / 1000,
         slant: RAIN_SLANT * weather.wind,
         light: 0.55 + 0.45 * atmosphere.daylight,
@@ -167,7 +179,16 @@ export class LowpolyGame {
   }
 
   private buildActors(live: PlanetPoint, turn: number): void {
-    this.actors.build({ player: this.hero.player, elapsedMs: this.clock.elapsedMs, yaw: this.shownYaw, live, turn, encounter: this.encounter });
+    const fx = this.options.effects;
+    this.actors.build({
+      player: this.hero.player,
+      elapsedMs: this.clock.elapsedMs,
+      yaw: this.shownYaw,
+      live,
+      turn,
+      encounter: this.encounter,
+      shows: { shadows: fx.on("shadows"), trail: fx.on("trail") },
+    });
     for (const key of ACTOR_MESH_KEYS) {
       this.renderer.update(this.dynamic[key], this.actors.bytes(key));
     }

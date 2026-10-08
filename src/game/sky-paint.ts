@@ -13,7 +13,13 @@ import type { PixelBuffer } from "./pixel-buffer";
 import { cloudTones, paintCloudDecks } from "./sky-clouds";
 import { ditherThreshold } from "./shading";
 
-const RIDGE_FAR = { seed: 7, base: 3, amplitude: 3, wavelength: 55 } as const;
+/** Which of the sky's switchable parts are painted. */
+export interface SkyShows {
+  readonly clouds: boolean;
+  readonly stars: boolean;
+}
+
+const RIDGE_FAR ={ seed: 7, base: 3, amplitude: 3, wavelength: 55 } as const;
 const RIDGE_NEAR = { seed: 21, base: 1, amplitude: 3, wavelength: 26 } as const;
 
 export class SkyPainter {
@@ -21,11 +27,15 @@ export class SkyPainter {
   private readonly ridges: { readonly profile: readonly number[]; readonly near: boolean }[];
   private readonly width: number;
 
-  /** `ridgesOnly` paints the ridges and leaves the rest of the band transparent (`?sky=hd`). */
+  /**
+   * `ridgesOnly` paints the ridges and leaves the rest of the band transparent
+   * (`?sky=hd`); `shows` leaves out the clouds or the stars (`?off=`).
+   */
   constructor(
     private readonly buffer: PixelBuffer,
     private readonly layout: HorizonLayout,
     private readonly ridgesOnly = false,
+    private readonly shows: SkyShows = { clouds: true, stars: true },
   ) {
     this.width = buffer.width;
     this.stars = starField(PANORAMA_WIDTH, layout.skyHeight);
@@ -40,9 +50,13 @@ export class SkyPainter {
     this.buffer.data.fill(0);
     if (!this.ridgesOnly) {
       this.paintSky(atmosphere);
-      this.paintStars(atmosphere, offset, elapsedMs);
+      if (this.shows.stars) {
+        this.paintStars(atmosphere, offset, elapsedMs);
+      }
       this.paintSun(atmosphere);
-      this.paintClouds(atmosphere, offset, drift);
+      if (this.shows.clouds) {
+        this.paintClouds(atmosphere, offset, drift);
+      }
     }
     this.paintRidges(atmosphere, offset);
     this.unlight(atmosphere.ambient);

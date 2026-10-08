@@ -11,7 +11,7 @@
  * simulation: a flame never decides whether a blow landed.
  */
 
-import { createPool, particleCloud, stepParticles, type ParticlePool } from "../fx/particles";
+import { clearPool, createPool, particleCloud, stepParticles, type ParticlePool } from "../fx/particles";
 import type { PixelCloud } from "../ink";
 import type { LightSource } from "../lights";
 import { BLADE_SPAN, CAST, HERO_EQUIPPED, WALK } from "../models";
@@ -60,16 +60,35 @@ const SCARF_GROUP = 1000;
 /** How far behind (or, turned away, in front of) the spine the tail hangs. */
 const SCARF_DEPTH = 2.9;
 
+/**
+ * Which of his switchable effects are drawn; all of them when absent. Read
+ * every frame, so a caller may hand getters over live switches.
+ */
+export interface LookShows {
+  readonly scarf: boolean;
+  readonly trail: boolean;
+  /** Blade fire and hit sparks. */
+  readonly particles: boolean;
+  readonly shadow: boolean;
+}
+
+const ALL_SHOWN: LookShows = { scarf: true, trail: true, particles: true, shadow: true };
+
 export class HeroLook {
   private readonly pool: ParticlePool;
   private readonly fire: FireEmitter;
   private readonly scarf: Scarf;
   private settled = false;
+  /** Whether his particles were on last frame: the frame they go off, the pool is emptied. */
+  private sparking = true;
   private lastBlade: BladeSegment | undefined;
   /** The rig's drawn yaw, chasing `player.facing`; unset until the first frame. */
   private yaw: number | undefined;
 
-  constructor(seed = 0x4e50) {
+  constructor(
+    seed = 0x4e50,
+    private readonly shows: LookShows = ALL_SHOWN,
+  ) {
     this.pool = createPool(180, seed);
     this.fire = createFireEmitter(seed + 1);
     this.scarf = createScarf(seed + 2);
@@ -78,7 +97,7 @@ export class HeroLook {
   /** Sparks (or flame) off the blade's tip — a blow landed. */
   hit(burning: boolean): void {
     const blade = this.lastBlade;
-    if (blade !== undefined) {
+    if (blade !== undefined && this.shows.particles) {
       emitHitBurst(this.pool, blade.bx, blade.by, burning);
     }
   }
@@ -96,25 +115,45 @@ export class HeroLook {
     // so there is no separate gaze to add. Swept rather than cut (`turn.ts`).
     this.yaw = easeYaw(this.yaw ?? player.facing, player.facing, input.deltaMs);
     const orient = { yaw: this.yaw };
-    const skeleton = solveModel(HERO_EQUIPPED, pose, orient);
-    this.stepScarf(skeleton, input);
+    const scarf = this.shows.scarf;
+    // Put away, the tail is hung afresh from his neck when it comes back, not where it was left.
+    this.settled &&= scarf;
+    const extras = scarf ? this.scarfExtras(pose, orient.yaw, input) : [];
 
     const figure = heroFigure(pose, {
       ...orient,
       enchanted: player.enchanted,
       timeMs: input.elapsedMs,
       light: { x: input.sun.light.x, y: input.sun.light.y, ambient: 0.24 },
-      extras: scarfPrims(this.scarf, depthOf(skeleton, orient.yaw), SCARF_GROUP),
+      extras,
     });
 
     const blade = bladeOf(figure.solved);
-    this.stepParticles(player, blade, input.deltaMs);
+    const particles = this.shows.particles;
+    if (particles) {
+      this.stepParticles(player, blade, input.deltaMs);
+    } else {
+      if (this.sparking) {
+        clearPool(this.pool);
+      }
+      this.lastBlade = blade;
+    }
+    this.sparking = particles;
     const trail =
-      player.attackMs === undefined
+      player.attackMs === undefined || !this.shows.trail
         ? { behind: [], front: [] }
         : trailCloud(trailSegments(player.attackMs, layeredPose({ ...tracksOf(player, input.elapsedMs), swingMs: undefined }), orient), player.enchanted);
-    const scene = [...trail.behind, ...figure.cloud, ...trail.front, ...particleCloud(this.pool)];
-    return { figure: figure.cloud, scene, shadow: heroShadow(figure.cloud, input.sun), blade };
+    const sparks = particles ? particleCloud(this.pool) : [];
+    const scene = [...trail.behind, ...figure.cloud, ...trail.front, ...sparks];
+    const shadow = this.shows.shadow ? heroShadow(figure.cloud, input.sun) : [];
+    return { figure: figure.cloud, scene, shadow, blade };
+  }
+
+  /** The scarf, stepped from where his neck is now, as the figure's extra primitives. */
+  private scarfExtras(pose: ReturnType<typeof layeredPose>, yaw: number, input: LookInput): ReturnType<typeof scarfPrims> {
+    const skeleton = solveModel(HERO_EQUIPPED, pose, { yaw });
+    this.stepScarf(skeleton, input);
+    return scarfPrims(this.scarf, depthOf(skeleton, yaw), SCARF_GROUP);
   }
 
   private stepScarf(solved: SolvedPose, input: LookInput): void {

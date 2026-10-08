@@ -1,5 +1,6 @@
 import "./style.css";
 import { isSkinKey } from "./game/keybindings";
+import { readSceneOptions } from "./game/scene-options";
 import { attachOptionsPanel } from "./options-panel";
 import { nextSkin, parseSkin, skinHref, type SkinId, type SkinModule } from "./skins/skin";
 
@@ -35,7 +36,11 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-// Every knob above and in `scene-options.ts`, as controls in the corner (`knobs.ts`).
-attachOptionsPanel(host, skin, window.location);
+// The effect switches (`effects.ts`): one object for the whole page, which the
+// panel flips and the skin reads every frame, so a switch takes effect at once.
+const effects = readSceneOptions(query).effects;
 
-void SKIN_MODULES[skin]().then((module) => module.mount(host, query));
+// Every knob above and in `scene-options.ts`, as controls in the corner (`knobs.ts`).
+attachOptionsPanel(host, skin, window.location, effects);
+
+void SKIN_MODULES[skin]().then((module) => module.mount(host, query, effects));

@@ -8,6 +8,7 @@
  */
 
 import { Game } from "../engine";
+import type { EffectSwitches } from "../game/effects";
 import { DemoScene, GAME_SIZE } from "../game/demo-scene";
 import { readSceneOptions } from "../game/scene-options";
 import { coverOffset, integerCoverScale, presentScale } from "../game/integer-scale";
@@ -15,7 +16,7 @@ import { HelpOverlay } from "../game/help-overlay";
 import { MapOverlay, wantsMap } from "../game/map-overlay";
 import { visibleHeight } from "../game/viewport";
 
-export function mount(host: HTMLElement, query: URLSearchParams): void {
+export function mount(host: HTMLElement, query: URLSearchParams, effects: EffectSwitches): void {
   // Every knob the address bar can turn — the sky split, the strafe radius, the
   // time of day and the weather — is read in `scene-options.ts`. An unreadable
   // value falls back rather than blanking the game.
@@ -25,7 +26,8 @@ export function mount(host: HTMLElement, query: URLSearchParams): void {
 
   // Held rather than built inline: the layout below has to tell it how much of
   // the render target survived the window's crop.
-  const scene = new DemoScene(readSceneOptions(query));
+  // The page's live effect switches, not the query's copy: the panel flips them mid-run.
+  const scene = new DemoScene({ ...readSceneOptions(query), effects });
 
   // WebGL2 or nothing: every per-pixel pass, and `pixelHash` itself, is GLSL ES
   // 3.00 - shifts, xors and unsigned integers ES 1.00 does not have.

@@ -35,6 +35,7 @@
 import type { Scene } from "../engine";
 
 import type { Atmosphere } from "./atmosphere";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import type { HorizonLayout } from "./horizon";
 import { bearingOffset } from "./panorama";
 import { PixelSurface } from "./pixel-surface";
@@ -60,16 +61,29 @@ export class SkyLayer {
    * clouds - and the rest of it transparent, and has `sky-hd-layer.ts` draw the
    * air behind the world at the screen's own resolution instead.
    */
-  constructor(style: SkyStyle = "pixel") {
+  constructor(
+    style: SkyStyle = "pixel",
+    private readonly effects: EffectSwitches = ALL_EFFECTS,
+  ) {
     this.ridgesOnly = style === "hd";
   }
 
   create(scene: Scene, layout: HorizonLayout, width: number): void {
     this.surface = new PixelSurface(scene, width, Math.max(layout.skyHeight, 1), "sky");
     this.surface.image.setDepth(HORIZON_DEPTH);
-    this.painter = new SkyPainter(this.surface.buffer, layout, this.ridgesOnly);
+    // Read on every paint, so a switch flipped mid-run shows on the next one.
+    const effects = this.effects;
+    const shows = {
+      get clouds(): boolean {
+        return effects.on("sky-clouds");
+      },
+      get stars(): boolean {
+        return effects.on("stars");
+      },
+    };
+    this.painter = new SkyPainter(this.surface.buffer, layout, this.ridgesOnly, shows);
     if (this.ridgesOnly) {
-      this.hd = new HdSkyLayer();
+      this.hd = new HdSkyLayer(shows);
       this.hd.create(scene, layout, width);
     }
   }
@@ -78,9 +92,14 @@ export class SkyLayer {
   update(turn: number, atmosphere: Atmosphere, elapsedMs: number): void {
     this.hd?.update(turn, atmosphere, elapsedMs);
     const offset = bearingOffset(turn);
-    // Nothing on the ridges drifts or twinkles: they repaint only for a turn or the light.
-    const tick = this.ridgesOnly ? 0 : Math.floor(elapsedMs / CLOUD_TICK_MS);
-    const signature = `${offset}|${atmosphere.hours.toFixed(2)}|${atmosphere.overcast.toFixed(2)}|${tick}`;
+    // Nothing on the ridges drifts or twinkles: they repaint only for a turn or
+    // the light - and so does a sky with no clouds and no stars out.
+    const clouds = this.effects.on("sky-clouds");
+    const stars = this.effects.on("stars");
+    const moves = clouds || (stars && atmosphere.starAlpha > 0.02);
+    const tick = this.ridgesOnly || !moves ? 0 : Math.floor(elapsedMs / CLOUD_TICK_MS);
+    // The switches are in it, so flipping one repaints at once.
+    const signature = `${offset}|${atmosphere.hours.toFixed(2)}|${atmosphere.overcast.toFixed(2)}|${tick}|${clouds}|${stars}`;
     if (signature === this.rendered) {
       return;
     }

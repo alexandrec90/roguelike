@@ -71,7 +71,19 @@ export const WATER_LOOK = {
 /** `LOWPOLY.waterDeep` as a shader constant's arguments, for either language. */
 export const WATER_DEEP_ARGS = LOWPOLY.waterDeep.map(float).join(", ");
 
-/** Uniforms and functions shared by the world fragment shader. */
+/**
+ * Uniforms and functions shared by the world fragment shader. Without
+ * `ripples` (`?off=ripples`) the water is still: `waterColour` takes no slope,
+ * so neither ring lattice is compiled in.
+ */
+export function waterGlsl(ripples: boolean): string {
+  return ripples ? WATER_GLSL : WATER_GLSL.replace(RIPPLE_SLOPE, "vec2 slope = vec2(0.0);");
+}
+
+/** The one line of `waterColour` the rings enter by. */
+const RIPPLE_SLOPE = "vec2 slope = rainSlope(planet) * 0.6 + stepSlope(planet);";
+
+/** The water's shader source with every ring in it. */
 export const WATER_GLSL = `
 uniform sampler2D u_puddles;   // the basin field, one planet lap, REPEAT
 uniform sampler2D u_reflect;   // the world mirrored, this frame

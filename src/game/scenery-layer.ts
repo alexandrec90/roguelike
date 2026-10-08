@@ -31,6 +31,7 @@
 
 import type { Image, Scene } from "../engine";
 import { groundRow, localPlacement, localReach, type LocalBounds } from "./camera";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import type { FrameContext } from "./frame-context";
 import { fieldDepth, rowsToSink } from "./horizon";
 import { toLocal, type PlanetPose } from "./planet";
@@ -69,6 +70,11 @@ export class SceneryLayer {
   private width = 0;
   private swept: PlanetPose | undefined;
   private candidates: readonly SceneryFeature[] = [];
+  /**
+   * Read every frame: `sway` off stands each body upright and samples no wind
+   * for it; `shadows` off shows no body's shadow image.
+   */
+  constructor(private readonly effects: EffectSwitches = ALL_EFFECTS) {}
 
   create(scene: Scene, bounds: LocalBounds, width: number): void {
     this.layout(bounds, width);
@@ -138,10 +144,14 @@ export class SceneryLayer {
       return;
     }
 
-    const wind = windAt(ctx.elapsedMs, feature.x * TILE_WIDTH, feature.y * TILE_WIDTH, ctx.wind);
-    // Eased toward the field rather than set to it: a baked lean has no spring,
-    // so the inertia the spring would have given is put back here.
-    slot.lean += (wind - slot.lean) * Math.min(1, ctx.deltaMs / 180);
+    if (this.effects.on("sway")) {
+      const wind = windAt(ctx.elapsedMs, feature.x * TILE_WIDTH, feature.y * TILE_WIDTH, ctx.wind);
+      // Eased toward the field rather than set to it: a baked lean has no spring,
+      // so the inertia the spring would have given is put back here.
+      slot.lean += (wind - slot.lean) * Math.min(1, ctx.deltaMs / 180);
+    } else {
+      slot.lean = 0;
+    }
     // Lean and shadow fade out over the field's last row, so at the seam the
     // body is its ladder's full-size rung exactly and crosses without a snap.
     const depth = fieldDepth(placed.y, ctx.frame.groundTop);
@@ -155,7 +165,7 @@ export class SceneryLayer {
     // A body stands over the cloud shadows' pass; the shadow at its foot is its tint.
     slot.body.setTint(ctx.shade.tint(placed.x, placed.y));
     const shadowAlpha = Math.min(1, ctx.atmosphere.shadowStrength * 1.15) * depth;
-    if (lean.shadow === null || ctx.atmosphere.shadowStrength < 0.05 || shadowAlpha <= 0) {
+    if (!this.effects.on("shadows") || lean.shadow === null || ctx.atmosphere.shadowStrength < 0.05 || shadowAlpha <= 0) {
       slot.shadow.setVisible(false);
     } else {
       show(slot.shadow, lean.shadow, placed.x, placed.y, standingDepth(row, SHADOW_RANK));

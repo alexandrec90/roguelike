@@ -26,6 +26,8 @@ export interface SlimeRenderEnv {
   readonly scale?: number;
   /** Horizontal shadow offset, px — the sun low on one side pushes it the other way. */
   readonly shadowShift?: number;
+  /** False skips the shadow altogether (`?off=shadows`); true when absent. */
+  readonly shadow?: boolean;
 }
 
 export interface SlimeFrame {
@@ -176,7 +178,7 @@ export function slimeFrame(slime: Slime, env: SlimeRenderEnv): SlimeFrame {
     shadowSize = Math.min(slime.modeMs / EMERGE_MS, 1);
   }
   const shadow =
-    shadowSize > 0.15
+    env.shadow !== false && shadowSize > 0.15
       ? slimeShadow(slime.squash.value, slime.lift, scale * shadowSize, env.shadowShift ?? 0)
       : [];
   return { body: lifted(body, slime.lift * scale), shadow };

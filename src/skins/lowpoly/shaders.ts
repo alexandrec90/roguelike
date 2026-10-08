@@ -17,13 +17,19 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon"
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
 import { Kind } from "./mesh";
 import { TOWARD_VIEWER } from "./placement";
-import { MAX_PUSHES, SWAY_GLSL } from "./sway";
-import { WATER_GLSL } from "./water-glsl";
+import { ALL_FEATURES, type ShaderFeatures } from "./backend";
+import { MAX_PUSHES, SWAY_GLSL, SWAY_STILL_GLSL } from "./sway";
+import { waterGlsl } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
 const vec3 = (v: readonly [number, number, number]): string => `vec3(${v.map(float).join(", ")})`;
 
-export const WORLD_VERTEX = `#version 300 es
+/** The world's vertex shader, with or without the sway (`ShaderFeatures`). */
+export function worldVertex(features: ShaderFeatures): string {
+  return WORLD_VERTEX_SOURCE.replace("/*SWAY*/", () => (features.sway ? SWAY_GLSL : SWAY_STILL_GLSL));
+}
+
+const WORLD_VERTEX_SOURCE = `#version 300 es
 precision highp float;
 
 layout(location = 0) in vec3 a_pos;
@@ -59,7 +65,7 @@ const float WALL_RISE = ${float(WALL_RISE)};
 vec2 turned(vec2 p) {
   return vec2(p.x * u_rot.x - p.y * u_rot.y, p.x * u_rot.y + p.y * u_rot.x);
 }
-${SWAY_GLSL}
+/*SWAY*/
 float squash(float row) {
   float r = row / u_roll.z;
   return 1.0 / (1.0 + r * r);
@@ -115,6 +121,9 @@ void main() {
 }
 `;
 
+/** The vertex shader with everything in it. */
+export const WORLD_VERTEX = worldVertex(ALL_FEATURES);
+
 /**
  * The cut a fragment may make: what lies past the horizon, and in the mirror
  * anything lying flat or sunk past it.
@@ -142,7 +151,12 @@ const CLIP_GLSL = `
     discard;
   }`;
 
-const worldFragment = (clips: boolean): string => `#version 300 es
+/**
+ * The world's fragment shader: `clips` for the ground, the mirror and the
+ * sheer pass; without, for what stands on screen. Without `ripples` the water
+ * is still - neither the rain's rings nor the footsteps' are compiled in.
+ */
+export const worldFragment = (clips: boolean, features: ShaderFeatures = ALL_FEATURES): string => `#version 300 es
 precision highp float;
 
 in vec4 v_colour;
@@ -164,7 +178,7 @@ out vec4 outColour;
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
 
-${WATER_GLSL}
+${waterGlsl(features.ripples)}
 
 const vec3 TOWARD_VIEWER = ${vec3(TOWARD_VIEWER)};
 

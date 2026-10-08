@@ -36,5 +36,11 @@ export class AmbientLayer {
     for (const light of moteLights(flies)) {
       ctx.lights.push(light);
     }
+    this.gfx.setVisible(true);
+  }
+
+  /** Put the motes away: what `?off=motes` does instead of a frame, so none is left hanging. */
+  hide(): void {
+    this.gfx.setVisible(false);
   }
 }
