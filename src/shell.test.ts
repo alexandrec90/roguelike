@@ -83,6 +83,19 @@ describe("the page shell", () => {
     expect(ruleBody(css, ".help-hint--faded")).toContain("opacity: 0");
   });
 
+  it("folds the options panel into a corner until it is opened", () => {
+    // The second sanctioned overlay: the address-bar knobs as controls, a small
+    // tab in the top-right corner rather than a panel over the middle of the world.
+    const entry = readFileSync(resolve(root, "src/main.ts"), "utf8");
+    const panel = readFileSync(resolve(root, "src/options-panel.ts"), "utf8");
+    expect(entry).toContain("attachOptionsPanel(");
+    expect(panel).toContain('createElement("details")');
+    expect(panel).toContain("panel.open = readOpen()");
+    const corner = ruleBody(css, ".options-panel");
+    expect(corner).toContain("top: 8px");
+    expect(corner).toContain("right: 8px");
+  });
+
   it("draws no caption inside the canvas either", () => {
     // Removing the DOM chrome and leaving a label rendered into the world would
     // satisfy every assertion above while looking identical on screen.

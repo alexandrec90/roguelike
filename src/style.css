@@ -19,7 +19,8 @@ body {
 /*
  * The game world is the page. No chrome, no border, no title, no buttons —
  * the only thing on screen is the canvas, enlarged until it covers the host
- * (and, only when asked for, the controls reminder at the end of this file).
+ * (and, only when asked for, the controls reminder and the folded options
+ * panel at the end of this file).
  * Any excess is clipped here, so no frame or letterbox can appear.
  */
 #game {
@@ -129,4 +130,88 @@ body {
   margin: 14px 0 0;
   color: #9aa0ab;
   font-size: 12px;
+}
+
+/*
+ * The options panel (`options-panel.ts`): every address-bar knob as a control,
+ * folded to one small tab in the top-right corner until it is opened. Changing
+ * a control reloads the page under the new address.
+ */
+.options-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  border: 1px solid rgb(90 74 50 / 70%);
+  border-radius: 4px;
+  background: rgb(10 12 22 / 55%);
+  color: #e9e3cf;
+  font: 12px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.options-panel[open] {
+  min-width: 250px;
+  padding-bottom: 8px;
+  background: rgb(14 16 26 / 90%);
+}
+
+.options-panel summary {
+  padding: 3px 10px;
+  color: #c8c1ad;
+  cursor: pointer;
+  user-select: none;
+}
+
+.options-panel[open] summary {
+  color: #f0c24a;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.options-panel fieldset {
+  margin: 4px 8px 0;
+  padding: 2px 8px 6px;
+  border: 1px solid #343846;
+  border-radius: 4px;
+}
+
+.options-panel legend {
+  padding: 0 4px;
+  color: #9aa0ab;
+}
+
+.options-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+
+.options-panel__row--idle {
+  opacity: 0.5;
+}
+
+.options-panel select,
+.options-panel__reset {
+  padding: 1px 4px;
+  border: 1px solid #6c7382;
+  border-radius: 3px;
+  background: #23252e;
+  color: #f4efe0;
+  font: inherit;
+}
+
+.options-panel input[type="checkbox"] {
+  margin: 0;
+  accent-color: #f0c24a;
+}
+
+.options-panel__reset {
+  display: block;
+  margin: 8px 8px 0 auto;
+  cursor: pointer;
 }
