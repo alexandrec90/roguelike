@@ -43,6 +43,12 @@ export const LOWPOLY = {
   /** Water's own body where it is deep: what a lake shows through, under the sky it mirrors. */
   waterDeep: rgb("#2c5866"),
   shadow: rgb("#1c2030"),
+  slimeGreen: rgb("#6cc98a"),
+  slimeFire: rgb("#f08a4b"),
+  slimeFrost: rgb("#8fd3f0"),
+  slimeArcane: rgb("#a77be0"),
+  slimeEye: rgb("#15171e"),
+  eyeGlint: rgb("#dfe6e8"),
 } as const satisfies Record<string, Rgb>;
 
 export type LowpolyColour = keyof typeof LOWPOLY;

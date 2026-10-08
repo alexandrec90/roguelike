@@ -54,6 +54,12 @@ A body's foot also stands **on the drawn land**, not at height 0: walkable groun
 up a landform's lower slope (to `BLOCK_HEIGHT`), so a foot at 0 there is buried in the
 facets. Lift it by `standingHeight`, which reads the facets `landformMesh` draws.
 
+**A see-through body is half of one.** The sheer pass is neither mirrored nor depth
+written, and nothing culls back faces. So a slime's `Kind.liquid` skin puts only the
+faces turned to the eye in it (`smoothBlob`'s `facing`, from `viewInPlanet`) - else its
+back blends through its front in triangle order - and keeps an opaque part, its heart
+and eyes, in the solid pass for the mirror and the depth test.
+
 ## Wind and pushes
 
 Plants lean in the **vertex shader** (`sway.ts`): a shear about the vertex's anchor,
@@ -147,9 +153,9 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | Module | Symbols |
 | --- | --- |
 | `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` |
-| `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` |
+| `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` · `TOWARD_VIEWER` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `frond` · `frondFaces` · `disc` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `frond` · `frondFaces` · `disc` |
 | `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
 | `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
 | `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
@@ -168,7 +174,8 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `hero-mesh.ts` | `heroMesh` · `heroHeightPx` · `swingTrailMesh` |
 | `hero-dress.ts` | `SKELETON_DRESS` · `STICK_DRESS` · `SKULL` · `SKULL_HOLES` · `DressPiece` |
 | `hero-sway.ts` | `looseSkeleton` · `freeOf` · `SwayTracks` |
-| `actor-mesh.ts` | `slimeMesh` · `fireballMesh` · `burstMesh` |
+| `actor-mesh.ts` | `fireballMesh` · `burstMesh` |
+| `slime-mesh.ts` | `slimeMesh` · `slimeBody` · `skinPoint` · `slimeGaze` · `viewInPlanet` |
 | `actor-frame.ts` | `ActorMeshes` · `ACTOR_MESH_KEYS` |
 | `webgpu/webgpu-renderer.ts` | `WebGpuBackend` |
 | `webgpu/waves.ts` | `stepWaveGrid` · `windowCell` · `cellRecycled` · `WAVE_N` · `WAVE_RES` |

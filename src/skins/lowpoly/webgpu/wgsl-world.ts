@@ -13,6 +13,7 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horiz
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { Kind } from "../mesh";
+import { TOWARD_VIEWER } from "../placement";
 import { MAX_PUSHES, SWAY_WGSL } from "../sway";
 import { LAKE_DEPTH_PER_TILE, WATER_DEEP_ARGS, WATER_LOOK } from "../water-glsl";
 import { LAKE_RANGE_TILES } from "../water-texels";
@@ -97,6 +98,7 @@ const GLINT_POWER = ${f(WATER_LOOK.glintPower)};
 const GLINT = ${f(WATER_LOOK.glint)};
 const PUDDLE_DEEP = ${f(WATER_LOOK.puddleDeep)};
 const LAKE_DEEP = ${f(WATER_LOOK.lakeDeep)};
+const TOWARD_VIEWER = vec3f(${TOWARD_VIEWER.map(f).join(", ")});
 
 struct VertexIn {
   @location(0) pos: vec3f,
@@ -204,6 +206,17 @@ fn lit(colour: vec3f, normal: vec3f) -> vec3f {
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * frame.shading.x) * frame.ambient.rgb;
 }
 
+/** Jelly, as \`shaders.ts\` has it: lit, a highlight, and a rim thickening to the silhouette. */
+fn liquid(colour: vec3f, alpha: f32, normal: vec3f) -> vec4f {
+  let n = normalize(normal);
+  let facing = max(dot(n, TOWARD_VIEWER), 0.0);
+  let rim = (1.0 - facing) * (1.0 - facing);
+  let toward = max(dot(n, normalize(frame.lightDir.xyz + TOWARD_VIEWER)), 0.0);
+  let glint = (0.9 * pow(toward, 48.0) + 0.15 * pow(toward, 6.0)) * frame.shading.x;
+  let shaded = lit(colour, normal) * (1.0 + 0.35 * rim) + glint * frame.ambient.rgb;
+  return vec4f(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
+}
+
 /**
  * Standing water at a planet point, as \`waterAt\` in \`water-glsl.ts\`: x how
  * deep (> 0 is water), y tiles inside a lake's shore. A lake is the deeper of
@@ -270,6 +283,10 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
       let deep = max(PUDDLE_DEEP * smoothstep(0.0, 0.15, depth), LAKE_DEEP * smoothstep(0.3, 3.0, water.y));
       colour = mix(ground, waterColour(input.planet, ground * 0.7, input.clip.xy, deep), smoothstep(0.0, 0.012, depth));
     }
+  } else if (input.kind == ${Kind.liquid}u) {
+    let jelly = liquid(colour, alpha, input.normal);
+    colour = jelly.rgb;
+    alpha = jelly.a;
   } else if (input.kind != ${Kind.glow}u) {
     colour = lit(colour, input.normal);
   }

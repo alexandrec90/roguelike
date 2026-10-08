@@ -67,7 +67,7 @@ function lowest(actors: ActorMeshes, key: ActorMeshKey): number {
 
 function build(live: PlanetPoint, encounter = new EncounterSim()): ActorMeshes {
   const actors = new ActorMeshes();
-  actors.build({ player: new HeroDriver({ ...live, turn: 0 }).player, elapsedMs: 0, yaw: 0, live, encounter });
+  actors.build({ player: new HeroDriver({ ...live, turn: 0 }).player, elapsedMs: 0, yaw: 0, live, turn: 0, encounter });
   return actors;
 }
 
