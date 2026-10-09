@@ -9,8 +9,8 @@
  * project does not have.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -101,5 +101,25 @@ describe("the /preview skill", () => {
   it("names the key that really switches the skin", () => {
     const key = /\*\*(F\d+)\*\* cycles the\s+skin/.exec(SKILL)?.[1];
     expect(SKIN_KEYS).toContain(key);
+  });
+});
+
+describe("starting the dev server", () => {
+  it("is sent through /preview by every other instruction file", () => {
+    // A session told by CLAUDE.md and /art-check to run `npm run dev` did, bare: a colored
+    // log, then a foreground `until grep` on it. /preview had the fix and was never loaded.
+    const others = [
+      "CLAUDE.md",
+      ...readdirSync(resolve(REPO_ROOT, ".claude", "skills"))
+        .filter((name) => name !== "preview")
+        .map((name) => join(".claude", "skills", name, "SKILL.md")),
+    ].filter((path) => existsSync(resolve(REPO_ROOT, path)));
+    expect(others).toContain(join(".claude", "skills", "art-check", "SKILL.md"));
+    for (const path of others) {
+      const bare = readFileSync(resolve(REPO_ROOT, path), "utf8")
+        .split("\n")
+        .filter((line) => /(^|[`\s])npm run dev\b/.test(line) && !/VITE_PORT=\d+ npm run dev/.test(line));
+      expect(bare, `${path} starts the dev server without /preview`).toEqual([]);
+    }
   });
 });
