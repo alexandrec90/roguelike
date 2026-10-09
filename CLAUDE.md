@@ -196,7 +196,7 @@ pinned capture at 1× and enlarged, and the checklist of what to actually look a
 
 #### The asset lab
 
-`lab.html` (`npm run dev`, then `/lab.html`) is that scene. It renders on its own
+`lab.html` (`/preview`, then `/lab.html`) is that scene. It renders on its own
 320×180 canvas under the same integer-scale contract as the game, and shows the selected
 art on two grounds at once — dark beside light — because a sprite that reads on charcoal
 and disappears on bone is a fault you only see with both on screen at the same moment.
@@ -383,7 +383,7 @@ it named are now `water-layer.ts`, `draw-cloud.ts` and `ripples.ts`.
 cost: `rainImpact`'s rings were spawning at the right rate, every unit test passed, and
 the scene had no visible ripples in it for a whole session, because the rings were
 opening on the far rim and being clipped away. Any change to art, motion, or effects is
-inspected in the running browser as well — `npm run dev`, then the scene at an integer
+inspected in the running browser as well — `/preview` to start the server, then the scene at an integer
 zoom and `/lab.html` for the frames. A test can only assert the property you thought to
 name; the screen asserts the rest.
 

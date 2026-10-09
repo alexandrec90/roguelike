@@ -35,6 +35,7 @@ export type EffectId =
   | "lights"
   | "cloud-shadows"
   | "sky-clouds"
+  | "volcano-smoke"
   | "stars"
   | "rain"
   | "mist"
@@ -64,12 +65,14 @@ export interface Effect {
 
 const BOTH: readonly SkinId[] = ["pixel", "lowpoly"];
 const PIXEL: readonly SkinId[] = ["pixel"];
+const LOWPOLY: readonly SkinId[] = ["lowpoly"];
 
 /** Every effect, in the order the panel lists them: the sky down to the hero. */
 export const EFFECTS: readonly Effect[] = [
   { id: "lights", label: "Light pools", skins: PIXEL, what: "Pools and haloes round fires, spells, the burning blade and fireflies" },
   { id: "cloud-shadows", label: "Cloud shadows", skins: PIXEL, what: "Shadows of clouds drifting over the field" },
-  { id: "sky-clouds", label: "Sky clouds", skins: PIXEL, what: "The cumulus in the band above the horizon" },
+  { id: "sky-clouds", label: "Sky clouds", skins: BOTH, what: "The cumulus in the band above the horizon" },
+  { id: "volcano-smoke", label: "Volcano smoke", skins: LOWPOLY, what: "The plumes rising from the volcanoes' craters" },
   { id: "stars", label: "Stars", skins: PIXEL, what: "The night sky's stars and their twinkle" },
   { id: "rain", label: "Rain", skins: BOTH, what: "Falling streaks and the splashes they throw on dry ground" },
   { id: "mist", label: "Rain mist", skins: PIXEL, what: "The grey veil rain draws over the horizon" },

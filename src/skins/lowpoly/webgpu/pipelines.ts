@@ -9,11 +9,15 @@
  * | `worldSolid` | the screen, without discard | written, tested early | none |
  * | `worldSheer` | the screen | tested, not written | alpha |
  * | `sky`, `rain` | the screen | ignored | none / alpha |
+ * | `ballMirror`, `ball` | the reflection; the screen | written, per pixel | none |
+ * | `ballVolume` | the screen | tested, not written | premultiplied alpha |
  */
 
 import { ALL_FEATURES, type ShaderFeatures } from "../backend";
+import { IMPOSTOR_BYTES } from "../impostor";
 import { VERTEX_BYTES } from "../mesh";
 import { ShaderStage } from "./gpu-flags";
+import { impostorWgsl } from "./wgsl-impostor";
 import { RAIN_WGSL, SKY_WGSL } from "./wgsl-passes";
 import { worldWgsl } from "./wgsl-world";
 
@@ -34,7 +38,26 @@ export interface Pipelines {
   readonly worldSheer: GPURenderPipeline;
   readonly sky: GPURenderPipeline;
   readonly rain: GPURenderPipeline;
+  readonly ballMirror: GPURenderPipeline;
+  readonly ball: GPURenderPipeline;
+  readonly ballVolume: GPURenderPipeline;
 }
+
+const IMPOSTOR_LAYOUT: GPUVertexBufferLayout = {
+  arrayStride: IMPOSTOR_BYTES,
+  attributes: [
+    { shaderLocation: 0, offset: 0, format: "float32x3" },
+    { shaderLocation: 1, offset: 12, format: "float32x2" },
+    { shaderLocation: 2, offset: 20, format: "float32" },
+    { shaderLocation: 3, offset: 24, format: "unorm8x4" },
+    { shaderLocation: 4, offset: 28, format: "uint8x4" },
+  ],
+};
+
+const PREMULTIPLIED_BLEND: GPUBlendState = {
+  color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+};
 
 const VERTEX_LAYOUT: GPUVertexBufferLayout = {
   arrayStride: VERTEX_BYTES,
@@ -79,7 +102,7 @@ export interface PipelineLayouts {
 }
 
 /**
- * Every pipeline, its world shaders built for `features`. Pass the `layouts`
+ * Every pipeline, its world and impostor shaders built for `features`. Pass the `layouts`
  * of an earlier build to make another variant the same bind groups still fit.
  */
 export function createPipelines(
@@ -115,6 +138,16 @@ export function createPipelines(
       multisample: { count: samples },
     });
   };
+  const balls = device.createShaderModule({ code: impostorWgsl(features) });
+  const ballWith = (format: GPUTextureFormat, samples: number, volume: boolean): GPURenderPipeline =>
+    device.createRenderPipeline({
+      layout: worldPipeline,
+      vertex: { module: balls, entryPoint: "ballVertex", buffers: [IMPOSTOR_LAYOUT] },
+      fragment: { module: balls, entryPoint: "ballFragment", targets: [{ format, blend: volume ? PREMULTIPLIED_BLEND : undefined }] },
+      primitive: { topology: "triangle-list", cullMode: "none" },
+      depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: !volume, depthCompare: volume ? "less-equal" : "less" },
+      multisample: { count: samples },
+    });
   return {
     worldLayout,
     passesLayout,
@@ -124,5 +157,8 @@ export function createPipelines(
     worldSheer: worldWith(clipping, screenFormat, samples, true),
     sky: screenPass(SKY_WGSL, "skyFragment", false),
     rain: screenPass(RAIN_WGSL, "rainFragment", true),
+    ballMirror: ballWith(MIRROR_FORMAT, 1, false),
+    ball: ballWith(screenFormat, samples, false),
+    ballVolume: ballWith(screenFormat, samples, true),
   };
 }

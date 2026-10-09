@@ -12,10 +12,12 @@ import {
   type LowpolyBackend,
   type ShaderFeatures,
 } from "./backend";
+import { impostorVertex } from "./impostor-glsl";
 import { LowpolyGame } from "./lowpoly-game";
 import { VERTEX_BYTES } from "./mesh";
 import { worldFragment, worldVertex } from "./shaders";
 import { STILL_WIND } from "./sway";
+import { impostorWgsl } from "./webgpu/wgsl-impostor";
 import { worldWgsl } from "./webgpu/wgsl-world";
 
 /** A backend that draws nothing and keeps the last frame it was asked for. */
@@ -89,6 +91,15 @@ describe("the low-poly frame with an effect off", () => {
     expect(backend.last!.scene.rain.strength).toBeGreaterThan(0);
   });
 
+  it("lays out neither the clouds nor the volcano smoke when each is off", () => {
+    // No chunk is built, so the balls are the clouds and the plumes and nothing else.
+    const balls = (off: readonly EffectId[]): number => frameWith(off).scene.impostors.balls.length;
+    expect(all.scene.impostors.balls).toHaveLength(2);
+    expect(balls(["sky-clouds"])).toBe(1);
+    expect(balls(["volcano-smoke"])).toBe(1);
+    expect(balls(["sky-clouds", "volcano-smoke"])).toBe(0);
+  });
+
   it("works out neither the wind nor the pushes without sway", () => {
     expect(all.frame.sway.pushes.some((value) => value !== 0)).toBe(true);
     const still = frameWith(["sway"]).frame.sway;
@@ -116,6 +127,15 @@ describe("the shaders with an effect off", () => {
     expect(worldVertex(still)).toContain("vec3 sway = swayOffset(kind");
     expect(worldWgsl(false)).toContain("pushLean(foot)");
     expect(worldWgsl(false, still)).not.toContain("pushLean(");
+  });
+
+  it("leave the sway out of the impostors' crowns too", () => {
+    const still = { ...ALL_FEATURES, sway: false };
+    expect(impostorVertex(ALL_FEATURES)).toContain("pushLean(foot)");
+    expect(impostorVertex(still)).not.toContain("pushLean(");
+    expect(impostorVertex(still)).toContain("vec3 sway = swayOffset(kind");
+    expect(impostorWgsl(ALL_FEATURES)).toContain("pushLean(foot)");
+    expect(impostorWgsl(still)).not.toContain("pushLean(");
   });
 
   it("leave the rings out of the water", () => {

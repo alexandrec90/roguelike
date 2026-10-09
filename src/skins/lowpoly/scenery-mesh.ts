@@ -14,6 +14,8 @@
 import { speciesHeight } from "../../game/scenery-features";
 import { WALL_RISE } from "../../game/projection";
 import { broadleafMesh } from "./broadleaf-mesh";
+import type { ImpostorBuilder } from "./impostor";
+import { FLAT_LOOK, type Look } from "./look";
 import { Kind, MeshBuilder, mixRgb, type Vec3 } from "./mesh";
 import { LOWPOLY, hash01 } from "./palette";
 import { blob, cone, disc, frustum } from "./primitives";
@@ -28,24 +30,56 @@ const SHADOW_ALPHA = 0.32;
  */
 const DRAWN_SHARE = 0.6;
 
-type SpeciesMesh = (solid: MeshBuilder, at: Vec3, height: number, seed: number) => number;
+/** A species' body; given `leaves`, its foliage is impostor balls there (`?leaves=impostor`) where it has any. */
+type SpeciesMesh = (solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look, leaves?: ImpostorBuilder) => number;
 
-/** Draw one species at `at`, and its shadow under it. Returns nothing; both builders grow. */
-export function sceneryMesh(solid: MeshBuilder, sheer: MeshBuilder, species: string, at: Vec3, seed: number): void {
-  const height = (speciesHeight(species) / WALL_RISE) * DRAWN_SHARE * (0.85 + hash01(seed) * 0.3);
-  const build = SPECIES[species] ?? SPECIES.bush!;
-  const spread = build(solid, at, height, seed);
-  shadowUnder(sheer, at, spread);
+/** The height of the drawn ground under a point of the builder's own frame, tiles. */
+export type GroundUnder = (x: number, y: number) => number;
+
+/**
+ * How a body is laid: in which look, on what ground (omitted, level), and with
+ * its foliage as impostor balls in `leaves` (omitted, mesh).
+ */
+export interface SceneryLay {
+  readonly look?: Look;
+  readonly ground?: GroundUnder;
+  readonly leaves?: ImpostorBuilder;
 }
 
-/** A soft dark disc under a body, anchored at its foot so it shrinks with it on the lip. */
-export function shadowUnder(sheer: MeshBuilder, at: Vec3, radius: number): void {
-  disc(sheer, [at[0], at[1], at[2] + 0.01], radius, 8, {
-    colour: LOWPOLY.shadow,
-    kind: Kind.shadow,
-    alpha: SHADOW_ALPHA,
-    anchor: [at[0], at[1]],
+/**
+ * Draw one species at `at`, and its shadow under it, lying on the `ground` it
+ * is laid on. Returns nothing; the builders grow.
+ */
+export function sceneryMesh(solid: MeshBuilder, sheer: MeshBuilder, species: string, at: Vec3, seed: number, lay: SceneryLay = {}): void {
+  const height = (speciesHeight(species) / WALL_RISE) * DRAWN_SHARE * (0.85 + hash01(seed) * 0.3);
+  const build = SPECIES[species] ?? SPECIES.bush!;
+  const spread = build(solid, at, height, seed, lay.look ?? FLAT_LOOK, lay.leaves);
+  shadowUnder(sheer, at, spread, lay.ground);
+}
+
+/** Corners round a contact shadow. */
+const SHADOW_SIDES = 8;
+
+/**
+ * A soft dark disc under a body, anchored at its foot so it shrinks with it on
+ * the lip. Given the `ground` under it, each corner lies on the slope rather
+ * than the disc hanging level off a hillside.
+ */
+export function shadowUnder(sheer: MeshBuilder, at: Vec3, radius: number, ground?: GroundUnder): void {
+  const style = { colour: LOWPOLY.shadow, kind: Kind.shadow, alpha: SHADOW_ALPHA, anchor: [at[0], at[1]] as const };
+  if (ground === undefined) {
+    disc(sheer, [at[0], at[1], at[2] + 0.01], radius, SHADOW_SIDES, style);
+    return;
+  }
+  const lie = (x: number, y: number): Vec3 => [x, y, ground(x, y) + 0.01];
+  const centre = lie(at[0], at[1]);
+  const rim = Array.from({ length: SHADOW_SIDES }, (_, i) => {
+    const angle = (i / SHADOW_SIDES) * Math.PI * 2;
+    return lie(at[0] + Math.cos(angle) * radius, at[1] + Math.sin(angle) * radius);
   });
+  for (let i = 0; i < SHADOW_SIDES; i += 1) {
+    sheer.tri(centre, rim[i]!, rim[(i + 1) % SHADOW_SIDES]!, style);
+  }
 }
 
 /** A five-sided trunk `height` tall, tapering from `radius` to a little over half of it. */
@@ -69,15 +103,34 @@ function conifer(solid: MeshBuilder, at: Vec3, height: number, seed: number): nu
   return height * 0.2;
 }
 
-function bush(solid: MeshBuilder, at: Vec3, height: number, seed: number): number {
+function bush(solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look, leaves?: ImpostorBuilder): number {
   const r = height * 0.55;
-  blob(solid, [at[0], at[1], at[2] + r * 0.6], [r, r, r * 0.75], { colour: LOWPOLY.bush, kind: Kind.foliage, anchor: [at[0], at[1]] }, seed, 0.22);
+  const anchor = [at[0], at[1]] as const;
+  if (leaves !== undefined) {
+    // A mound of three: a big ball and two smaller ones leaning off it.
+    const turn = hash01(seed + 3) * Math.PI * 2;
+    leaves.ball({ centre: [at[0], at[1], at[2] + r * 0.55], foot: anchor, radius: r * 0.78, colour: LOWPOLY.bush, kind: Kind.foliage, seed: hash01(seed + 5) });
+    for (const side of [0, 1]) {
+      const angle = turn + side * 2.4;
+      const offset = r * 0.62;
+      leaves.ball({
+        centre: [at[0] + Math.cos(angle) * offset, at[1] + Math.sin(angle) * offset, at[2] + r * 0.38],
+        foot: anchor,
+        radius: r * (0.5 + hash01(seed + 7 + side) * 0.12),
+        colour: mixRgb(LOWPOLY.bush, LOWPOLY.leafLight, 0.2 * side),
+        kind: Kind.foliage,
+        seed: hash01(seed + 11 + side),
+      });
+    }
+    return r;
+  }
+  blob(solid, [at[0], at[1], at[2] + r * 0.6], [r, r, r * 0.75], { colour: LOWPOLY.bush, kind: Kind.foliage, anchor }, seed, { jitter: 0.22, look });
   return r;
 }
 
-function boulder(solid: MeshBuilder, at: Vec3, height: number, seed: number): number {
+function boulder(solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look): number {
   const r = height * 0.55;
-  blob(solid, [at[0], at[1], at[2] + r * 0.45], [r, r * 0.85, r * 0.7], { colour: LOWPOLY.rock, anchor: [at[0], at[1]] }, seed, 0.3);
+  blob(solid, [at[0], at[1], at[2] + r * 0.45], [r, r * 0.85, r * 0.7], { colour: LOWPOLY.rock, anchor: [at[0], at[1]] }, seed, { jitter: 0.3, look });
   return r * 0.9;
 }
 

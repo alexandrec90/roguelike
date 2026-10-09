@@ -79,7 +79,7 @@ export function heroMesh(b: MeshBuilder, pose: RigPose, options: HeroMeshOptions
       const style = { colour, kind, anchor: [0, 0] as const };
       const radius = piece.radius / TILE_WIDTH;
       if (piece.to === undefined) {
-        blob(b, along(piece.from, piece.offset), [radius, radius, radius], style, index * 131 + bone.length, 0);
+        blob(b, along(piece.from, piece.offset), [radius, radius, radius], style, index * 131 + bone.length, { jitter: 0 });
       } else {
         frustum(
           b,
@@ -111,7 +111,7 @@ function skullHoles(b: MeshBuilder, head: RigVec3 | undefined, yaw: number, lift
     const out = orientVector(at, yaw, false);
     const centre = toLocal({ x: head.x + out.x, y: head.y + out.y, z: head.z + out.z }, lift);
     const r = radius / TILE_WIDTH;
-    blob(b, centre, [r, r, r], { colour: LOWPOLY.socket, anchor: [0, 0] }, index, 0);
+    blob(b, centre, [r, r, r], { colour: LOWPOLY.socket, anchor: [0, 0] }, index, { jitter: 0 });
   });
 }
 

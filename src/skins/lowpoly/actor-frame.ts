@@ -16,6 +16,7 @@ import type { PlayerState } from "../../game/player";
 import { burstMesh, fireballMesh } from "./actor-mesh";
 import { heroMesh, swingTrailMesh } from "./hero-mesh";
 import { looseSkeleton } from "./hero-sway";
+import { FLAT_LOOK, type Look } from "./look";
 import { MeshBuilder } from "./mesh";
 import { shadowUnder } from "./scenery-mesh";
 import { slimeGaze, slimeMesh } from "./slime-mesh";
@@ -59,6 +60,8 @@ export class ActorMeshes {
   private readonly gazes = new Map<number, number>();
   private lastMs: number | undefined;
 
+  constructor(private readonly look: Look = FLAT_LOOK) {}
+
   /** Rebuild all four for this frame. */
   build(input: ActorInput): void {
     const b = this.builders;
@@ -67,7 +70,7 @@ export class ActorMeshes {
     }
     const { player, live, encounter } = input;
     const shows = input.shows ?? { shadows: true, trail: true };
-    const ground = standingHeight(live);
+    const ground = standingHeight(live, this.look);
     const tracks = tracksOf(player, input.elapsedMs);
     const stance = { enchanted: player.enchanted, sunk: wadeDepth(live) * WADE_SINK, ground };
     heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), { yaw: input.yaw, ...stance });
@@ -86,7 +89,13 @@ export class ActorMeshes {
       const gaze = easeYaw(this.gazes.get(slime.id) ?? target, target, deltaMs, GAZE_EASE_MS);
       this.gazes.set(slime.id, gaze);
       seen.add(slime.id);
-      slimeMesh(b.actorSolid, b.actorSheer, slime, live, { elapsedMs: input.elapsedMs, turn: input.turn, gaze, shadow: shows.shadows });
+      slimeMesh(b.actorSolid, b.actorSheer, slime, live, {
+        elapsedMs: input.elapsedMs,
+        turn: input.turn,
+        gaze,
+        shadow: shows.shadows,
+        paint: this.look,
+      });
     }
     for (const id of this.gazes.keys()) {
       if (!seen.has(id)) {

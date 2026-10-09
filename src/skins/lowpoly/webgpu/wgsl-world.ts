@@ -13,14 +13,17 @@ import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../../game/horiz
 import { PLANET_TILES } from "../../../game/planet";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../../game/projection";
 import { ALL_FEATURES, type ShaderFeatures } from "../backend";
-import { Kind } from "../mesh";
+import { Kind, type Rgb } from "../mesh";
+import { PAINT_STEPS } from "../palette";
 import { TOWARD_VIEWER } from "../placement";
+import { paintConstants } from "../shaders";
 import { MAX_PUSHES, SWAY_STILL_WGSL, SWAY_WGSL } from "../sway";
 import { LAKE_DEPTH_PER_TILE, WATER_DEEP_ARGS, WATER_LOOK } from "../water-glsl";
 import { LAKE_RANGE_TILES } from "../water-texels";
 import { WAVE_N, WAVE_RES } from "./waves";
 
 const f = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
+const vec3f = (colour: Rgb): string => `vec3f(${colour.map(f).join(", ")})`;
 
 /** Bindings shared by the world and the wave simulation's reading of the water. */
 export const WORLD_BINDINGS = `
@@ -79,26 +82,94 @@ const CLIP_WGSL = `
  */
 export function worldWgsl(clips: boolean, features: ShaderFeatures = ALL_FEATURES): string {
   return WORLD_SOURCE.replace("/*CLIP*/", () => (clips ? CLIP_WGSL : ""))
-    .replace("/*SWAY*/", () => (features.sway ? SWAY_WGSL : SWAY_STILL_WGSL))
+    .replace("/*SWAY*/", () => swayWgsl(features))
     .replace(WAVE_SLOPE, () => (features.ripples ? WAVE_SLOPE : "let wave = vec3f(0.0);"));
+}
+
+/**
+ * `swayOffset` in WGSL, or its still twin when the sway is off (`ShaderFeatures`):
+ * the world's and the impostors' vertex stages both take it from here.
+ */
+export function swayWgsl(features: ShaderFeatures): string {
+  return features.sway ? SWAY_WGSL : SWAY_STILL_WGSL;
 }
 
 /** The one line of `waterColour` the simulated waves enter by. */
 const WAVE_SLOPE = "let wave = waveSlope(planet);";
 
-const WORLD_SOURCE = `${WORLD_BINDINGS}
-
+/**
+ * The projection in WGSL, over \`frame\`: \`placement.ts\` line for line, shared
+ * by the world and the impostors (\`wgsl-impostor.ts\`). The sway is not in it:
+ * each vertex stage adds the build it was asked for (`swayWgsl`).
+ */
+export const PLACE_WGSL = `
 const ROLL_ROWS = ${f(ROLL_ROWS)};
 const HORIZON_SCALE = ${f(HORIZON_SCALE)};
 const SINK_RATE = ${f(HORIZON_SINK_RATE)};
 const TILE_WIDTH = ${f(TILE_WIDTH)};
 const TILE_DEPTH = ${f(TILE_DEPTH)};
 const WALL_RISE = ${f(WALL_RISE)};
+
+fn turned(p: vec2f, rot: vec2f) -> vec2f {
+  return vec2f(p.x * rot.x - p.y * rot.y, p.x * rot.y + p.y * rot.x);
+}
+
+fn squash(row: f32) -> f32 {
+  let r = row / frame.roll.z;
+  return 1.0 / (1.0 + r * r);
+}
+
+fn shrinkAt(rows: f32) -> f32 {
+  if (rows > ROLL_ROWS) {
+    return HORIZON_SCALE * ROLL_ROWS / rows;
+  }
+  if (frame.roll.z <= 0.0) {
+    return HORIZON_SCALE;
+  }
+  let far = squash(ROLL_ROWS);
+  let share = max(0.0, (squash(rows) - far) / (1.0 - far));
+  return HORIZON_SCALE + (1.0 - HORIZON_SCALE) * sqrt(share);
+}
+
+/** Where a point of a body lands: logical x, y (shake included), the body's scale, its rows past the field. */
+fn place(foot: vec2f, off: vec2f, rise: f32) -> vec4f {
+  let groundTop = frame.roll.x;
+  let affineY = frame.view.w - foot.y * TILE_DEPTH;
+  var ground = affineY;
+  var scale = 1.0;
+  var rows = 0.0;
+  if (affineY < groundTop) {
+    rows = (groundTop - affineY) / TILE_DEPTH;
+    var lift = 1.0;
+    if (frame.roll.z > 0.0) {
+      lift = min(atan(rows / frame.roll.z) / frame.roll.w, 1.0);
+    }
+    scale = shrinkAt(rows);
+    let over = rows - ROLL_ROWS;
+    let sink = select(0.0, SINK_RATE * over * over, over > 0.0);
+    ground = groundTop - frame.roll.y * lift + sink * scale;
+  }
+  let x = frame.view.z + (foot.x + off.x) * TILE_WIDTH * scale + frame.depthShake.z;
+  let y = ground - (off.y * TILE_DEPTH + rise * WALL_RISE) * scale + frame.depthShake.w;
+  return vec4f(x, y, scale, rows);
+}
+
+/** A depth key, rows ahead, as WebGPU's 0..1 clip depth. */
+fn clipDepth(depth: f32) -> f32 {
+  return clamp((depth - frame.depthShake.x) / (frame.depthShake.y - frame.depthShake.x), 0.0, 1.0);
+}
+`;
+
+const WORLD_SOURCE = `${WORLD_BINDINGS}
+${PLACE_WGSL}
+/*SWAY*/
 const LAP = ${f(PLANET_TILES)};
 const LAKE_RANGE = ${f(LAKE_RANGE_TILES)};
 const LAKE_DEPTH = ${f(LAKE_DEPTH_PER_TILE)};
 const WAVE_RES = ${f(WAVE_RES)};
 const WAVE_N = ${WAVE_N}i;
+${paintConstants("const", vec3f)}
+const TOWARD_VIEWER = ${vec3f(TOWARD_VIEWER)};
 const WATER_DEEP = vec3f(${WATER_DEEP_ARGS});
 const REFLECT = ${f(WATER_LOOK.reflect)};
 const SLOPE_CAP = ${f(WATER_LOOK.slopeCap)};
@@ -108,7 +179,6 @@ const GLINT_POWER = ${f(WATER_LOOK.glintPower)};
 const GLINT = ${f(WATER_LOOK.glint)};
 const PUDDLE_DEEP = ${f(WATER_LOOK.puddleDeep)};
 const LAKE_DEEP = ${f(WATER_LOOK.lakeDeep)};
-const TOWARD_VIEWER = vec3f(${TOWARD_VIEWER.map(f).join(", ")});
 
 struct VertexIn {
   @location(0) pos: vec3f,
@@ -129,27 +199,6 @@ struct VertexOut {
   @location(6) ahead: f32,
 };
 
-fn turned(p: vec2f, rot: vec2f) -> vec2f {
-  return vec2f(p.x * rot.x - p.y * rot.y, p.x * rot.y + p.y * rot.x);
-}
-/*SWAY*/
-fn squash(row: f32) -> f32 {
-  let r = row / frame.roll.z;
-  return 1.0 / (1.0 + r * r);
-}
-
-fn shrinkAt(rows: f32) -> f32 {
-  if (rows > ROLL_ROWS) {
-    return HORIZON_SCALE * ROLL_ROWS / rows;
-  }
-  if (frame.roll.z <= 0.0) {
-    return HORIZON_SCALE;
-  }
-  let far = squash(ROLL_ROWS);
-  let share = max(0.0, (squash(rows) - far) / (1.0 - far));
-  return HORIZON_SCALE + (1.0 - HORIZON_SCALE) * sqrt(share);
-}
-
 @vertex
 fn vertexMain(input: VertexIn) -> VertexOut {
   let draw = draws[input.draw];
@@ -160,43 +209,51 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   let sway = swayOffset(kind, input.anchor + draw.place.xy, input.pos.z, rot);
   let off = turned(input.pos.xy - input.anchor, rot) + sway.xy;
   let height = input.pos.z + sway.z;
-
-  let groundTop = frame.roll.x;
-  let affineY = frame.view.w - foot.y * TILE_DEPTH;
-  var ground = affineY;
-  var scale = 1.0;
-  var rows = 0.0;
-  if (affineY < groundTop) {
-    rows = (groundTop - affineY) / TILE_DEPTH;
-    var lift = 1.0;
-    if (frame.roll.z > 0.0) {
-      lift = min(atan(rows / frame.roll.z) / frame.roll.w, 1.0);
-    }
-    scale = shrinkAt(rows);
-    let over = rows - ROLL_ROWS;
-    let sink = select(0.0, SINK_RATE * over * over, over > 0.0);
-    ground = groundTop - frame.roll.y * lift + sink * scale;
-  }
-  let x = frame.view.z + (foot.x + off.x) * TILE_WIDTH * scale + frame.depthShake.z;
-  let y = ground - (off.y * TILE_DEPTH + height * mirror * WALL_RISE) * scale + frame.depthShake.w;
+  let placed = place(foot, off, height * mirror);
+  let scale = placed.z;
 
   var bias = 0.0;
   if (kind == ${Kind.ground}u) { bias = 0.06; }
   if (kind == ${Kind.shadow}u) { bias = 0.04; }
   if (kind == ${Kind.water}u) { bias = 0.03; }
   let depth = foot.y + off.y * scale + bias;
-  let z = clamp((depth - frame.depthShake.x) / (frame.depthShake.y - frame.depthShake.x), 0.0, 1.0);
 
   var result: VertexOut;
-  result.clip = vec4f(x / frame.view.x * 2.0 - 1.0, 1.0 - y / frame.view.y * 2.0, z, 1.0);
+  result.clip = vec4f(placed.x / frame.view.x * 2.0 - 1.0, 1.0 - placed.y / frame.view.y * 2.0, clipDepth(depth), 1.0);
   result.colour = input.colour;
   result.normal = vec3f(turned(input.normal.xy, rot), input.normal.z);
-  result.rows = rows;
+  result.rows = placed.w;
   result.planet = input.pos.xy + draw.place.xy + frame.hero.xy;
   result.kind = kind;
   result.mirror = mirror;
   result.ahead = foot.y + off.y * scale;
   return result;
+}
+
+/** One of three by a share 0..1: \`pick3\` in \`shaders.ts\`. */
+fn pick3(a: vec3f, b: vec3f, c: vec3f, share: f32) -> vec3f {
+  return select(select(c, b, share < 0.6667), a, share < 0.3333);
+}
+
+/** The painted look's stepped light: \`painted\` in \`shaders.ts\`, line for line. */
+fn painted(colour: vec3f, n: vec3f, ground: bool) -> vec3f {
+  let seed = fract(sin(dot(colour, vec3f(12.9898, 78.233, 37.719))) * 43758.5453);
+  let own = seed - 0.5;
+  let facing = dot(n, frame.lightDir.xyz);
+  let nudge = select(${f(PAINT_STEPS.bodyNudge)}, ${f(PAINT_STEPS.groundNudge)}, ground);
+  let level = select(max(facing, 0.0), facing - frame.lightDir.z, ground) * frame.shading.x + own * nudge;
+  let bar = select(vec2f(${f(PAINT_STEPS.bodyShade)}, ${f(PAINT_STEPS.bodyLit)}), vec2f(${f(PAINT_STEPS.groundShade)}, ${f(PAINT_STEPS.groundLit)}), ground);
+  let bright = smoothstep(bar.y - ${f(PAINT_STEPS.edge)}, bar.y + ${f(PAINT_STEPS.edge)}, level);
+  let shade = 1.0 - smoothstep(bar.x - ${f(PAINT_STEPS.edge)}, bar.x + ${f(PAINT_STEPS.edge)}, level);
+  let deep = select(1.0 - smoothstep(-0.3, -0.2, n.z), 0.0, ground);
+  let warm = pick3(PAINT_WARM_0, PAINT_WARM_1, PAINT_WARM_2, fract(seed * 3.7));
+  let cool = pick3(PAINT_COOL_0, PAINT_COOL_1, PAINT_COOL_2, fract(seed * 7.3));
+  let under = pick3(PAINT_DEEP_0, PAINT_DEEP_1, PAINT_DEEP_2, fract(seed * 11.9));
+  var c = colour * (0.75 + 0.3 * frame.shading.x);
+  c = mix(c, mix(colour, warm, ${f(PAINT_STEPS.warmMix)}) * 1.1, bright);
+  c = mix(c, mix(colour, cool, ${f(PAINT_STEPS.coolMix)}) * 0.8, shade);
+  c = mix(c, mix(colour, under, ${f(PAINT_STEPS.deepMix)}) * 0.65, deep);
+  return c * frame.ambient.rgb;
 }
 
 /** Whether the window takes this device pixel: inside the oval, its rim dithered over the outer fifth. */
@@ -209,8 +266,11 @@ fn cutAway(fragment: vec2f) -> bool {
   return distance < 0.8 || (distance < 1.0 && (1.0 - distance) / 0.2 > threshold);
 }
 
-fn lit(colour: vec3f, normal: vec3f) -> vec3f {
+fn lit(colour: vec3f, normal: vec3f, ground: bool) -> vec3f {
   let n = normalize(normal);
+  if (frame.shading.w > 0.5) {
+    return painted(colour, n, ground);
+  }
   let lambert = max(dot(n, frame.lightDir.xyz), 0.0);
   let sky = 0.5 + 0.5 * n.z;
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * frame.shading.x) * frame.ambient.rgb;
@@ -223,7 +283,7 @@ fn liquid(colour: vec3f, alpha: f32, normal: vec3f) -> vec4f {
   let rim = (1.0 - facing) * (1.0 - facing);
   let toward = max(dot(n, normalize(frame.lightDir.xyz + TOWARD_VIEWER)), 0.0);
   let glint = (0.9 * pow(toward, 48.0) + 0.15 * pow(toward, 6.0)) * frame.shading.x;
-  let shaded = lit(colour, normal) * (1.0 + 0.35 * rim) + glint * frame.ambient.rgb;
+  let shaded = lit(colour, normal, false) *(1.0 + 0.35 * rim) + glint * frame.ambient.rgb;
   return vec4f(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
 }
 
@@ -281,10 +341,10 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
   if (input.kind == ${Kind.shadow}u) {
     alpha *= frame.shading.y;
   } else if (input.kind == ${Kind.water}u) {
-    colour = waterColour(input.planet, lit(colour, input.normal) * 0.6, input.clip.xy, 0.5);
+    colour = waterColour(input.planet, lit(colour, input.normal, true) * 0.6, input.clip.xy, 0.5);
     alpha = 0.94;
   } else if (input.kind == ${Kind.ground}u) {
-    var ground = lit(colour, input.normal) * (1.0 - 0.18 * wet);
+    var ground = lit(colour, input.normal, true) * (1.0 - 0.18 * wet);
     let water = waterAt(input.planet);
     let depth = water.x;
     ground *= 1.0 - 0.22 * smoothstep(-0.03, 0.0, depth);
@@ -298,7 +358,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {/*CLIP*/
     colour = jelly.rgb;
     alpha = jelly.a;
   } else if (input.kind != ${Kind.glow}u) {
-    colour = lit(colour, input.normal);
+    colour = lit(colour, input.normal, false);
   }
   let far = clamp(input.rows / ROLL_ROWS, 0.0, 1.0);
   let haze = select(far * far * (3.0 - 2.0 * far) * 0.78, 0.82, input.rows > ROLL_ROWS);

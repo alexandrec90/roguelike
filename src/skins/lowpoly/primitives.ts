@@ -7,8 +7,9 @@
  * fifty triangles, where a GPU draws millions a frame.
  */
 
+import { FLAT_LOOK, type Look } from "./look";
 import { hash01, faceTint } from "./palette";
-import { MeshBuilder, type FaceStyle, type Vec3 } from "./mesh";
+import { faceNormal, MeshBuilder, type FaceStyle, type Vec3 } from "./mesh";
 
 type Style = Omit<FaceStyle, "inside">;
 
@@ -104,23 +105,77 @@ const ICO_RADIUS = Math.hypot(1, PHI);
 /** Faces in a `blob`: twenty, the whole icosahedron. */
 export const BLOB_FACES = ICO_FACES.length;
 
+/** How lumpy a `blob` is, and how it is painted beyond its colour. */
+export interface BlobShape {
+  /** How far each corner is pushed in or out, as a share of its radius; 0.15 unless given. */
+  readonly jitter?: number;
+  readonly look?: Look;
+  /** A crown: drawn up into the look's `peak`, and allowed its accent faces. */
+  readonly crown?: boolean;
+}
+
 /**
  * A lumpy solid: an icosahedron stretched to `radii`, each corner pushed in or
  * out by up to `jitter` of its radius, seeded. A crown, a bush, a boulder, a
- * slime. Each face gets its own small nudge of colour, which is what reads as
- * a facet catching the light differently from its neighbour.
+ * slime. Each face gets its own nudge of colour (`faceTint`), which is what
+ * reads as a facet catching the light differently from its neighbour.
+ *
+ * The look decides how far from a ball it strays: under the painted look the
+ * jitter grows, each axis is stretched by its own seeded share, the top leans
+ * off-centre, and a crown's upper corners are drawn up into a point - the
+ * flame-shaped tree of a flat-colour landscape rather than a dented sphere.
  */
-export function blob(b: MeshBuilder, centre: Vec3, radii: Vec3, style: Style, seed: number, jitter = 0.15): void {
+export function blob(b: MeshBuilder, centre: Vec3, radii: Vec3, style: Style, seed: number, shape: BlobShape = {}): void {
+  const look = shape.look ?? FLAT_LOOK;
+  const spread = (shape.jitter ?? 0.15) * look.jitter;
+  const axis = (n: number): number => 1 + (hash01(seed + 0x5a1 + n) * 2 - 1) * look.stretch;
+  const r: Vec3 = [radii[0] * axis(0), radii[1] * axis(1), radii[2] * axis(2)];
+  const lean = (hash01(seed + 0x5a5) * 2 - 1) * look.stretch;
+  const leanAngle = hash01(seed + 0x5a7) * Math.PI * 2;
+  const peak = shape.crown === true ? look.peak : 0;
   const corners = ICO_VERTICES.map((corner, index): Vec3 => {
-    const k = (1 + (hash01(seed + index * 7919) * 2 - 1) * jitter) / ICO_RADIUS;
-    return [centre[0] + corner[0] * radii[0] * k, centre[1] + corner[1] * radii[1] * k, centre[2] + corner[2] * radii[2] * k];
+    const k = (1 + (hash01(seed + index * 7919) * 2 - 1) * spread) / ICO_RADIUS;
+    // How high this corner sits on the solid, -1..1: the top leans and points, the bottom stays put.
+    const up = Math.max(0, corner[2] / ICO_RADIUS);
+    const shift = lean * up * r[2];
+    return [
+      centre[0] + corner[0] * r[0] * k + Math.cos(leanAngle) * shift,
+      centre[1] + corner[1] * r[1] * k + Math.sin(leanAngle) * shift,
+      centre[2] + corner[2] * r[2] * k * (1 + peak * up),
+    ];
   });
   ICO_FACES.forEach(([i, j, k], face) => {
-    b.tri(corners[i]!, corners[j]!, corners[k]!, {
-      ...style,
-      colour: faceTint(style.colour, seed + face * 104729),
-      inside: centre,
-    });
+    const faceSeed = seed + face * 104729;
+    facet(b, [corners[i]!, corners[j]!, corners[k]!], { ...style, colour: faceTint(style.colour, faceSeed, look, shape.crown === true), inside: centre }, faceSeed, look);
+  });
+}
+
+/** How far a split face's three small faces stray in colour from it, either way: enough to light apart. */
+const SPLIT_TINT = 0.06;
+
+/**
+ * One face - or, under a look that splits faces (`look.split` of them, by
+ * seed), three small faces round its middle, the middle pushed out along the
+ * face's normal (a bump) or in (a dent) by up to `look.bump` of the face's
+ * size. So a solid's faces are not all one size, and not all convex. Each small
+ * face is tinted a hair apart, so the shaders pick each its own colour of light.
+ */
+export function facet(b: MeshBuilder, [p, q, r]: readonly [Vec3, Vec3, Vec3], style: FaceStyle, seed: number, look: Look = FLAT_LOOK): void {
+  const normal = look.split > 0 && hash01(seed + 0x5b1) < look.split ? faceNormal(p, q, r) : null;
+  if (normal === null) {
+    b.tri(p, q, r, style);
+    return;
+  }
+  const centroid: Vec3 = [(p[0] + q[0] + r[0]) / 3, (p[1] + q[1] + r[1]) / 3, (p[2] + q[2] + r[2]) / 3];
+  const inside = style.inside;
+  const outward =
+    inside === undefined || normal[0] * (centroid[0] - inside[0]) + normal[1] * (centroid[1] - inside[1]) + normal[2] * (centroid[2] - inside[2]) >= 0 ? 1 : -1;
+  const size = (Math.hypot(...sub(q, p)) + Math.hypot(...sub(r, q)) + Math.hypot(...sub(p, r))) / 3;
+  const push = outward * (hash01(seed + 0x5b3) * 2 - 1) * look.bump * size;
+  const middle: Vec3 = [centroid[0] + normal[0] * push, centroid[1] + normal[1] * push, centroid[2] + normal[2] * push];
+  const tint = { ...look, hueDrift: 0, faceSpread: SPLIT_TINT };
+  [[p, q], [q, r], [r, p]].forEach(([from, to], k) => {
+    b.tri(from!, to!, middle, { ...style, colour: faceTint(style.colour, seed + 0x5c0 + k, tint) });
   });
 }
 
@@ -228,8 +283,10 @@ export function frondFaces(teeth: number): number {
  * stylised low-poly foliage is drawn: a layer, not a ball. Every face is turned
  * to the sky, so it lights as the top of a canopy from any side, and each point
  * is seeded a little longer or shorter so no two plates share an outline.
+ * Foliage is crown, so under the painted `look` its faces drift in hue and
+ * may take the accent, as a blob crown's do.
  */
-export function frond(b: MeshBuilder, shape: FrondShape, style: Style, seed: number): void {
+export function frond(b: MeshBuilder, shape: FrondShape, style: Style, seed: number, look: Look = FLAT_LOOK): void {
   const { centre, radius, teeth, lift, droop, notch = 0.62, phase = 0 } = shape;
   const apex: Vec3 = [centre[0], centre[1], centre[2] + lift];
   const below: Vec3 = [centre[0], centre[1], centre[2] - radius * 8];
@@ -242,11 +299,8 @@ export function frond(b: MeshBuilder, shape: FrondShape, style: Style, seed: num
     return [centre[0] + Math.cos(angle) * reach, centre[1] + Math.sin(angle) * reach, z];
   });
   rim.forEach((corner, k) => {
-    b.tri(apex, corner, rim[(k + 1) % rim.length]!, {
-      ...style,
-      colour: faceTint(style.colour, seed + k * 104729),
-      inside: below,
-    });
+    const faceSeed = seed + k * 104729;
+    facet(b, [apex, corner, rim[(k + 1) % rim.length]!], { ...style, colour: faceTint(style.colour, faceSeed, look, true), inside: below }, faceSeed, look);
   });
 }
 

@@ -7,7 +7,8 @@ paths:
 # Rule: The low-poly skin
 
 A skin is how the game looks and nothing else (`src/skins/skin.ts`). This one draws the
-same planet, hero and fight as flat-shaded 3D geometry at the window's own resolution.
+same planet, hero and fight as flat-shaded 3D geometry at the window's own resolution -
+or, with `?res=low`, at ~180 scanlines blown up by a whole factor (`look-options.ts`).
 The pixel contract in `CLAUDE.md` (320×180, closed inks, Bayer dither, no rotation) does
 **not** bind it. Two things do, because they are the game's identity rather than its art:
 
@@ -23,21 +24,24 @@ The pixel contract in `CLAUDE.md` (320×180, closed inks, Bayer dither, no rotat
 (`backend.ts`) draws it. **WebGPU** (`webgpu/`) is preferred; **WebGL2** (`renderer.ts`)
 is the fallback when there is no adapter, no device, or a pipeline fails validation -
 `index.ts` tries each on a fresh canvas. `?gpu=webgl|webgpu` forces one, `?msaa=1` turns
-multisampling off. The geometry, projection and shading are the same in both; only the
+multisampling off (and `?res=low` turns it off unless `?msaa=4` asks for it). The geometry, projection and shading are the same in both; only the
 water's motion differs, because only WebGPU has compute.
 
 ## Every shader is written twice or three times
 
 | Description | CPU reference | GLSL (WebGL2) | WGSL (WebGPU) |
 | --- | --- | --- | --- |
-| the projection | `placement.ts` | `shaders.ts` | `webgpu/wgsl-world.ts` |
+| the projection | `placement.ts` | `shaders.ts` `PLACE_GLSL` | `webgpu/wgsl-world.ts` `PLACE_WGSL` |
 | the wave step | `webgpu/waves.ts` | - | `webgpu/wave-sim.ts` |
 | the sway | `sway.ts` `swayOffset` | `sway.ts` `SWAY_GLSL` | `sway.ts` `SWAY_WGSL` |
+| the impostor balls | - | `impostor-glsl.ts` | `webgpu/wgsl-impostor.ts` |
 
 **An effect switched off is left out of the source, not zeroed.** `ShaderFeatures`
 (`backend.ts`, from `?off=`) builds the world shaders without the sway or the water's
 rings, in GLSL and WGSL alike; a uniform at zero would still run the arithmetic on every
-vertex and water pixel. The switches flip mid-run, so `LowpolyGame` hands the backend the
+vertex and water pixel. The sway is not in the shared projection (`PLACE_GLSL` /
+`PLACE_WGSL`): the world's and the impostors' vertex stages each splice in the build they
+were asked for (`swayGlsl` / `swayWgsl`), so a crown stills with its trunk. The switches flip mid-run, so `LowpolyGame` hands the backend the
 features every frame (`setFeatures`) and each backend compiles a variant the first time
 it is asked for and keeps it (`featuresKey`); WebGPU's builds share one pair of bind
 group layouts (`createLayouts`), so the bind groups need no remaking. A new effect that
@@ -61,7 +65,41 @@ by point. A new body that forgets its anchor shears apart on the lip.
 
 A body's foot also stands **on the drawn land**, not at height 0: walkable ground runs
 up a landform's lower slope (to `BLOCK_HEIGHT`), so a foot at 0 there is buried in the
-facets. Lift it by `standingHeight`, which reads the facets `landformMesh` draws.
+facets, and the painted look's ground has hills. Lift it by `standingHeight(point, look)`,
+which reads the facets `landformMesh` and `groundMesh` actually draw.
+
+## Two looks, one skin
+
+`?look=painted` (`look.ts`) is a second way to paint the same geometry; the default is
+`flat`. A look is data, handed to every builder and to the shaders - never a branch on
+a global.
+
+| | `flat` | `painted` |
+| --- | --- | --- |
+| Light (`shading.w`) | smooth Lambert plus sky | `painted()` in both shaders: flat steps, each face picking its own colour of light from three a step - `PAINT.warm`, `PAINT.cool`, `PAINT.deep`, baked in by `paintConstants`; lines and mixes in `PAINT_STEPS` |
+| Faces (`faceTint`) | ±4.5% brightness | ±10%, hue drifting to `PAINT.drift`; crowns take a rare `PAINT.accent` |
+| Blobs (`blob`) | dented ball | stretched, leaned, drawn up to a point; some faces split |
+| Foliage (`frond`) | a broadleaf's tiered plates | the same outline, tinted as crowns; some faces split |
+| Split faces (`facet`) | never | three small faces round a middle pushed out (a bump) or in (a dent) |
+| Ground height (`ground-relief.ts`) | level, a hair of wobble | hills to `hills` tiles; colour by warped patch, not by face |
+| Ground faces (`ground-facets.ts`) | two triangles a tile | merged 2×2 and 4×4 planes, split tiles round a bump or a dent |
+
+The ground steps on how much more or less than **level ground** a face is lit, so the
+open field is always the middle step and only a hill's flanks cross a line; a body
+steps on how squarely it faces the sun. Keep the ground's per-face nudge and wobble
+small: a wobble steeper than the hills tips every tile across a step on its own.
+
+**The hills are level wherever something lies flat**: a puddle's basin (water is
+mirrored about height 0), a lake and its shore, and round a landform's foot (its mesh
+starts at 0). A merged plane or a ground bump stands only where `freeToTilt` says no
+water can stand and nothing has settled. `ground-relief.test.ts` holds the height
+field to that.
+
+**A merged plane opens no crack**: a lattice point on its edge is slid onto the edge
+line (`groundVertex`), so the tiles beside it meet the plane exactly. Squares are
+aligned to their own size, which divides `CHUNK_TILES`. `ground-facets.test.ts` holds
+a chunk watertight (its faces' area from above is exactly the area inside its rim) and
+`groundSurface` to the very face drawn.
 
 **A see-through body is half of one.** The sheer pass is neither mirrored nor depth
 written, and nothing culls back faces. So a slime's `Kind.liquid` skin puts only the
@@ -86,6 +124,30 @@ make leaves ripple. It read as jelly, not leaves; do not bring it back as is.
 **Grass blades are off for now.** Two looks were tried and both removed: evenly spread
 three-blade tufts, then meadow patches of five-blade sheaves. `Kind.grass` and its
 `SWAYERS` row stay, tested, so blades can come back as a mesh alone.
+
+## Soft things are impostors
+
+A ball is one camera-facing quad, the sphere worked out per pixel (`impostor.ts`): two
+triangles, round at any size, lit from a true normal, its outline pushed in and out by
+noise so it billows. Volcano smoke (`plume-balls.ts`, from the shared `volcanoes.ts`),
+the clouds (`sky-puffs.ts`, from the shared `sky-clouds.ts` decks) and - with
+`?leaves=impostor` - the crowns and bushes are drawn this way. Its vertex carries its
+body's foot like a mesh vertex's anchor, and is placed by the world's own projection
+(`PLACE_GLSL` / `PLACE_WGSL`) and the world's sway, so a crown sways and rides the lip with
+its trunk. A cloud puff is the exception: it is already in screen pixels and only sits
+behind everything (`CLOUD_DEPTH`). The clouds and the smoke are effects, each a switch
+(`sky-clouds`, `volcano-smoke`): off, they are not laid out, uploaded or drawn.
+
+- **Balls write their own depth** - the front of the sphere at that pixel - after the
+  sheer pass: a crown swallows its own trunk and two puffs cut into each other. An old
+  puff of smoke wastes away (shrinks along its noise); nothing blends, so nothing sorts.
+- **`?volume=1` marches smoke and clouds as volumes**: a noise density inside the ball,
+  each sample lit by a short march toward the sun, premultiplied, far to near, depth
+  tested but not written. Crowns never are. It is the expensive end of the menu - cheap
+  at `?res=low`, not measured at window resolution yet.
+- **A plume is low on purpose.** A mountain already stands taller than the 180-line
+  frame from most of the field, so the smoke bends into a banner downwind rather than
+  climbing out of the top; it shows past ~70 rows, where the vent comes on screen.
 
 ## Water
 
@@ -149,7 +211,7 @@ band above the field, a cheaper procedural ring lattice, and the wave surface te
 
 | Want | Read it from | Never |
 | --- | --- | --- |
-| where anything is | the shared simulation: `terrain.ts`, `lakes.ts`, `landforms.ts`, `scenery-features.ts`, `encounter-sim.ts` | a placement decided in this skin |
+| where anything is | the shared simulation: `terrain.ts`, `lakes.ts`, `landforms.ts`, `scenery-features.ts`, `encounter-sim.ts`, `volcanoes.ts`, `sky-clouds.ts` | a placement decided in this skin |
 | the hero's pose | `HERO_EQUIPPED`, `layeredPose`, `tracksOf` - the same rig and clips | a model of his own |
 | the hero's look | `hero-dress.ts`: an undead skeleton and a stick, pieces on the rig's own bones (the stick on `sword`); `hero-sway.ts` sums a loose-spine term onto the shared pose | a bone or a clip of the skin's own |
 | a colour | `palette.ts`, the skin's own small set | a hex inline in a mesh |
@@ -161,15 +223,26 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 
 | Module | Symbols |
 | --- | --- |
-| `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` · `ShaderFeatures` · `shaderFeatures` · `ALL_FEATURES` · `featuresKey` |
-| `shaders.ts` | `worldVertex` · `worldFragment` · `WORLD_VERTEX` · `WORLD_FRAGMENT` · `WORLD_FRAGMENT_SOLID` |
+| `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` · `ImpostorScene` · `VertexLayout` · `ShaderFeatures` · `shaderFeatures` · `ALL_FEATURES` · `featuresKey` |
+| `look-options.ts` | `readLookOptions` · `parseResolution` · `parseLeaves` · `parseVolume` · `lowResCanvas` |
+| `impostor.ts` | `ImpostorBuilder` · `IMPOSTOR_BYTES` · `BALL_VERTICES` · `QUAD_REACH` · `SCREEN_RISE` · `SCREEN_UP` |
+| `impostor-glsl.ts` | `impostorVertex` · `IMPOSTOR_VERTEX` · `IMPOSTOR_FRAGMENT` · `CLOUD_DEPTH` |
+| `impostor-pass.ts` | `ImpostorProgram` |
+| `sky-puffs.ts` | `skyPuffs` · `cloudShadeOf` |
+| `plume-balls.ts` | `plumeBalls` |
+| `webgpu/wgsl-impostor.ts` | `impostorWgsl` · `IMPOSTOR_WGSL` |
+| `webgpu/wgsl-world.ts` | `worldWgsl` · `swayWgsl` · `PLACE_WGSL` · `WORLD_BINDINGS` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` · `TOWARD_VIEWER` |
+| `shaders.ts` | `PLACE_GLSL` · `swayGlsl` · `worldVertex` · `worldFragment` · `WORLD_VERTEX` · `WORLD_FRAGMENT` · `WORLD_FRAGMENT_SOLID` · `paintConstants` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
-| `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `frond` · `frondFaces` · `disc` |
-| `palette.ts` | `LOWPOLY` · `faceTint` · `hash01` · `seedOf` |
-| `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` |
+| `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `frond` · `frondFaces` · `facet` · `disc` · `BlobShape` |
+| `palette.ts` | `LOWPOLY` · `PAINT` · `PAINT_STEPS` · `faceTint` · `hash01` · `seedOf` |
+| `look.ts` | `Look` · `FLAT_LOOK` · `PAINTED_LOOK` · `parseLook` |
+| `scenery-mesh.ts` | `sceneryMesh` · `shadowUnder` · `MESHED_SPECIES` · `SceneryLay` · `GroundUnder` |
 | `broadleaf-mesh.ts` | `broadleafMesh` · `Canopy` |
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
+| `ground-relief.ts` | `latticeVertex` · `calmAt` · `freeToTilt` · `SHORE` |
+| `ground-facets.ts` | `groundVertex` · `groundCell` · `groundSurface` · `GroundCell` |
 | `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` · `STILL_WIND` · `SWAY_STILL_GLSL` · `SWAY_STILL_WGSL` |
 | `sway-pushes.ts` | `pushesOf` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |

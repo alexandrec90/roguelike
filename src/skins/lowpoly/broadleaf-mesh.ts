@@ -11,6 +11,8 @@
  * Coordinates are tiles, x and y on the ground, z up; `at` is the foot.
  */
 
+import type { ImpostorBuilder } from "./impostor";
+import { FLAT_LOOK, type Look } from "./look";
 import { Kind, type MeshBuilder, mixRgb, type Rgb, shadeRgb, type Vec3 } from "./mesh";
 import { LOWPOLY, hash01, seedOf } from "./palette";
 import { frond, frustum } from "./primitives";
@@ -56,9 +58,13 @@ function lean(d: Vec3, theta: number, phi: number): Vec3 {
   return unit([d[0] * c + u[0] * cu + v[0] * cv, d[1] * c + u[1] * cu + v[1] * cv, d[2] * c + u[2] * cu + v[2] * cv]);
 }
 
-/** A broadleaf of this shape: draws it, and returns how far its crown reaches from the foot. */
+/**
+ * A broadleaf of this shape: draws it, and returns how far its crown reaches
+ * from the foot. Given `leaves`, each clump is an impostor ball there
+ * (`impostor.ts`) instead of tiers of plates - the same skeleton, a round crown.
+ */
 export function broadleafMesh(canopy: Canopy) {
-  return (solid: MeshBuilder, at: Vec3, height: number, seed: number): number => {
+  return (solid: MeshBuilder, at: Vec3, height: number, seed: number, look: Look = FLAT_LOOK, leaves?: ImpostorBuilder): number => {
     const anchor = [at[0], at[1]] as const;
     const rand = (salt: number): number => hash01(seedOf(seed, salt));
     // Wood and leaves alike sway as one body about the foot (`sway.ts`).
@@ -67,6 +73,12 @@ export function broadleafMesh(canopy: Canopy) {
 
     const clump = (centre: Vec3, radius: number, salt: number): void => {
       const leaf = mixRgb(canopy.leaf, LOWPOLY.leafLight, rand(salt) * 0.25);
+      reach = Math.max(reach, Math.hypot(centre[0] - at[0], centre[1] - at[1]) + radius);
+      if (leaves !== undefined) {
+        // The tiers' stack, as one ball: as wide as the widest tier, centred a little above it.
+        leaves.ball({ centre: [centre[0], centre[1], centre[2] + radius * 0.2], foot: anchor, radius: radius * 0.92, colour: leaf, kind: Kind.foliage, seed: rand(salt + 7) });
+        return;
+      }
       for (let tier = 0; tier < canopy.tiers; tier += 1) {
         const r = radius * (1 - tier * 0.28);
         const drift = radius * 0.12;
@@ -83,9 +95,9 @@ export function broadleafMesh(canopy: Canopy) {
           { centre: plate, radius: r, teeth, lift: r * 0.3, droop: r * 0.22, notch: 0.74, phase: rand(salt + tier * 3 + 3) * Math.PI },
           { colour, kind: Kind.foliage, anchor },
           seedOf(seed, salt, tier),
+          look,
         );
       }
-      reach = Math.max(reach, Math.hypot(centre[0] - at[0], centre[1] - at[1]) + radius);
     };
 
     const r0 = height * TRUNK_RADIUS;

@@ -48,6 +48,10 @@ export const Kind = {
    * thickens toward the silhouette, as a drop of liquid does. A slime's skin.
    */
   liquid: 9,
+  /** A puff of volcano smoke: an impostor ball that billows and thins with age (`impostor.ts`). */
+  smoke: 10,
+  /** A puff of a cloud in the sky: an impostor placed on screen, not on the planet (`sky-puffs.ts`). */
+  cloud: 11,
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];

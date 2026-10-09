@@ -193,6 +193,20 @@ export const KNOBS: readonly Knob[] = [
     control: { kind: "toggle", checked: "", unchecked: "1" },
   },
   {
+    key: "look",
+    label: "Look",
+    group: "Rendering",
+    skins: ["lowpoly"],
+    fallback: "",
+    control: {
+      kind: "select",
+      options: [
+        { value: "", label: "Flat" },
+        { value: "painted", label: "Painted" },
+      ],
+    },
+  },
+  {
     key: "off",
     label: "Effects",
     group: "Effects",

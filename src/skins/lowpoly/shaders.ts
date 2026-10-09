@@ -15,28 +15,48 @@
 
 import { HORIZON_SCALE, HORIZON_SINK_RATE, ROLL_ROWS } from "../../game/horizon";
 import { TILE_DEPTH, TILE_WIDTH, WALL_RISE } from "../../game/projection";
-import { Kind } from "./mesh";
+import { Kind, type Rgb } from "./mesh";
+import { PAINT, PAINT_STEPS } from "./palette";
 import { TOWARD_VIEWER } from "./placement";
 import { ALL_FEATURES, type ShaderFeatures } from "./backend";
 import { MAX_PUSHES, SWAY_GLSL, SWAY_STILL_GLSL } from "./sway";
 import { waterGlsl } from "./water-glsl";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
-const vec3 = (v: readonly [number, number, number]): string => `vec3(${v.map(float).join(", ")})`;
+const vec3 = (v: Rgb): string => `vec3(${v.map(float).join(", ")})`;
+
+/**
+ * `swayOffset` in GLSL, or its still twin when the sway is off (`ShaderFeatures`):
+ * the world's and the impostors' vertex shaders both take it from here.
+ */
+export function swayGlsl(features: ShaderFeatures): string {
+  return features.sway ? SWAY_GLSL : SWAY_STILL_GLSL;
+}
 
 /** The world's vertex shader, with or without the sway (`ShaderFeatures`). */
 export function worldVertex(features: ShaderFeatures): string {
-  return WORLD_VERTEX_SOURCE.replace("/*SWAY*/", () => (features.sway ? SWAY_GLSL : SWAY_STILL_GLSL));
+  return WORLD_VERTEX_SOURCE.replace("/*SWAY*/", () => swayGlsl(features));
 }
 
-const WORLD_VERTEX_SOURCE = `#version 300 es
-precision highp float;
+/**
+ * `PAINT`'s colours of light as constants, `PAINT_WARM_0` to `PAINT_DEEP_2`, in
+ * either shading language: `declare` is `const vec3` or `const`, `spell` its
+ * vector constructor. Shared so the GLSL and the WGSL cannot disagree on one.
+ */
+export function paintConstants(declare: string, spell: (colour: Rgb) => string): string {
+  const steps = { WARM: PAINT.warm, COOL: PAINT.cool, DEEP: PAINT.deep };
+  return Object.entries(steps)
+    .flatMap(([name, colours]) => colours.map((colour, i) => `${declare} PAINT_${name}_${i} = ${spell(colour)};`))
+    .join("\n");
+}
 
-layout(location = 0) in vec3 a_pos;
-layout(location = 1) in vec2 a_anchor;
-layout(location = 2) in vec4 a_normal;
-layout(location = 3) in vec4 a_colour;
-
+/**
+ * The projection as a GLSL function, with the uniforms it reads: `placement.ts`
+ * line for line. Shared by the world's vertex shader and the impostors'
+ * (`impostor-glsl.ts`), so a ball lands exactly where a mesh vertex would. The
+ * sway is not in it: each shader adds the build it was asked for (`swayGlsl`).
+ */
+export const PLACE_GLSL = `
 uniform vec2 u_offset;   // planet tiles from the hero to this draw's origin
 uniform vec2 u_rot;      // cos, sin of the turn: planet to local
 uniform vec4 u_view;     // logical width, height, foot x, foot y
@@ -48,13 +68,6 @@ uniform float u_mirror;  // 1, or -1 to draw the world reflected in still water 
 uniform vec4 u_wind;     // carrier phase, turbulence phase, gust strength (sway.ts)
 uniform vec4 u_pushes[${MAX_PUSHES}];  // planet x, y from the hero, front radius, strength
 
-out vec4 v_colour;
-out vec3 v_normal;
-out float v_rows;
-out vec2 v_planet;
-out float v_ahead;
-flat out int v_kind;
-
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
 const float HORIZON_SCALE = ${float(HORIZON_SCALE)};
 const float SINK_RATE = ${float(HORIZON_SINK_RATE)};
@@ -65,7 +78,7 @@ const float WALL_RISE = ${float(WALL_RISE)};
 vec2 turned(vec2 p) {
   return vec2(p.x * u_rot.x - p.y * u_rot.y, p.x * u_rot.y + p.y * u_rot.x);
 }
-/*SWAY*/
+
 float squash(float row) {
   float r = row / u_roll.z;
   return 1.0 / (1.0 + r * r);
@@ -83,13 +96,13 @@ float shrinkAt(float rows) {
   return HORIZON_SCALE + (1.0 - HORIZON_SCALE) * sqrt(share);
 }
 
-void main() {
-  int kind = int(a_normal.w * 127.0 + 0.5);
-  vec2 foot = turned(a_anchor + u_offset);
-  vec3 sway = swayOffset(kind, a_anchor + u_offset, a_pos.z);
-  vec2 off = turned(a_pos.xy - a_anchor) + sway.xy;
-  float height = a_pos.z + sway.z;
-
+/**
+ * Where a point of a body lands: \`foot\` its body's foot and \`off\` the point
+ * from it, both local tiles, and \`rise\` its height in tiles (negated in the
+ * mirror). Returns the logical pixel, shake included, the body's scale and its
+ * rows past the field.
+ */
+vec4 place(vec2 foot, vec2 off, float rise) {
   float groundTop = u_roll.x;
   float affineY = u_view.w - foot.y * TILE_DEPTH;
   float ground = affineY;
@@ -104,17 +117,49 @@ void main() {
     ground = groundTop - u_roll.y * lift + sink * scale;
   }
   float x = u_view.z + (foot.x + off.x) * TILE_WIDTH * scale + u_shake.x;
-  float y = ground - (off.y * TILE_DEPTH + height * u_mirror * WALL_RISE) * scale + u_shake.y;
+  float y = ground - (off.y * TILE_DEPTH + rise * WALL_RISE) * scale + u_shake.y;
+  return vec4(x, y, scale, rows);
+}
+
+/** A depth key, rows ahead, as clip-space z. */
+float clipDepth(float depth) {
+  return clamp((depth - u_depth.x) / (u_depth.y - u_depth.x), 0.0, 1.0) * 2.0 - 1.0;
+}
+`;
+
+const WORLD_VERTEX_SOURCE = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec2 a_anchor;
+layout(location = 2) in vec4 a_normal;
+layout(location = 3) in vec4 a_colour;
+${PLACE_GLSL}
+/*SWAY*/
+out vec4 v_colour;
+out vec3 v_normal;
+out float v_rows;
+out vec2 v_planet;
+out float v_ahead;
+flat out int v_kind;
+
+void main() {
+  int kind = int(a_normal.w * 127.0 + 0.5);
+  vec2 foot = turned(a_anchor + u_offset);
+  vec3 sway = swayOffset(kind, a_anchor + u_offset, a_pos.z);
+  vec2 off = turned(a_pos.xy - a_anchor) + sway.xy;
+  float height = a_pos.z + sway.z;
+  vec4 placed = place(foot, off, height * u_mirror);
+  float scale = placed.z;
 
   // Things lying on the ground sit a hair behind anything standing on the same row.
   float bias = kind == ${Kind.ground} ? 0.06 : (kind == ${Kind.shadow} ? 0.04 : (kind == ${Kind.water} ? 0.03 : 0.0));
   float depth = foot.y + off.y * scale + bias;
-  float z = clamp((depth - u_depth.x) / (u_depth.y - u_depth.x), 0.0, 1.0) * 2.0 - 1.0;
 
-  gl_Position = vec4(x / u_view.x * 2.0 - 1.0, 1.0 - y / u_view.y * 2.0, z, 1.0);
+  gl_Position = vec4(placed.x / u_view.x * 2.0 - 1.0, 1.0 - placed.y / u_view.y * 2.0, clipDepth(depth), 1.0);
   v_colour = a_colour;
   v_normal = vec3(turned(a_normal.xy), a_normal.z);
-  v_rows = rows;
+  v_rows = placed.w;
   v_planet = a_pos.xy + u_offset + u_hero;
   v_ahead = foot.y + off.y * scale;
   v_kind = kind;
@@ -171,20 +216,59 @@ uniform vec4 u_cut;       // the window round the hero, logical pixels: centre, 
 uniform vec3 u_lightDir;  // toward the light, local frame
 uniform vec3 u_ambient;   // the hour's colour, multiplied over everything lit
 uniform vec3 u_haze;      // the air at the far edge of the world
-uniform vec3 u_shading;   // sun strength, shadow strength, daylight
+uniform vec4 u_shading;   // sun strength, shadow strength, daylight, stepped (look.ts)
 uniform float u_mirror;   // -1 while drawing the reflection
 
 out vec4 outColour;
 
 const float ROLL_ROWS = ${float(ROLL_ROWS)};
+${paintConstants("const vec3", vec3)}
 
 ${waterGlsl(features.ripples)}
 
 const vec3 TOWARD_VIEWER = ${vec3(TOWARD_VIEWER)};
 
-/** A face lit by the sun and the sky, under the hour's colour. */
-vec3 lit(vec3 colour) {
+/** One of three by a share 0..1: a face's own pick from a step's colours of light. */
+vec3 pick3(vec3 a, vec3 b, vec3 c, float share) {
+  return share < 0.3333 ? a : (share < 0.6667 ? b : c);
+}
+
+/**
+ * The painted look's light (\`look.ts\`): a few flat steps, not a slope. A body
+ * steps by how squarely it faces the sun. The ground steps by how much more or
+ * less than level ground does, so the open field is always the middle step and
+ * only a hill's flanks cross a line. Each face nudges its own lines a little -
+ * read off its colour, which \`faceTint\` already made its own - so the steps
+ * fall unevenly, as a painter's would; and each picks its own colour of light
+ * from \`PAINT\`'s three a step, so the sun is yellow on one plane and orange on
+ * the next.
+ */
+vec3 painted(vec3 colour, vec3 n, bool ground) {
+  float seed = fract(sin(dot(colour, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  float own = seed - 0.5;
+  float facing = dot(n, u_lightDir);
+  float nudge = ground ? ${float(PAINT_STEPS.groundNudge)} : ${float(PAINT_STEPS.bodyNudge)};
+  float level = (ground ? facing - u_lightDir.z : max(facing, 0.0)) * u_shading.x + own * nudge;
+  vec2 bar = ground ? vec2(${float(PAINT_STEPS.groundShade)}, ${float(PAINT_STEPS.groundLit)}) : vec2(${float(PAINT_STEPS.bodyShade)}, ${float(PAINT_STEPS.bodyLit)});
+  float bright = smoothstep(bar.y - ${float(PAINT_STEPS.edge)}, bar.y + ${float(PAINT_STEPS.edge)}, level);
+  float shade = 1.0 - smoothstep(bar.x - ${float(PAINT_STEPS.edge)}, bar.x + ${float(PAINT_STEPS.edge)}, level);
+  float deep = ground ? 0.0 : 1.0 - smoothstep(-0.3, -0.2, n.z);
+  vec3 warm = pick3(PAINT_WARM_0, PAINT_WARM_1, PAINT_WARM_2, fract(seed * 3.7));
+  vec3 cool = pick3(PAINT_COOL_0, PAINT_COOL_1, PAINT_COOL_2, fract(seed * 7.3));
+  vec3 under = pick3(PAINT_DEEP_0, PAINT_DEEP_1, PAINT_DEEP_2, fract(seed * 11.9));
+  vec3 c = colour * (0.75 + 0.3 * u_shading.x);
+  c = mix(c, mix(colour, warm, ${float(PAINT_STEPS.warmMix)}) * 1.1, bright);
+  c = mix(c, mix(colour, cool, ${float(PAINT_STEPS.coolMix)}) * 0.8, shade);
+  c = mix(c, mix(colour, under, ${float(PAINT_STEPS.deepMix)}) * 0.65, deep);
+  return c * u_ambient;
+}
+
+/** A face lit by the sun and the sky, under the hour's colour; \`ground\` for what lies on it. */
+vec3 lit(vec3 colour, bool ground) {
   vec3 n = normalize(v_normal);
+  if (u_shading.w > 0.5) {
+    return painted(colour, n, ground);
+  }
   float lambert = max(dot(n, u_lightDir), 0.0);
   float sky = 0.5 + 0.5 * n.z;
   return colour * (0.4 + 0.24 * sky + 0.58 * lambert * u_shading.x) * u_ambient;
@@ -201,7 +285,7 @@ vec4 liquid(vec3 colour, float alpha) {
   float rim = (1.0 - facing) * (1.0 - facing);
   float toward = max(dot(n, normalize(u_lightDir + TOWARD_VIEWER)), 0.0);
   float glint = (0.9 * pow(toward, 48.0) + 0.15 * pow(toward, 6.0)) * u_shading.x;
-  vec3 shaded = lit(colour) * (1.0 + 0.35 * rim) + glint * u_ambient;
+  vec3 shaded = lit(colour, false) *(1.0 + 0.35 * rim) + glint * u_ambient;
   return vec4(shaded, clamp(mix(alpha, 1.0, 0.75 * rim) + glint, 0.0, 1.0));
 }
 
@@ -223,11 +307,11 @@ void main() {${clips ? CLIP_GLSL : ""}
   if (v_kind == ${Kind.shadow}) {
     alpha *= u_shading.y;
   } else if (v_kind == ${Kind.water}) {
-    colour = waterColour(v_planet, lit(colour) * 0.6, u_lightDir, 0.5);
+    colour = waterColour(v_planet, lit(colour, true) * 0.6, u_lightDir, 0.5);
     alpha = 0.94;
   } else if (v_kind == ${Kind.ground}) {
     // Soaked ground is darker; standing water is a mirror over it, with a damp rim.
-    vec3 ground = lit(colour) * (1.0 - 0.18 * wet);
+    vec3 ground = lit(colour, true) * (1.0 - 0.18 * wet);
     vec2 water = waterAt(v_planet);
     float depth = water.x;
     float rim = smoothstep(-0.03, 0.0, depth);
@@ -240,7 +324,7 @@ void main() {${clips ? CLIP_GLSL : ""}
     colour = jelly.rgb;
     alpha = jelly.a;
   } else if (v_kind != ${Kind.glow}) {
-    colour = lit(colour);
+    colour = lit(colour, false);
   }
   float far = clamp(v_rows / ROLL_ROWS, 0.0, 1.0);
   float haze = v_rows > ROLL_ROWS ? 0.82 : far * far * (3.0 - 2.0 * far) * 0.78;

@@ -26,6 +26,7 @@ import { DYING_MS, EMERGE_MS, MELT_MS, type Slime } from "../../game/creatures/s
 import type { SlimeVariant } from "../../game/creatures/slime-palette";
 import { wrapDelta, type PlanetPoint } from "../../game/planet";
 import { WALL_RISE } from "../../game/projection";
+import { FLAT_LOOK, type Look } from "./look";
 import { Kind, MeshBuilder, mixRgb, shadeRgb, type Rgb, type Vec3 } from "./mesh";
 import { hash01, LOWPOLY } from "./palette";
 import { TOWARD_VIEWER } from "./placement";
@@ -91,14 +92,14 @@ export interface SlimeBody {
   readonly phase: number;
 }
 
-/** The body's terms, from the slime and the clock. */
-export function slimeBody(slime: Slime, hero: PlanetPoint, elapsedMs: number): SlimeBody {
+/** The body's terms, from the slime and the clock, standing on `look`'s ground. */
+export function slimeBody(slime: Slime, hero: PlanetPoint, elapsedMs: number, look: Look = FLAT_LOOK): SlimeBody {
   const x = wrapDelta(slime.at.x, hero.x);
   const y = wrapDelta(slime.at.y, hero.y);
   const melt = meltOf(slime);
   const squash = slime.mode === "dying" ? 0 : slime.squash.value;
   const fade = slime.mode === "dying" ? 1 - clamp01((slime.modeMs - MELT_MS) / (DYING_MS - MELT_MS)) : 1;
-  const ground = standingHeight(slime.at);
+  const ground = standingHeight(slime.at, look);
   return {
     x,
     y,
@@ -171,11 +172,13 @@ export interface SlimeLook {
   readonly gaze: number;
   /** False leaves the shadow unbuilt (`?off=shadows`); true when absent. */
   readonly shadow?: boolean;
+  /** The skin's look (`look.ts`), whose ground - the painted look's hills - the slime stands on; flat unless given. */
+  readonly paint?: Look;
 }
 
 /** One slime: skin, heart, eyes and shadow. */
 export function slimeMesh(solid: MeshBuilder, sheer: MeshBuilder, slime: Slime, hero: PlanetPoint, look: SlimeLook): void {
-  const body = slimeBody(slime, hero, look.elapsedMs);
+  const body = slimeBody(slime, hero, look.elapsedMs, look.paint);
   const anchor = [body.x, body.y] as const;
   const base = SLIME_COLOURS[slime.variant];
   const colour = slime.flashMs > 0 ? mixRgb(base, [1, 1, 1], 0.75) : base;

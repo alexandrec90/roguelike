@@ -17,6 +17,7 @@
  * | `terrain-mesh.ts`, `scenery-mesh.ts` | ground, lakes, landforms; each scenery species |
  * | `hero-mesh.ts`, `actor-mesh.ts` | the rigged hero; slimes, fireballs, bursts |
  * | `mesh.ts`, `primitives.ts`, `palette.ts` | flat-shaded triangles, the solids, the skin's colours |
+ * | `look.ts`, `ground-relief.ts`, `ground-facets.ts` | `?look=`: flat, or painted (stepped light in many colours, hills of planes and facets) |
  */
 
 import { FrameClock } from "../../engine/loop";
@@ -27,6 +28,8 @@ import { mouseButtonOf } from "../../game/keybindings";
 import { readSceneOptions, type SceneOptions } from "../../game/scene-options";
 import { puddleField } from "../../game/water/puddle-field";
 import { backendOrder, parseGpu, parseMsaa, shaderFeatures, type GpuChoice, type LowpolyBackend, type ShaderFeatures } from "./backend";
+import { parseLook } from "./look";
+import { lowResCanvas, readLookOptions, type LookOptions } from "./look-options";
 import { LowpolyGame } from "./lowpoly-game";
 import { backingSize } from "./placement";
 import { WebGlBackend } from "./renderer";
@@ -36,19 +39,24 @@ import { WebGpuBackend } from "./webgpu/webgpu-renderer";
 export function mount(host: HTMLElement, query: URLSearchParams, effects: EffectSwitches): void {
   // The page's live effect switches, not the query's copy: the panel flips them mid-run.
   const options = { ...readSceneOptions(query), effects };
+  const display = readLookOptions(query);
   // An effect switched off that lives in a shader is left out of it (`ShaderFeatures`);
   // these are the first shaders built, and a switch later swaps in another build.
-  const choice = { gpu: parseGpu(query.get("gpu")), samples: parseMsaa(query.get("msaa")), features: shaderFeatures(options.effects) };
-  void createBackend(host, choice).then(({ canvas, backend }) => start(host, canvas, backend, options));
+  const choice = {
+    gpu: parseGpu(query.get("gpu")),
+    samples: parseMsaa(query.get("msaa"), display.resolution === "low" ? 1 : 4),
+    features: shaderFeatures(options.effects),
+  };
+  void createBackend(host, choice, display).then(({ canvas, backend }) => start(host, canvas, backend, options, query, display));
 }
 
-/** A full-window canvas for the skin. */
-function makeCanvas(host: HTMLElement): HTMLCanvasElement {
+/** A full-window canvas for the skin; at `?res=low`, its pixels blown up whole rather than smoothed. */
+function makeCanvas(host: HTMLElement, display: LookOptions): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.style.inset = "0";
   canvas.style.width = "100%";
   canvas.style.height = "100%";
-  canvas.style.imageRendering = "auto";
+  canvas.style.imageRendering = display.resolution === "low" ? "pixelated" : "auto";
   host.appendChild(canvas);
   return canvas;
 }
@@ -61,10 +69,11 @@ function makeCanvas(host: HTMLElement): HTMLCanvasElement {
 async function createBackend(
   host: HTMLElement,
   choice: { gpu: GpuChoice; samples: number; features: ShaderFeatures },
+  display: LookOptions,
 ): Promise<{ canvas: HTMLCanvasElement; backend: LowpolyBackend }> {
   const reasons: string[] = [];
   for (const kind of backendOrder(choice.gpu, "gpu" in navigator)) {
-    const canvas = makeCanvas(host);
+    const canvas = makeCanvas(host, display);
     try {
       const backend =
         kind === "webgpu"
@@ -88,10 +97,27 @@ function webglBackend(canvas: HTMLCanvasElement, samples: number, features: Shad
   return new WebGlBackend(gl, puddleField(), features);
 }
 
-function start(host: HTMLElement, canvas: HTMLCanvasElement, backend: LowpolyBackend, options: SceneOptions): void {
-  const game = new LowpolyGame(backend, options);
+function start(
+  host: HTMLElement,
+  canvas: HTMLCanvasElement,
+  backend: LowpolyBackend,
+  options: SceneOptions,
+  query: URLSearchParams,
+  display: LookOptions,
+): void {
+  const game = new LowpolyGame(backend, options, parseLook(query.get("look")), display);
 
   const fit = (): void => {
+    if (display.resolution === "low") {
+      // One logical pixel to one buffer pixel, blown up by a whole factor: the canvas overhangs by under a pixel.
+      const size = lowResCanvas(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);
+      canvas.width = size.width;
+      canvas.height = size.height;
+      canvas.style.width = `${size.cssWidth}px`;
+      canvas.style.height = `${size.cssHeight}px`;
+      game.resize(size.width / size.height, size.height);
+      return;
+    }
     const size = backingSize(host.clientWidth, host.clientHeight, window.devicePixelRatio || 1);
     canvas.width = size.width;
     canvas.height = size.height;
