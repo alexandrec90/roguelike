@@ -79,14 +79,70 @@ export function worldWgsl(clips: boolean): string {
   return WORLD_SOURCE.replace("/*CLIP*/", clips ? CLIP_WGSL : "");
 }
 
-const WORLD_SOURCE = `${WORLD_BINDINGS}
-
+/**
+ * The projection in WGSL, over \`frame\`: \`placement.ts\` line for line, shared
+ * by the world and the impostors (\`wgsl-impostor.ts\`).
+ */
+export const PLACE_WGSL = `
 const ROLL_ROWS = ${f(ROLL_ROWS)};
 const HORIZON_SCALE = ${f(HORIZON_SCALE)};
 const SINK_RATE = ${f(HORIZON_SINK_RATE)};
 const TILE_WIDTH = ${f(TILE_WIDTH)};
 const TILE_DEPTH = ${f(TILE_DEPTH)};
 const WALL_RISE = ${f(WALL_RISE)};
+
+fn turned(p: vec2f, rot: vec2f) -> vec2f {
+  return vec2f(p.x * rot.x - p.y * rot.y, p.x * rot.y + p.y * rot.x);
+}
+${SWAY_WGSL}
+fn squash(row: f32) -> f32 {
+  let r = row / frame.roll.z;
+  return 1.0 / (1.0 + r * r);
+}
+
+fn shrinkAt(rows: f32) -> f32 {
+  if (rows > ROLL_ROWS) {
+    return HORIZON_SCALE * ROLL_ROWS / rows;
+  }
+  if (frame.roll.z <= 0.0) {
+    return HORIZON_SCALE;
+  }
+  let far = squash(ROLL_ROWS);
+  let share = max(0.0, (squash(rows) - far) / (1.0 - far));
+  return HORIZON_SCALE + (1.0 - HORIZON_SCALE) * sqrt(share);
+}
+
+/** Where a point of a body lands: logical x, y (shake included), the body's scale, its rows past the field. */
+fn place(foot: vec2f, off: vec2f, rise: f32) -> vec4f {
+  let groundTop = frame.roll.x;
+  let affineY = frame.view.w - foot.y * TILE_DEPTH;
+  var ground = affineY;
+  var scale = 1.0;
+  var rows = 0.0;
+  if (affineY < groundTop) {
+    rows = (groundTop - affineY) / TILE_DEPTH;
+    var lift = 1.0;
+    if (frame.roll.z > 0.0) {
+      lift = min(atan(rows / frame.roll.z) / frame.roll.w, 1.0);
+    }
+    scale = shrinkAt(rows);
+    let over = rows - ROLL_ROWS;
+    let sink = select(0.0, SINK_RATE * over * over, over > 0.0);
+    ground = groundTop - frame.roll.y * lift + sink * scale;
+  }
+  let x = frame.view.z + (foot.x + off.x) * TILE_WIDTH * scale + frame.depthShake.z;
+  let y = ground - (off.y * TILE_DEPTH + rise * WALL_RISE) * scale + frame.depthShake.w;
+  return vec4f(x, y, scale, rows);
+}
+
+/** A depth key, rows ahead, as WebGPU's 0..1 clip depth. */
+fn clipDepth(depth: f32) -> f32 {
+  return clamp((depth - frame.depthShake.x) / (frame.depthShake.y - frame.depthShake.x), 0.0, 1.0);
+}
+`;
+
+const WORLD_SOURCE = `${WORLD_BINDINGS}
+${PLACE_WGSL}
 const LAP = ${f(PLANET_TILES)};
 const LAKE_RANGE = ${f(LAKE_RANGE_TILES)};
 const LAKE_DEPTH = ${f(LAKE_DEPTH_PER_TILE)};
@@ -123,27 +179,6 @@ struct VertexOut {
   @location(6) ahead: f32,
 };
 
-fn turned(p: vec2f, rot: vec2f) -> vec2f {
-  return vec2f(p.x * rot.x - p.y * rot.y, p.x * rot.y + p.y * rot.x);
-}
-${SWAY_WGSL}
-fn squash(row: f32) -> f32 {
-  let r = row / frame.roll.z;
-  return 1.0 / (1.0 + r * r);
-}
-
-fn shrinkAt(rows: f32) -> f32 {
-  if (rows > ROLL_ROWS) {
-    return HORIZON_SCALE * ROLL_ROWS / rows;
-  }
-  if (frame.roll.z <= 0.0) {
-    return HORIZON_SCALE;
-  }
-  let far = squash(ROLL_ROWS);
-  let share = max(0.0, (squash(rows) - far) / (1.0 - far));
-  return HORIZON_SCALE + (1.0 - HORIZON_SCALE) * sqrt(share);
-}
-
 @vertex
 fn vertexMain(input: VertexIn) -> VertexOut {
   let draw = draws[input.draw];
@@ -154,38 +189,20 @@ fn vertexMain(input: VertexIn) -> VertexOut {
   let sway = swayOffset(kind, input.anchor + draw.place.xy, input.pos.z, rot);
   let off = turned(input.pos.xy - input.anchor, rot) + sway.xy;
   let height = input.pos.z + sway.z;
-
-  let groundTop = frame.roll.x;
-  let affineY = frame.view.w - foot.y * TILE_DEPTH;
-  var ground = affineY;
-  var scale = 1.0;
-  var rows = 0.0;
-  if (affineY < groundTop) {
-    rows = (groundTop - affineY) / TILE_DEPTH;
-    var lift = 1.0;
-    if (frame.roll.z > 0.0) {
-      lift = min(atan(rows / frame.roll.z) / frame.roll.w, 1.0);
-    }
-    scale = shrinkAt(rows);
-    let over = rows - ROLL_ROWS;
-    let sink = select(0.0, SINK_RATE * over * over, over > 0.0);
-    ground = groundTop - frame.roll.y * lift + sink * scale;
-  }
-  let x = frame.view.z + (foot.x + off.x) * TILE_WIDTH * scale + frame.depthShake.z;
-  let y = ground - (off.y * TILE_DEPTH + height * mirror * WALL_RISE) * scale + frame.depthShake.w;
+  let placed = place(foot, off, height * mirror);
+  let scale = placed.z;
 
   var bias = 0.0;
   if (kind == ${Kind.ground}u) { bias = 0.06; }
   if (kind == ${Kind.shadow}u) { bias = 0.04; }
   if (kind == ${Kind.water}u) { bias = 0.03; }
   let depth = foot.y + off.y * scale + bias;
-  let z = clamp((depth - frame.depthShake.x) / (frame.depthShake.y - frame.depthShake.x), 0.0, 1.0);
 
   var result: VertexOut;
-  result.clip = vec4f(x / frame.view.x * 2.0 - 1.0, 1.0 - y / frame.view.y * 2.0, z, 1.0);
+  result.clip = vec4f(placed.x / frame.view.x * 2.0 - 1.0, 1.0 - placed.y / frame.view.y * 2.0, clipDepth(depth), 1.0);
   result.colour = input.colour;
   result.normal = vec3f(turned(input.normal.xy, rot), input.normal.z);
-  result.rows = rows;
+  result.rows = placed.w;
   result.planet = input.pos.xy + draw.place.xy + frame.hero.xy;
   result.kind = kind;
   result.mirror = mirror;

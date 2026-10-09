@@ -69,4 +69,14 @@ describe("the low-poly projection", () => {
     expect(lowpolyView(21 / 9, DEFAULT_SKY_FRACTION, 20).height).toBe(180);
     expect(lowpolyView(Number.NaN, DEFAULT_SKY_FRACTION, 20).width).toBe(320);
   });
+
+  it("can be cut to another height, for a frame drawn a logical pixel to a buffer pixel", () => {
+    const tall = lowpolyView(334 / 200, DEFAULT_SKY_FRACTION, 20, 200);
+    expect(tall.height).toBe(200);
+    expect(tall.width).toBe(334);
+    expect(tall.layout.height).toBe(200);
+    // The hero still stands inside the field, below the band.
+    expect(tall.footY).toBeGreaterThan(tall.layout.groundTop);
+    expect(tall.footY).toBeLessThan(200);
+  });
 });

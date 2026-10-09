@@ -58,9 +58,12 @@ export interface LowpolyView {
   readonly atanRows: number;
 }
 
-/** The view for a window of this shape. */
-export function lowpolyView(aspect: number, skyFraction: number, heroHeightPx: number): LowpolyView {
-  const height = LOGICAL_HEIGHT;
+/**
+ * The view for a window of this shape, `height` scanlines tall: `LOGICAL_HEIGHT`
+ * unless the frame is drawn a logical pixel to a buffer pixel (`?res=low`),
+ * when it is however tall the window is in whole pixels.
+ */
+export function lowpolyView(aspect: number, skyFraction: number, heroHeightPx: number, height: number = LOGICAL_HEIGHT): LowpolyView {
   const width = Math.max(1, Math.round(height * (Number.isFinite(aspect) && aspect > 0 ? aspect : 16 / 9)));
   const layout = horizonLayout(height, skyFraction);
   const foot = anchorFoot(walkableBand(layout.groundTop, height), width, heroHeightPx);

@@ -20,16 +20,21 @@ import type { SceneOptions } from "../../game/scene-options";
 import { fromLocal, type PlanetPoint } from "../../game/planet";
 import { WEATHER_PRESETS } from "../../game/water/schedule";
 import { RAIN_SLANT } from "../../game/weather";
+import type { Atmosphere } from "../../game/atmosphere";
 import { ACTOR_MESH_KEYS, ActorMeshes, type ActorMeshKey } from "./actor-frame";
-import type { DrawableHandle, DrawCall, LowpolyBackend } from "./backend";
+import type { DrawableHandle, DrawCall, ImpostorScene, LowpolyBackend } from "./backend";
 import { FLAT_LOOK, type Look } from "./look";
 import { WetWorld } from "./wet-world";
 import { heroCutaway } from "./cutaway";
 import { heroHeightPx } from "./hero-mesh";
+import { ImpostorBuilder } from "./impostor";
+import type { LookOptions } from "./look-options";
 import { fieldRows, lowpolyView, type LowpolyView } from "./placement";
+import { plumeBalls } from "./plume-balls";
+import { cloudShadeOf, skyPuffs } from "./sky-puffs";
 import { MAX_PUSHES, windUniform } from "./sway";
 import { pushesOf } from "./sway-pushes";
-import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE, groundInView, MIRROR_ROWS, type ChunkMesh } from "./world-chunks";
+import { buildChunk, chunkOffset, CHUNK_TILES, CHUNKS_PER_SIDE, groundInView, MIRROR_ROWS, type ChunkMesh, type FieldRows } from "./world-chunks";
 
 /** Where the session opens: the pixel skin's start, so a switch lands in the same field. */
 const START: PlanetPoint = { x: 128, y: 128 };
@@ -43,7 +48,10 @@ interface LoadedChunk {
   readonly solid: DrawableHandle;
   readonly land: DrawableHandle;
   readonly sheer: DrawableHandle;
+  readonly balls: DrawableHandle;
 }
+
+const DEFAULT_DISPLAY: LookOptions = { resolution: "full", leaves: "mesh", volume: false };
 
 export class LowpolyGame {
   readonly hero: HeroDriver;
@@ -56,6 +64,11 @@ export class LowpolyGame {
   private readonly actors: ActorMeshes;
   private readonly pushes = new Float32Array(MAX_PUSHES * 4);
   private readonly dynamic: Record<ActorMeshKey, DrawableHandle>;
+  /** Rebuilt every frame: the volcano smoke and the clouds, as impostor balls. */
+  private readonly smoke = new ImpostorBuilder();
+  private readonly clouds = new ImpostorBuilder();
+  private readonly smokeDrawable: DrawableHandle;
+  private readonly cloudDrawable: DrawableHandle;
   private shownYaw: number;
   view: LowpolyView;
 
@@ -63,6 +76,8 @@ export class LowpolyGame {
     readonly renderer: LowpolyBackend,
     private readonly options: SceneOptions,
     private readonly look: Look = FLAT_LOOK,
+    /** The skin's own drawing knobs (`look-options.ts`): resolution, impostor crowns, volumes. */
+    private readonly display: LookOptions = DEFAULT_DISPLAY,
   ) {
     this.actors = new ActorMeshes(look);
     this.hero = new HeroDriver({ ...dryGround(START), turn: 0 }, options.radius);
@@ -74,14 +89,16 @@ export class LowpolyGame {
       actorSolid: this.renderer.createDrawable(),
       actorSheer: this.renderer.createDrawable(),
     };
+    this.smokeDrawable = this.renderer.createDrawable(undefined, "impostor");
+    this.cloudDrawable = this.renderer.createDrawable(undefined, "impostor");
     this.shownYaw = this.hero.player.facing;
     this.view = lowpolyView(16 / 9, options.skyFraction, this.heroHeight);
     this.pending = nearestFirst(START);
   }
 
-  /** The window changed shape: re-cut the logical view to it. */
-  resize(aspect: number): void {
-    this.view = lowpolyView(aspect, this.options.skyFraction, this.heroHeight);
+  /** The window changed shape: re-cut the logical view to it, `height` scanlines tall (`lowpolyView`). */
+  resize(aspect: number, height?: number): void {
+    this.view = lowpolyView(aspect, this.options.skyFraction, this.heroHeight, height);
   }
 
   /** Whether every chunk of the planet has its geometry - the first frame waits on it. */
@@ -94,13 +111,14 @@ export class LowpolyGame {
     const start = performance.now();
     while (this.pending.length > 0 && performance.now() - start < budgetMs) {
       const next = this.pending.shift()!;
-      const mesh = buildChunk(next.cx, next.cy, this.look);
+      const mesh = buildChunk(next.cx, next.cy, this.look, this.display.leaves);
       this.chunks.push({
         mesh,
         ground: this.renderer.createDrawable(mesh.ground),
         solid: this.renderer.createDrawable(mesh.solid),
         land: this.renderer.createDrawable(mesh.land),
         sheer: this.renderer.createDrawable(mesh.sheer),
+        balls: this.renderer.createDrawable(mesh.balls, "impostor"),
       });
     }
   }
@@ -133,7 +151,8 @@ export class LowpolyGame {
     const shake = this.clock.shake();
     const cut = heroCutaway(this.view, live, this.heroHeight);
     const cutaway = cut === undefined ? undefined : { ...cut, x: cut.x + shake.x, y: cut.y + shake.y };
-    const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), look: this.look, sway, width, height, cutaway };
+    const cloudShade = cloudShadeOf(atmosphere);
+    const frame = { view: this.view, atmosphere, shake, water: this.wet.water(live, this.clock.elapsedMs), look: this.look, sway, width, height, cutaway, cloudShade };
     const turn = where.turn;
     const chunkCall = (drawable: DrawableHandle, mesh: ChunkMesh): DrawCall => ({ drawable, offset: asPair(chunkOffset(mesh, live)), turn });
     const rows = fieldRows(this.view);
@@ -160,6 +179,7 @@ export class LowpolyGame {
         { drawable: this.dynamic.actorSheer, offset: [0, 0], turn },
         { drawable: this.dynamic.heroSheer, offset: [0, 0], turn: 0 },
       ],
+      impostors: this.impostorScene(live, turn, atmosphere, rows, mirrorable, chunkCall),
       rain: {
         strength: weather.rain,
         seconds: this.clock.elapsedMs / 1000,
@@ -167,6 +187,37 @@ export class LowpolyGame {
         light: 0.55 + 0.45 * atmosphere.daylight,
       },
     });
+  }
+
+  /**
+   * This frame's impostors: the crowns of every chunk, the plumes in sight and
+   * the clouds on screen. Smoke and clouds are balls, or with `?volume=1`
+   * volumes, blended far to near - so the clouds first, then the plumes.
+   */
+  private impostorScene(
+    live: PlanetPoint,
+    turn: number,
+    atmosphere: Atmosphere,
+    rows: FieldRows,
+    mirrorable: readonly LoadedChunk[],
+    chunkCall: (drawable: DrawableHandle, mesh: ChunkMesh) => DrawCall,
+  ): ImpostorScene {
+    this.smoke.reset();
+    this.clouds.reset();
+    plumeBalls(this.smoke, live, turn, this.clock.elapsedMs, this.wet.weather.wind, rows);
+    skyPuffs(this.clouds, this.view, atmosphere, turn, this.clock.elapsedMs);
+    this.renderer.update(this.smokeDrawable, this.smoke.bytesView());
+    this.renderer.update(this.cloudDrawable, this.clouds.bytesView());
+    const soft = [
+      { drawable: this.cloudDrawable, offset: [0, 0], turn: 0 },
+      { drawable: this.smokeDrawable, offset: [0, 0], turn },
+    ] as const;
+    const crowns = this.chunks.filter((chunk) => chunk.balls.count > 0);
+    return {
+      balls: [...crowns.map((chunk) => chunkCall(chunk.balls, chunk.mesh)), ...(this.display.volume ? [] : soft)],
+      volumes: this.display.volume ? soft : [],
+      mirrored: mirrorable.filter((chunk) => chunk.balls.count > 0).map((chunk) => chunkCall(chunk.balls, chunk.mesh)),
+    };
   }
 
   private buildActors(live: PlanetPoint, turn: number): void {

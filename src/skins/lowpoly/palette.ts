@@ -44,6 +44,8 @@ export const LOWPOLY = {
   fire: rgb("#ffb347"),
   fireCore: rgb("#fff1b0"),
   frost: rgb("#bfe9ff"),
+  smoke: rgb("#7a7471"),
+  ember: rgb("#ff7d3a"),
   /** Water's own body where it is deep: what a lake shows through, under the sky it mirrors. */
   waterDeep: rgb("#2c5866"),
   shadow: rgb("#1c2030"),

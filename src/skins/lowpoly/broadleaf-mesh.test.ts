@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { broadleafMesh, type Canopy } from "./broadleaf-mesh";
-import { MeshBuilder, VERTEX_BYTES } from "./mesh";
+import { BALL_VERTICES, IMPOSTOR_BYTES, ImpostorBuilder } from "./impostor";
+import { FLAT_LOOK } from "./look";
+import { Kind, MeshBuilder, VERTEX_BYTES } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { sceneryMesh } from "./scenery-mesh";
 
@@ -80,6 +82,35 @@ describe("a broadleaf", () => {
     const { mesh, shadow } = grow(6);
     expect(shadow).toBeGreaterThan(0);
     expect(shadow).toBeLessThan(Math.max(...vertices(mesh).map(across)));
+  });
+
+  it("given impostor leaves, wears a ball where each clump was, and keeps only its wood as mesh", () => {
+    const mesh = new MeshBuilder();
+    const leaves = new ImpostorBuilder();
+    const shadow = broadleafMesh(CANOPY)(mesh, FOOT, HEIGHT, 5, FLAT_LOOK, leaves);
+    // Three limbs of two twigs, and the heart: a clump each.
+    expect(leaves.balls).toBe(CANOPY.limbs * CANOPY.twigs + 1);
+    expect(vertices(mesh).every((v) => v.bark)).toBe(true);
+    const bytes = leaves.bytesView();
+    const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < leaves.balls; i += 1) {
+      const at = i * BALL_VERTICES * IMPOSTOR_BYTES;
+      // Anchored at the tree's foot, so the crown sways and rides the lip with its trunk.
+      expect(data.getFloat32(at + 12, true)).toBeCloseTo(FOOT[0], 4);
+      expect(data.getFloat32(at + 16, true)).toBeCloseTo(FOOT[1], 4);
+      expect(data.getFloat32(at + 8, true)).toBeGreaterThan(FOOT[2] + HEIGHT * 0.3);
+      expect(data.getUint8(at + 28)).toBe(Kind.foliage);
+    }
+    // The same crown, so the same shadow.
+    expect(shadow).toBeCloseTo(grow(5).shadow, 9);
+  });
+
+  it("gives a bush impostor leaves too: a mound of balls and no faceted blob", () => {
+    const solid = new MeshBuilder();
+    const leaves = new ImpostorBuilder();
+    sceneryMesh(solid, new MeshBuilder(), "bush", [0, 0, 0], 9, { leaves });
+    expect(solid.vertexCount).toBe(0);
+    expect(leaves.balls).toBe(3);
   });
 
   it("keeps every species within a triangle budget: the whole wood is drawn every frame", () => {

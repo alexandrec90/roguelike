@@ -16,6 +16,8 @@ import { LAKE_MAX_REACH, lakesNear } from "../../game/lakes";
 import { planetLandforms } from "../../game/landforms";
 import { PLANET_TILES, wrapDelta, type PlanetPoint } from "../../game/planet";
 import { sceneryNear } from "../../game/scenery-features";
+import { ImpostorBuilder } from "./impostor";
+import type { Leaves } from "./look-options";
 import { MeshBuilder } from "./mesh";
 import { ROLL_ROWS } from "../../game/horizon";
 import { groundSurface } from "./ground-facets";
@@ -47,6 +49,8 @@ export interface ChunkMesh {
   readonly land: Uint8Array;
   /** Sheer: shadows and water, drawn over the solid pass. */
   readonly sheer: Uint8Array;
+  /** Impostor balls (`impostor.ts`): the crowns, with `?leaves=impostor`; empty otherwise. */
+  readonly balls: Uint8Array;
 }
 
 /** Whether a planet point's chunk is `(cx, cy)`. */
@@ -54,14 +58,19 @@ function inChunk(point: PlanetPoint, cx: number, cy: number): boolean {
   return Math.floor(point.x / CHUNK_TILES) === cx && Math.floor(point.y / CHUNK_TILES) === cy;
 }
 
-/** Everything in one chunk, as geometry, in a look. Pure and seeded: the same chunk every time. */
-export function buildChunk(cx: number, cy: number, look: Look = FLAT_LOOK): ChunkMesh {
+/**
+ * Everything in one chunk, as geometry, in a look. Pure and seeded: the same
+ * chunk every time. `leaves` says whether crowns are faceted plates or impostor balls.
+ */
+export function buildChunk(cx: number, cy: number, look: Look = FLAT_LOOK, leaves: Leaves = "mesh"): ChunkMesh {
   const origin = { x: cx * CHUNK_TILES, y: cy * CHUNK_TILES };
   const centre = { x: origin.x + CHUNK_TILES / 2, y: origin.y + CHUNK_TILES / 2 };
   const ground = new MeshBuilder();
   const solid = new MeshBuilder();
   const land = new MeshBuilder();
   const sheer = new MeshBuilder();
+  const balls = new ImpostorBuilder();
+  const crowns = leaves === "impostor" ? balls : undefined;
 
   groundMesh(ground, origin, CHUNK_TILES, lakesNear(centre, CHUNK_TILES / 2 + LAKE_MAX_REACH + 1), look);
   for (const landform of planetLandforms()) {
@@ -75,7 +84,7 @@ export function buildChunk(cx: number, cy: number, look: Look = FLAT_LOOK): Chun
     if (inChunk(feature, cx, cy)) {
       const x = feature.x - origin.x;
       const y = feature.y - origin.y;
-      sceneryMesh(solid, sheer, feature.species, [x, y, under?.(x, y) ?? 0], feature.seed, { look, ground: under });
+      sceneryMesh(solid, sheer, feature.species, [x, y, under?.(x, y) ?? 0], feature.seed, { look, ground: under, leaves: crowns });
     }
   }
   return {
@@ -86,6 +95,7 @@ export function buildChunk(cx: number, cy: number, look: Look = FLAT_LOOK): Chun
     solid: solid.bytesView().slice(),
     land: land.bytesView().slice(),
     sheer: sheer.bytesView().slice(),
+    balls: balls.bytesView().slice(),
   };
 }
 

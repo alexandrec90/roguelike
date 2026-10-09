@@ -4,7 +4,7 @@
  *
  * One command buffer a frame: the wave steps (compute, `wave-sim.ts`), the
  * mirror pass into the half-size reflection, then one 4× MSAA screen pass - sky,
- * solids, sheers, rain - resolved straight to the canvas. Per-draw data is a
+ * solids, sheers, impostor balls and volumes, rain - resolved straight to the canvas. Per-draw data is a
  * storage array indexed by `firstInstance` (`uniform-pack.ts`), so the whole
  * frame is three uploads and one bind group per pass.
  *
@@ -13,7 +13,8 @@
  * (`index.ts`) falls back to WebGL2 when it does.
  */
 
-import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend } from "../backend";
+import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend, VertexLayout } from "../backend";
+import { IMPOSTOR_BYTES } from "../impostor";
 import { VERTEX_BYTES } from "../mesh";
 import { stillSky } from "../sky-light";
 import { FIELD_SIZE } from "../../../game/water/puddle-field";
@@ -29,6 +30,8 @@ import { packPasses, PASSES_FLOATS } from "./wgsl-passes";
 interface GpuDrawable extends DrawableHandle {
   buffer: GPUBuffer | null;
   capacity: number;
+  /** Bytes a vertex: a mesh's or an impostor's. */
+  readonly stride: number;
 }
 
 /** Draws the per-draw array has room for before it is regrown. */
@@ -104,8 +107,8 @@ export class WebGpuBackend implements LowpolyBackend {
     this.draws = this.drawBuffer(INITIAL_DRAWS);
   }
 
-  createDrawable(bytes?: Uint8Array): DrawableHandle {
-    const drawable: GpuDrawable = { buffer: null, capacity: 0, count: 0 };
+  createDrawable(bytes?: Uint8Array, layout: VertexLayout = "mesh"): DrawableHandle {
+    const drawable: GpuDrawable = { buffer: null, capacity: 0, count: 0, stride: layout === "impostor" ? IMPOSTOR_BYTES : VERTEX_BYTES };
     if (bytes !== undefined) {
       this.update(drawable, bytes);
     }
@@ -114,7 +117,7 @@ export class WebGpuBackend implements LowpolyBackend {
 
   update(handle: DrawableHandle, bytes: Uint8Array): void {
     const drawable = handle as GpuDrawable;
-    drawable.count = bytes.byteLength / VERTEX_BYTES;
+    drawable.count = bytes.byteLength / drawable.stride;
     if (bytes.byteLength === 0) {
       return;
     }
@@ -132,13 +135,16 @@ export class WebGpuBackend implements LowpolyBackend {
     if (this.targets.fit(frame.width, frame.height) || this.groups === undefined) {
       this.groups = this.bindGroups();
     }
-    // Mirror pass, then the screen's ground, land, solids and sheers: draw n is entry n.
+    // Mirror pass, then the screen's ground, land, solids, sheers and impostors: draw n is entry n.
     const lists = [
       { calls: scene.mirrored, mirror: -1 },
+      { calls: scene.impostors.mirrored, mirror: -1 },
       { calls: scene.grounds, mirror: 1 },
       { calls: scene.lands, mirror: 1 },
       { calls: scene.solids, mirror: 1 },
       { calls: scene.sheers, mirror: 1 },
+      { calls: scene.impostors.balls, mirror: 1 },
+      { calls: scene.impostors.volumes, mirror: 1, volume: true },
     ];
     this.uploadDraws(lists);
     const first = (list: number): number => drawCount(lists.slice(0, list));
@@ -159,6 +165,8 @@ export class WebGpuBackend implements LowpolyBackend {
     mirror.setPipeline(this.pipelines.worldMirror);
     mirror.setBindGroup(0, groups[0]);
     drawCalls(mirror, scene.mirrored, first(0));
+    mirror.setPipeline(this.pipelines.ballMirror);
+    drawCalls(mirror, scene.impostors.mirrored, first(1));
     mirror.end();
 
     const screen = encoder.beginRenderPass({
@@ -171,14 +179,19 @@ export class WebGpuBackend implements LowpolyBackend {
     // The ground first, so it hides what stands behind it from the early depth test.
     screen.setPipeline(this.pipelines.worldGround);
     screen.setBindGroup(0, groups[1]);
-    drawCalls(screen, scene.grounds, first(1));
+    drawCalls(screen, scene.grounds, first(2));
     // The land can discard only on a frame with a window in it: elsewhere it keeps the early depth test.
     screen.setPipeline(frame.cutaway === undefined ? this.pipelines.worldSolid : this.pipelines.worldGround);
-    drawCalls(screen, scene.lands, first(2));
+    drawCalls(screen, scene.lands, first(3));
     screen.setPipeline(this.pipelines.worldSolid);
-    drawCalls(screen, scene.solids, first(3));
+    drawCalls(screen, scene.solids, first(4));
     screen.setPipeline(this.pipelines.worldSheer);
-    drawCalls(screen, scene.sheers, first(4));
+    drawCalls(screen, scene.sheers, first(5));
+    // The balls write their own depth; the volumes blend over everything, far to near.
+    screen.setPipeline(this.pipelines.ball);
+    drawCalls(screen, scene.impostors.balls, first(6));
+    screen.setPipeline(this.pipelines.ballVolume);
+    drawCalls(screen, scene.impostors.volumes, first(7));
     if (scene.rain.strength > 0) {
       screen.setPipeline(this.pipelines.rain);
       screen.setBindGroup(0, this.passesGroup);

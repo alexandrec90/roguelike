@@ -49,6 +49,7 @@ exclude = '^scripts/(hooks/|sync-harness\.py)'
 # on `sys.path` at run time. mypy is not told that path (it would then follow into the
 # excluded harness), so without this a run naming the script -- `lint-all.py --changed`
 # -- fails on `import-not-found` for code that imports fine when it runs.
+# `tests/test_mypy_config.py` fails when a script imports one not listed here.
 [[tool.mypy.overrides]]
 module = ["harness_events", "toolchain", "untested_symbols"]
 ignore_missing_imports = true

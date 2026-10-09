@@ -26,6 +26,13 @@ describe("choosing a backend", () => {
     expect(parseMsaa("8")).toBe(4);
     expect(parseMsaa(null)).toBe(4);
   });
+
+  it("takes a different default where one is asked for, and still honours either value", () => {
+    expect(parseMsaa(null, 1)).toBe(1);
+    expect(parseMsaa("8", 1)).toBe(1);
+    expect(parseMsaa("4", 1)).toBe(4);
+    expect(parseMsaa("1", 4)).toBe(1);
+  });
 });
 
 describe("the drawing buffer", () => {
