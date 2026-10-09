@@ -15,6 +15,7 @@
  */
 
 import type { Atmosphere } from "../../game/atmosphere";
+import type { EffectSwitches } from "../../game/effects";
 import type { LowpolyCutaway } from "./cutaway";
 import type { Look } from "./look";
 import type { LowpolyView } from "./placement";
@@ -115,7 +116,38 @@ export interface LowpolyBackend {
   /** A buffer for geometry, filled now (static) or every frame (`update`). */
   createDrawable(bytes?: Uint8Array, layout?: VertexLayout): DrawableHandle;
   update(drawable: DrawableHandle, bytes: Uint8Array): void;
+  /**
+   * Draw from now on with the shaders built for `features`. Called every frame
+   * with the live switches; a backend builds each variant the first time it is
+   * asked for and keeps it, so flipping back and forth costs one build each.
+   */
+  setFeatures(features: ShaderFeatures): void;
   render(frame: FrameUniforms, scene: FrameScene): void;
+}
+
+/** A short key naming a set of features: what a backend files its builds under. */
+export function featuresKey(features: ShaderFeatures): string {
+  return `${features.sway ? "S" : "s"}${features.ripples ? "R" : "r"}`;
+}
+
+/**
+ * What the world shaders are built with. An effect that lives in a shader is
+ * not switched off by a uniform - the arithmetic would still run on every
+ * vertex or water pixel - but left out of the source (`?off=`), so the frame
+ * costs what it would if the effect had never been written.
+ */
+export interface ShaderFeatures {
+  /** Plants leaning in the wind and round feet (`sway.ts`). */
+  readonly sway: boolean;
+  /** Rings on the water: WebGL2's procedural ones, WebGPU's simulated waves. */
+  readonly ripples: boolean;
+}
+
+export const ALL_FEATURES: ShaderFeatures = { sway: true, ripples: true };
+
+/** The shader features a load's effect switches ask for. */
+export function shaderFeatures(effects: EffectSwitches): ShaderFeatures {
+  return { sway: effects.on("sway"), ripples: effects.on("ripples") };
 }
 
 export type GpuKind = "webgpu" | "webgl";

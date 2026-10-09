@@ -59,6 +59,10 @@ A new effect is assembled, not authored:
 3. **A ramp**, so its colour is the palette's decision rather than the effect's.
 4. **A cap** — a maximum particle count, a maximum radius, a maximum lifetime.
 5. **A gameplay beat that starts it**, and a beat that ends it.
+6. **A switch** — a row in `EFFECTS` (`src/game/effects.ts`) and an `effects.on("<id>")`
+   where its work starts, asked every frame because the panel flips it mid-run, so that
+   off it is neither stepped nor drawn and what it had on screen is cleared. The look is
+   undecided (`CLAUDE.md`), and an effect that cannot be taken away cannot be judged.
 
 A worked example, and the shape a prompt for one should reduce to:
 

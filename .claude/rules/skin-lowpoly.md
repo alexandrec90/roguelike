@@ -36,6 +36,17 @@ water's motion differs, because only WebGPU has compute.
 | the sway | `sway.ts` `swayOffset` | `sway.ts` `SWAY_GLSL` | `sway.ts` `SWAY_WGSL` |
 | the impostor balls | - | `impostor-glsl.ts` | `webgpu/wgsl-impostor.ts` |
 
+**An effect switched off is left out of the source, not zeroed.** `ShaderFeatures`
+(`backend.ts`, from `?off=`) builds the world shaders without the sway or the water's
+rings, in GLSL and WGSL alike; a uniform at zero would still run the arithmetic on every
+vertex and water pixel. The sway is not in the shared projection (`PLACE_GLSL` /
+`PLACE_WGSL`): the world's and the impostors' vertex stages each splice in the build they
+were asked for (`swayGlsl` / `swayWgsl`), so a crown stills with its trunk. The switches flip mid-run, so `LowpolyGame` hands the backend the
+features every frame (`setFeatures`) and each backend compiles a variant the first time
+it is asked for and keeps it (`featuresKey`); WebGPU's builds share one pair of bind
+group layouts (`createLayouts`), so the bind groups need no remaking. A new effect that
+lives in a shader gets a feature the same way.
+
 **Change one, change all.** `placement.test.ts` pins `placeVertex` to the pixel skin's
 `localPlacement` and `waves.test.ts` the wave step's behaviour; a drift between a
 reference and its shader only shows on screen. WGSL clip depth runs 0..1 where GLSL's
@@ -122,9 +133,10 @@ noise so it billows. Volcano smoke (`plume-balls.ts`, from the shared `volcanoes
 the clouds (`sky-puffs.ts`, from the shared `sky-clouds.ts` decks) and - with
 `?leaves=impostor` - the crowns and bushes are drawn this way. Its vertex carries its
 body's foot like a mesh vertex's anchor, and is placed by the world's own projection
-(`PLACE_GLSL` / `PLACE_WGSL`), so a crown sways and rides the lip with its trunk. A cloud
-puff is the exception: it is already in screen pixels and only sits behind everything
-(`CLOUD_DEPTH`).
+(`PLACE_GLSL` / `PLACE_WGSL`) and the world's sway, so a crown sways and rides the lip with
+its trunk. A cloud puff is the exception: it is already in screen pixels and only sits
+behind everything (`CLOUD_DEPTH`). The clouds and the smoke are effects, each a switch
+(`sky-clouds`, `volcano-smoke`): off, they are not laid out, uploaded or drawn.
 
 - **Balls write their own depth** - the front of the sphere at that pixel - after the
   sheer pass: a crown swallows its own trunk and two puffs cut into each other. An old
@@ -211,16 +223,17 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 
 | Module | Symbols |
 | --- | --- |
-| `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` · `ImpostorScene` · `VertexLayout` |
+| `backend.ts` | `backendOrder` · `parseGpu` · `parseMsaa` · `ImpostorScene` · `VertexLayout` · `ShaderFeatures` · `shaderFeatures` · `ALL_FEATURES` · `featuresKey` |
 | `look-options.ts` | `readLookOptions` · `parseResolution` · `parseLeaves` · `parseVolume` · `lowResCanvas` |
 | `impostor.ts` | `ImpostorBuilder` · `IMPOSTOR_BYTES` · `BALL_VERTICES` · `QUAD_REACH` · `SCREEN_RISE` · `SCREEN_UP` |
-| `impostor-glsl.ts` | `IMPOSTOR_VERTEX` · `IMPOSTOR_FRAGMENT` · `CLOUD_DEPTH` |
+| `impostor-glsl.ts` | `impostorVertex` · `IMPOSTOR_VERTEX` · `IMPOSTOR_FRAGMENT` · `CLOUD_DEPTH` |
 | `impostor-pass.ts` | `ImpostorProgram` |
 | `sky-puffs.ts` | `skyPuffs` · `cloudShadeOf` |
 | `plume-balls.ts` | `plumeBalls` |
-| `webgpu/wgsl-impostor.ts` | `IMPOSTOR_WGSL` |
+| `webgpu/wgsl-impostor.ts` | `impostorWgsl` · `IMPOSTOR_WGSL` |
+| `webgpu/wgsl-world.ts` | `worldWgsl` · `swayWgsl` · `PLACE_WGSL` · `WORLD_BINDINGS` |
 | `placement.ts` | `lowpolyView` · `placeVertex` · `backingSize` · `fieldRows` · `LOGICAL_HEIGHT` · `TOWARD_VIEWER` |
-| `shaders.ts` | `PLACE_GLSL` · `WORLD_VERTEX` · `WORLD_FRAGMENT` · `WORLD_FRAGMENT_SOLID` · `paintConstants` |
+| `shaders.ts` | `PLACE_GLSL` · `swayGlsl` · `worldVertex` · `worldFragment` · `WORLD_VERTEX` · `WORLD_FRAGMENT` · `WORLD_FRAGMENT_SOLID` · `paintConstants` |
 | `mesh.ts` | `MeshBuilder` · `Kind` · `VERTEX_BYTES` · `rgb` · `mixRgb` |
 | `primitives.ts` | `frustum` · `cone` · `blob` · `smoothBlob` · `frond` · `frondFaces` · `facet` · `disc` · `BlobShape` |
 | `palette.ts` | `LOWPOLY` · `PAINT` · `PAINT_STEPS` · `faceTint` · `hash01` · `seedOf` |
@@ -230,12 +243,12 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `terrain-mesh.ts` | `groundMesh` · `landformMesh` · `standingHeight` |
 | `ground-relief.ts` | `latticeVertex` · `calmAt` · `freeToTilt` · `SHORE` |
 | `ground-facets.ts` | `groundVertex` · `groundCell` · `groundSurface` · `GroundCell` |
-| `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` |
+| `sway.ts` | `swayOffset` · `SWAYERS` · `windUniform` · `SWAY_GLSL` · `SWAY_WGSL` · `MAX_PUSHES` · `STILL_WIND` · `SWAY_STILL_GLSL` · `SWAY_STILL_WGSL` |
 | `sway-pushes.ts` | `pushesOf` |
 | `world-chunks.ts` | `buildChunk` · `chunkOffset` · `groundInView` · `MIRROR_ROWS` · `CHUNK_TILES` |
 | `cutaway.ts` | `heroCutaway` · `heroHidden` |
 | `wet-world.ts` | `WetWorld` · `shaderSeconds` |
-| `water-glsl.ts` | `WATER_GLSL` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
+| `water-glsl.ts` | `WATER_GLSL` · `waterGlsl` · `MAX_RIPPLES` · `RIPPLE_LIFE_S` |
 | `ripples.ts` | `RippleRing` |
 | `sky-light.ts` | `lightDirection` · `stillSky` |
 | `renderer.ts` | `WebGlBackend` |
@@ -252,7 +265,7 @@ Export-checked by `src/skins/lowpoly/skin-rule.test.ts`.
 | `webgpu/wave-sim.ts` | `WaveSim` · `stepsFor` · `freshImpulses` |
 | `webgpu/wave-surface.ts` | `WaveSurface` |
 | `webgpu/uniform-pack.ts` | `packFrame` · `packDraws` · `drawCount` |
-| `webgpu/pipelines.ts` | `createPipelines` · `DEFAULT_SAMPLES` |
+| `webgpu/pipelines.ts` | `createPipelines` · `createLayouts` · `PipelineLayouts` · `DEFAULT_SAMPLES` |
 
 A new species is one entry in `scenery-mesh.ts`'s table; `world.test.ts` fails if the
 planet places a species this skin has no body for. A broadleaf is a `Canopy` - trunk,

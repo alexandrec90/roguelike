@@ -16,6 +16,7 @@ import type { Scene } from "../../engine";
 
 import { groundRow, localPlacement } from "../camera";
 import type { Strike } from "../combat";
+import { ALL_EFFECTS, type EffectSwitches } from "../effects";
 import type { FrameContext } from "../frame-context";
 import { createPool, clearPool, particleCloud, stepParticles, type ParticlePool } from "../fx/particles";
 import type { PixelCloud } from "../ink";
@@ -56,6 +57,11 @@ export interface SlimeLayerInput {
 export interface SlimeLayerOptions {
   /** Kick hit stop and shake on hits and kills. On by default. */
   readonly impulses?: boolean;
+  /**
+   * The effect switches, read every frame: `particles` (goo, splats and flames
+   * off the slimes) and `shadows` (the one under each). All on by default.
+   */
+  readonly effects?: EffectSwitches;
 }
 
 /** A slime as the water sees it: its body cloud and the screen pixel of its foot. */
@@ -78,9 +84,17 @@ export class SlimeLayer {
   private readonly slots: Slot[] = [];
   private reflections: SlimeReflectable[] = [];
   private readonly impulses: boolean;
+  private readonly effects: EffectSwitches;
+  /** Whether the particles were on last frame: the frame they go off, every pool is emptied. */
+  private sparking = true;
 
   constructor(options: SlimeLayerOptions = {}) {
     this.impulses = options.impulses ?? true;
+    this.effects = options.effects ?? ALL_EFFECTS;
+  }
+
+  private get particles(): boolean {
+    return this.effects.on("particles");
   }
 
   create(scene: Scene): void {
@@ -100,6 +114,13 @@ export class SlimeLayer {
       deltaMs: ctx.deltaMs,
     });
     this.lend();
+    const particles = this.particles;
+    if (!particles && this.sparking) {
+      for (const slot of this.slots) {
+        clearPool(slot.pool);
+      }
+    }
+    this.sparking = particles;
     this.react(ctx, events);
     this.reflections = [];
     for (const slime of this.sim.slimes) {
@@ -166,13 +187,22 @@ export class SlimeLayer {
 
   private react(ctx: FrameContext, events: SlimeEvents): void {
     for (const hit of events.hits) {
-      const slot = this.slotOf(hit.id);
-      if (slot !== undefined) {
-        emitHitGoo(slot.pool, hit.variant, hit.push.x, -hit.push.y);
-      }
       if (this.impulses && hit.damage > 0) {
         ctx.impulse.hitStop(hit.killed ? 70 : 45);
         ctx.impulse.shake(hit.killed ? 2.5 : 1.5, hit.killed ? 240 : 160);
+      }
+    }
+    if (this.particles) {
+      this.splash(events);
+    }
+  }
+
+  /** Goo where a slime was hit or died, a splat where it landed. */
+  private splash(events: SlimeEvents): void {
+    for (const hit of events.hits) {
+      const slot = this.slotOf(hit.id);
+      if (slot !== undefined) {
+        emitHitGoo(slot.pool, hit.variant, hit.push.x, -hit.push.y);
       }
     }
     for (const death of events.deaths) {
@@ -198,7 +228,9 @@ export class SlimeLayer {
       placed.x < ctx.width + FOOT_X &&
       placed.y > -8 &&
       placed.y < ctx.height + SURFACE_HEIGHT - FOOT_Y;
-    this.stepEffects(ctx, slime, slot);
+    if (this.particles) {
+      this.stepEffects(ctx, slime, slot);
+    }
     if (!onScreen) {
       image.setVisible(false);
       return;
@@ -210,12 +242,15 @@ export class SlimeLayer {
       hero,
       scale: placed.scale,
       shadowShift: -light.x * 2.5 * (1 - ctx.atmosphere.elevation),
+      shadow: this.effects.on("shadows"),
     });
     const surface = slot.surface.clear();
     if (ctx.atmosphere.shadowStrength > 0.02) {
       surface.paint(drawn.shadow, FOOT_X, FOOT_Y, ctx.atmosphere.shadowStrength);
     }
-    surface.paint(particleCloud(slot.pool), FOOT_X, FOOT_Y);
+    if (this.particles) {
+      surface.paint(particleCloud(slot.pool), FOOT_X, FOOT_Y);
+    }
     surface.paint(drawn.body, FOOT_X, FOOT_Y);
     surface.commit();
     image

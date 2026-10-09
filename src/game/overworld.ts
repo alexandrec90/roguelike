@@ -18,6 +18,7 @@ import { AmbientLayer } from "./ambient-layer";
 import type { FrameProfiler } from "./bench";
 import type { CameraFrame, LocalBounds } from "./camera";
 import { DisplayGroup } from "./display-group";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import { Encounter } from "./encounter";
 import type { FrameContext } from "./frame-context";
 import type { HeroLayer, Whereabouts } from "./hero-layer";
@@ -46,19 +47,27 @@ export interface OverworldFrame {
 }
 
 export class Overworld {
-  readonly vegetation = new VegetationLayer();
-  readonly scenery = new SceneryLayer();
+  readonly vegetation: VegetationLayer;
+  readonly scenery: SceneryLayer;
   private landforms!: LandformLayer | LandformGpuLayer;
-  readonly encounter = new Encounter();
-  readonly water = new WaterLayer();
+  readonly encounter: Encounter;
+  readonly water: WaterLayer;
   private readonly wade: WadeLayer;
   readonly weather: WeatherLayer;
   private readonly ambient = new AmbientLayer();
   private group!: DisplayGroup;
 
-  constructor(stormSeed: number, weather: WeatherState | undefined) {
-    this.wade = new WadeLayer(stormSeed ^ 0x3a7e);
-    this.weather = new WeatherLayer(stormSeed, weather);
+  constructor(
+    stormSeed: number,
+    weather: WeatherState | undefined,
+    private readonly effects: EffectSwitches = ALL_EFFECTS,
+  ) {
+    this.vegetation = new VegetationLayer(effects);
+    this.scenery = new SceneryLayer(effects);
+    this.encounter = new Encounter(effects);
+    this.water = new WaterLayer(effects);
+    this.wade = new WadeLayer(stormSeed ^ 0x3a7e, effects);
+    this.weather = new WeatherLayer(stormSeed, weather, effects);
   }
 
   create(scene: Scene, at: OverworldFrame, gpu: boolean, campfireAt: PlanetPoint): void {
@@ -99,7 +108,8 @@ export class Overworld {
   /** One frame of the overworld, the hero drawn in the middle of it, in the order a blow and its consequences need. */
   draw(ctx: FrameContext, hero: HeroLayer, where: Whereabouts, odometer: Odometer, lap: FrameProfiler | null): void {
     this.group.track(() => {
-      this.vegetation.update(ctx, this.grassPushers(ctx));
+      // Only swaying grass parts round feet, so only then is anyone asked where theirs are.
+      this.vegetation.update(ctx, this.effects.on("sway") ? this.grassPushers(ctx) : []);
       lap?.lap("grass");
       this.scenery.update(ctx);
       lap?.lap("scenery");
@@ -117,7 +127,11 @@ export class Overworld {
       // After everything standing has been placed: the slices are cut round it.
       this.landforms.arrange();
       lap?.lap("landforms");
-      this.ambient.update(ctx, odometer);
+      if (this.effects.on("motes")) {
+        this.ambient.update(ctx, odometer);
+      } else {
+        this.ambient.hide();
+      }
     });
   }
 
@@ -134,7 +148,9 @@ export class Overworld {
   private drawWater(ctx: FrameContext, hero: HeroLayer, walked: number): void {
     this.weather.update(ctx, this.water);
     this.wade.update(ctx, this.water, [{ id: "hero", foot: hero.footNow(), travelled: walked }]);
-    this.water.update(ctx, { hero: hero.reflection(), reflectables: standingOver(this.encounter) });
+    // Nothing is mirrored, so nothing is cut at the waterline and flipped for it.
+    const actors = this.effects.on("reflections") ? { hero: hero.reflection(), reflectables: standingOver(this.encounter) } : {};
+    this.water.update(ctx, actors);
   }
 }
 

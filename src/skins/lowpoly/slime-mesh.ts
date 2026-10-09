@@ -170,6 +170,8 @@ export interface SlimeLook {
   readonly turn: number;
   /** Where the eyes point, planet frame, radians - `slimeGaze`, eased by the caller. */
   readonly gaze: number;
+  /** False leaves the shadow unbuilt (`?off=shadows`); true when absent. */
+  readonly shadow?: boolean;
   /** The skin's look (`look.ts`), whose ground - the painted look's hills - the slime stands on; flat unless given. */
   readonly paint?: Look;
 }
@@ -181,7 +183,9 @@ export function slimeMesh(solid: MeshBuilder, sheer: MeshBuilder, slime: Slime, 
   const base = SLIME_COLOURS[slime.variant];
   const colour = slime.flashMs > 0 ? mixRgb(base, [1, 1, 1], 0.75) : base;
   const view = viewInPlanet(look.turn);
-  shadowUnder(sheer, [body.x, body.y, body.ground], body.wide * 0.9 * body.fade);
+  if (look.shadow !== false) {
+    shadowUnder(sheer, [body.x, body.y, body.ground], body.wide * 0.9 * body.fade);
+  }
   if (body.fade <= 0) {
     return;
   }

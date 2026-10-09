@@ -98,6 +98,8 @@ export interface CampfireDrive {
   readonly wind: number;
   /** 0..1 rain; it damps the flame and thickens the smoke. */
   readonly rain?: number;
+  /** False leaves the embers and smoke out: none emitted, none stepped. True when absent. */
+  readonly particles?: boolean;
 }
 
 /**
@@ -110,6 +112,9 @@ export function stepCampfire(state: CampfireState, deltaMs: number, drive: Campf
   const dt = Math.min(Math.max(deltaMs, 0), 100);
   const rain = Math.min(Math.max(drive.rain ?? 0, 0), 1);
   stepFlame(state.flame, dt, { wind: drive.wind * 0.8, intensity: 1 - rain * 0.3 });
+  if (drive.particles === false) {
+    return;
+  }
   const top = FLAME_BASE_Y - FLAME_HEIGHT * 0.45;
 
   state.emberCarry += dt;

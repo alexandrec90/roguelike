@@ -196,7 +196,8 @@ body {
 }
 
 .options-panel select,
-.options-panel__reset {
+.options-panel__reset,
+.options-panel__all button {
   padding: 1px 4px;
   border: 1px solid #6c7382;
   border-radius: 3px;
@@ -213,5 +214,17 @@ body {
 .options-panel__reset {
   display: block;
   margin: 8px 8px 0 auto;
+  cursor: pointer;
+}
+
+/* "All on" and "All off" under the effect switches. */
+.options-panel__all {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.options-panel__all button {
   cursor: pointer;
 }

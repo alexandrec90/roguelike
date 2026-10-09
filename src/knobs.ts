@@ -11,6 +11,7 @@
  * address a panel produces is the shortest one that means the same game.
  */
 
+import { EFFECTS, formatEffectsOff, parseEffectsOff, type EffectId } from "./game/effects";
 import { DEFAULT_SKIN, SKINS, type SkinId } from "./skins/skin";
 
 export interface KnobOption {
@@ -19,12 +20,26 @@ export interface KnobOption {
   readonly label: string;
 }
 
+/** One checkbox of a `switches` knob: ticked while its value is absent from the list. */
+export interface KnobSwitch {
+  readonly value: EffectId;
+  readonly label: string;
+  readonly skins: readonly SkinId[];
+  /** A line on what it is, for the tooltip. */
+  readonly what: string;
+}
+
 export type KnobControl =
   | { readonly kind: "select"; readonly options: readonly KnobOption[] }
   /** A checkbox: `checked` in the URL when ticked, `unchecked` when not. */
-  | { readonly kind: "toggle"; readonly checked: string; readonly unchecked: string };
+  | { readonly kind: "toggle"; readonly checked: string; readonly unchecked: string }
+  /**
+   * A checkbox per switch, the URL listing the ones *un*ticked: `off=rain,shake`.
+   * Live, unlike the rest: ticking one flips the running game and only rewrites the URL.
+   */
+  | { readonly kind: "switches"; readonly switches: readonly KnobSwitch[] };
 
-export type KnobGroup = "World" | "Rendering" | "Debug";
+export type KnobGroup = "World" | "Rendering" | "Effects" | "Debug";
 
 export interface Knob {
   readonly key: string;
@@ -192,6 +207,17 @@ export const KNOBS: readonly Knob[] = [
     },
   },
   {
+    key: "off",
+    label: "Effects",
+    group: "Effects",
+    skins: ALL_SKINS,
+    fallback: "",
+    control: {
+      kind: "switches",
+      switches: EFFECTS.map((effect) => ({ value: effect.id, label: effect.label, skins: effect.skins, what: effect.what })),
+    },
+  },
+  {
     key: "map",
     label: "Debug map",
     group: "Debug",
@@ -219,7 +245,7 @@ export const KNOBS: readonly Knob[] = [
 ];
 
 /** The panel's sections, top to bottom: the skin first, as the biggest switch. */
-export const KNOB_GROUPS: readonly KnobGroup[] = ["Rendering", "World", "Debug"];
+export const KNOB_GROUPS: readonly KnobGroup[] = ["Rendering", "World", "Effects", "Debug"];
 
 /** The knobs the shown skin reads, in table order. */
 export function knobsFor(skin: SkinId): readonly Knob[] {
@@ -236,6 +262,9 @@ export function knobValue(knob: Knob, query: URLSearchParams): string {
   if (knob.control.kind === "toggle") {
     return raw;
   }
+  if (knob.control.kind === "switches") {
+    return formatEffectsOff(parseEffectsOff(raw).off);
+  }
   const match = knob.control.options.find((option) => option.value.toLowerCase() === raw.toLowerCase());
   return match?.value ?? raw;
 }
@@ -246,6 +275,11 @@ export function knobChecked(knob: Knob, query: URLSearchParams): boolean {
     return false;
   }
   return knobValue(knob, query) !== knob.control.unchecked;
+}
+
+/** The switches of a `switches` knob the shown skin draws, in table order; none for any other knob. */
+export function switchesFor(knob: Knob, skin: SkinId): readonly KnobSwitch[] {
+  return knob.control.kind === "switches" ? knob.control.switches.filter((option) => option.skins.includes(skin)) : [];
 }
 
 /** Whether the knob it depends on is where this one matters. */

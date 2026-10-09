@@ -37,6 +37,7 @@ import {
   releaseKey,
   type ControlState,
 } from "./controls";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import type { FrameContext } from "./frame-context";
 import type { CastEvent } from "./hero/hero-actions";
 import { HeroDriver, type Whereabouts } from "./hero/hero-driver";
@@ -85,7 +86,9 @@ const DEFAULT_SUN: ShadowLight = { light: { x: -0.6, y: -0.8 }, elevation: 0.7 }
 
 export class HeroLayer {
   private readonly driver: HeroDriver;
-  private readonly look = new HeroLook();
+  private readonly look: HeroLook;
+  /** Read every frame: `shadows` off casts and uploads no shadow, and hides its surface. */
+  private readonly effects: EffectSwitches;
   private groundTop = 0;
   private foot: Foot = { x: 0, y: 0 };
   /** How far the ground's depths have slid this frame (`scrollRows`), in depth units. */
@@ -112,8 +115,25 @@ export class HeroLayer {
     start: PlanetPose,
     radius: number = DEFAULT_STRAFE_RADIUS,
     blocked: (point: PlanetPoint) => boolean = blockedGround,
+    effects: EffectSwitches = ALL_EFFECTS,
   ) {
     this.driver = new HeroDriver(start, radius, blocked);
+    this.effects = effects;
+    // Getters, so his look asks the switches afresh every frame.
+    this.look = new HeroLook(undefined, {
+      get scarf(): boolean {
+        return effects.on("scarf");
+      },
+      get trail(): boolean {
+        return effects.on("trail");
+      },
+      get particles(): boolean {
+        return effects.on("particles");
+      },
+      get shadow(): boolean {
+        return effects.on("shadows");
+      },
+    });
   }
 
   create(scene: Scene, groundTop: number, foot: Foot): void {
@@ -267,11 +287,15 @@ export class HeroLayer {
     });
     this.cloud = aboveWater(frame.figure, this.sunk);
     this.body.clear().paint(aboveWater(frame.scene, this.sunk), BODY.footX, BODY.footY).commit();
-    this.shade.clear();
-    if (shadowStrength > 0.02) {
-      this.shade.paint(frame.shadow, SHADOW.footX, SHADOW.footY, Math.min(shadowStrength * 1.1, 1));
+    const shadows = this.effects.on("shadows");
+    this.shade.image.setVisible(shadows);
+    if (shadows) {
+      this.shade.clear();
+      if (shadowStrength > 0.02) {
+        this.shade.paint(frame.shadow, SHADOW.footX, SHADOW.footY, Math.min(shadowStrength * 1.1, 1));
+      }
+      this.shade.commit();
     }
-    this.shade.commit();
     this.place();
   }
 

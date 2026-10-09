@@ -17,9 +17,11 @@
  * | `sky`      | `hd` draws the air above the horizon at the screen's own    |
  * |            | resolution behind the pixel world (`sky-hd-layer.ts`)       |
  * | `map`      | `1` stacks the debug map over the canvas                    |
+ * | `off`      | effects not drawn, comma-separated: `rain,shake` (`effects.ts`) |
  */
 
 import { DEFAULT_DAY_MS, parseDayLength, parseTime } from "./atmosphere";
+import { ALL_EFFECTS, parseEffectsOff, type EffectSwitches } from "./effects";
 import { DEFAULT_SKY_FRACTION, parseSkyFraction } from "./horizon";
 import { DEFAULT_STRAFE_RADIUS, parseStrafeRadius } from "./planet";
 
@@ -40,6 +42,8 @@ export interface SceneOptions {
   readonly weather: WeatherPin | undefined;
   readonly render: RenderPath;
   readonly sky: SkyStyle;
+  /** Which visual effects are drawn; one that is off does no work (`effects.ts`). */
+  readonly effects: EffectSwitches;
 }
 
 export const DEFAULT_SCENE_OPTIONS: SceneOptions = {
@@ -50,6 +54,7 @@ export const DEFAULT_SCENE_OPTIONS: SceneOptions = {
   weather: undefined,
   render: "gpu",
   sky: "pixel",
+  effects: ALL_EFFECTS,
 };
 
 /** `hd` asks for the screen-resolution sky; anything else, or nothing, the pixel one. */
@@ -76,5 +81,6 @@ export function readSceneOptions(query: URLSearchParams): SceneOptions {
     weather: parseWeather(query.get("weather")),
     render: parseRenderPath(query.get("render")),
     sky: parseSkyStyle(query.get("sky")),
+    effects: parseEffectsOff(query.get("off")),
   };
 }

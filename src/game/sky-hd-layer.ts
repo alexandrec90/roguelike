@@ -20,6 +20,7 @@ import { FloatTexture } from "./gpu/float-texture";
 import { SKY_FRAGMENT_SHADER } from "./gpu/sky-shader";
 import type { HorizonLayout } from "./horizon";
 import { CLOUD_TEXELS, MAX_SKY_CLOUDS, panoramaOffset, skyDrift, skyUniforms, writeCloudTexels } from "./sky-hd";
+import type { SkyShows } from "./sky-paint";
 
 /** Logical rows past the horizon line the pass also covers: the ridges hide them, a shake may not. */
 const SKIRT_ROWS = 2;
@@ -33,6 +34,9 @@ export class HdSkyLayer implements Backdrop {
   private clouds = 0;
   /** This moment's uniforms, or undefined before the first update - nothing to draw yet. */
   private uniforms: Record<string, UniformValue> | undefined;
+
+  /** `shows` leaves the clouds or the stars out (`?off=`): no texels written, no star searched for. */
+  constructor(private readonly shows: SkyShows = { clouds: true, stars: true }) {}
 
   create(scene: Scene, layout: HorizonLayout, width: number): void {
     this.layout = layout;
@@ -49,17 +53,20 @@ export class HdSkyLayer implements Backdrop {
   /** One moment of sky for a heading, a time of day and a clock. */
   update(turn: number, atmosphere: Atmosphere, elapsedMs: number): void {
     const offset = panoramaOffset(turn);
-    this.clouds = writeCloudTexels(this.texels, {
-      offset,
-      drift: skyDrift(elapsedMs),
-      overcast: atmosphere.overcast,
-      width: this.width,
-      skyHeight: this.layout.skyHeight,
-    });
+    this.clouds = this.shows.clouds
+      ? writeCloudTexels(this.texels, {
+          offset,
+          drift: skyDrift(elapsedMs),
+          overcast: atmosphere.overcast,
+          width: this.width,
+          skyHeight: this.layout.skyHeight,
+        })
+      : 0;
     if (this.clouds > 0) {
       this.data.write(0, 0, CLOUD_TEXELS, this.clouds, this.texels);
     }
-    this.uniforms = skyUniforms(atmosphere, this.layout, this.width, { offset, elapsedMs });
+    const sky = this.shows.stars ? atmosphere : { ...atmosphere, starAlpha: 0 };
+    this.uniforms = skyUniforms(sky, this.layout, this.width, { offset, elapsedMs });
   }
 
   render(view: BackdropView): void {

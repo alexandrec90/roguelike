@@ -16,7 +16,17 @@
  */
 
 import { FIELD_SIZE } from "../../game/water/puddle-field";
-import type { DrawableHandle, DrawCall, FrameScene, FrameUniforms, LowpolyBackend, VertexLayout } from "./backend";
+import {
+  ALL_FEATURES,
+  featuresKey,
+  type DrawableHandle,
+  type DrawCall,
+  type FrameScene,
+  type FrameUniforms,
+  type LowpolyBackend,
+  type ShaderFeatures,
+  type VertexLayout,
+} from "./backend";
 import { program, Uniforms } from "./gl-util";
 import { IMPOSTOR_BYTES } from "./impostor";
 import { ImpostorProgram } from "./impostor-pass";
@@ -24,7 +34,7 @@ import { rgb, VERTEX_BYTES } from "./mesh";
 import { DEPTH_FAR, DEPTH_NEAR } from "./placement";
 import { RainPass } from "./rain-pass";
 import { ReflectionTarget } from "./reflection";
-import { SKY_FRAGMENT, SKY_VERTEX, WORLD_FRAGMENT, WORLD_FRAGMENT_SOLID, WORLD_VERTEX } from "./shaders";
+import { SKY_FRAGMENT, SKY_VERTEX, worldFragment, worldVertex } from "./shaders";
 import { lightDirection, stillSky } from "./sky-light";
 import { waterTexels } from "./water-texels";
 
@@ -35,6 +45,13 @@ interface Drawable extends DrawableHandle {
   readonly stride: number;
 }
 
+/** One build of the programs a `ShaderFeatures` changes. */
+interface WorldPrograms {
+  readonly world: Uniforms;
+  readonly solidWorld: Uniforms;
+  readonly impostor: ImpostorProgram;
+}
+
 /** Texture units: the puddle field (with the lakes) and the mirror. */
 const PUDDLE_UNIT = 1;
 const REFLECT_UNIT = 2;
@@ -42,28 +59,51 @@ const REFLECT_UNIT = 2;
 export class WebGlBackend implements LowpolyBackend {
   readonly kind = "webgl";
   /** The world, able to discard: the ground, the mirror and the sheer pass. */
-  private readonly world: Uniforms;
+  private world: Uniforms;
   /** The world for what stands on screen: no discard, so early depth testing stays on. */
-  private readonly solidWorld: Uniforms;
+  private solidWorld: Uniforms;
+  /** The impostors, built for the same features as the world. */
+  private impostor: ImpostorProgram;
+  /** Each build of the world and impostor programs asked for so far, by `featuresKey`. */
+  private readonly builds = new Map<string, WorldPrograms>();
   private readonly sky: Uniforms;
   private readonly skyVao: WebGLVertexArrayObject;
   private readonly puddles: WebGLTexture;
   private readonly reflection: ReflectionTarget;
   private readonly rain: RainPass;
-  private readonly impostor: ImpostorProgram;
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
     puddleField: Uint8Array,
+    features: ShaderFeatures = ALL_FEATURES,
   ) {
-    this.world = new Uniforms(gl, program(gl, WORLD_VERTEX, WORLD_FRAGMENT));
-    this.solidWorld = new Uniforms(gl, program(gl, WORLD_VERTEX, WORLD_FRAGMENT_SOLID));
+    ({ world: this.world, solidWorld: this.solidWorld, impostor: this.impostor } = this.build(features));
     this.sky = new Uniforms(gl, program(gl, SKY_VERTEX, SKY_FRAGMENT));
-    this.impostor = new ImpostorProgram(gl);
     this.skyVao = gl.createVertexArray();
     this.puddles = puddleTexture(gl, puddleField);
     this.reflection = new ReflectionTarget(gl);
     this.rain = new RainPass(gl);
+  }
+
+  setFeatures(features: ShaderFeatures): void {
+    ({ world: this.world, solidWorld: this.solidWorld, impostor: this.impostor } = this.build(features));
+  }
+
+  /** The two world programs and the impostors' for `features`, compiled the first time they are asked for. */
+  private build(features: ShaderFeatures): WorldPrograms {
+    const key = featuresKey(features);
+    let built = this.builds.get(key);
+    if (built === undefined) {
+      const gl = this.gl;
+      const vertex = worldVertex(features);
+      built = {
+        world: new Uniforms(gl, program(gl, vertex, worldFragment(true, features))),
+        solidWorld: new Uniforms(gl, program(gl, vertex, worldFragment(false, features))),
+        impostor: new ImpostorProgram(gl, features),
+      };
+      this.builds.set(key, built);
+    }
+    return built;
   }
 
   createDrawable(bytes?: Uint8Array, layout: VertexLayout = "mesh"): DrawableHandle {

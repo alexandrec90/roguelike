@@ -35,6 +35,8 @@ export interface SurfaceMotion {
   readonly rain: number;
   /** 0..1: a lightning strike lighting the water from above. */
   readonly strike: number;
+  /** False leaves out the sky's glints (`?off=reflections`); true when absent. */
+  readonly glints?: boolean;
 }
 
 /** A reflection is always dimmer than what it reflects — and sits *in* the water, over the sky in it. */
@@ -78,7 +80,7 @@ export function paintSurface(
   const rain = Math.min(Math.max(motion.rain, 0), 1);
 
   const glintAlpha = GLINT_ALPHA * (1 - 0.65 * rain);
-  for (const puddle of scene.puddles) {
+  for (const puddle of motion.glints === false ? [] : scene.puddles) {
     paintInto(buffer, puddleGlints(puddle, motion.elapsedMs, scene.sky.glint), margin, margin, glintAlpha);
   }
 

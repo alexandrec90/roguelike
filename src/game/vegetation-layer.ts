@@ -40,6 +40,7 @@ import {
   type LocalBounds,
 } from "./camera";
 import type { CloudShade } from "./cloud-shadow";
+import { ALL_EFFECTS, type EffectSwitches } from "./effects";
 import type { FrameContext } from "./frame-context";
 import { prefetchGroundSample, sharedGroundSample, type GroundSample } from "./ground/ground-sample";
 import {
@@ -114,6 +115,12 @@ export class VegetationLayer {
   private bareCheckedAt = Number.NEGATIVE_INFINITY;
   /** The last frame's cost, ms - read it from the console when profiling. */
   lastFrameMs = 0;
+  /** Whether the rows are shown, and whether the tufts were last left swaying. */
+  private shown = true;
+  private swayed = true;
+
+  /** `grass` off hides every row and skips the frame; `sway` off seats each tuft at rest. */
+  constructor(private readonly effects: EffectSwitches = ALL_EFFECTS) {}
 
   create(scene: Scene, frame: CameraFrame, bounds: LocalBounds): void {
     this.scene = scene;
@@ -134,7 +141,7 @@ export class VegetationLayer {
     this.rowDepths = Array.from({ length: count }, (_unused, index) =>
       rootedDepth(latticeRow(flat, { x: 0, y: bounds.minY + index }), RANK.grass),
     );
-    this.rows = this.rowDepths.map((depth) => this.scene.add.blitter(0, 0, TUFT_TEXTURE).setDepth(depth));
+    this.rows = this.rowDepths.map((depth) => this.scene.add.blitter(0, 0, TUFT_TEXTURE).setDepth(depth).setVisible(this.shown));
     this.slid = 0;
     this.pools = this.rows.map(() => []);
     this.tufts = [];
@@ -162,6 +169,13 @@ export class VegetationLayer {
    * (a slime, a falling body) and the grass parts around them too.
    */
   update(ctx: FrameContext, pushers?: readonly GrassPusher[]): void {
+    if (this.effects.on("grass") !== this.shown) {
+      this.shown = !this.shown;
+      this.rows.forEach((row) => row.setVisible(this.shown));
+    }
+    if (!this.shown) {
+      return;
+    }
     this.draw(ctx.frame, ctx.pose, ctx.elapsedMs, ctx.wind, pushers ?? [{ x: ctx.frame.footX, y: ctx.frame.footY }]);
     this.shadeTufts(ctx.shade, ctx.frame);
   }
@@ -217,17 +231,21 @@ export class VegetationLayer {
       }
     });
     this.slid = slid;
-    this.blow(elapsedMs, wind);
-    for (const tuft of this.tufts) {
-      if (tuft.bare) {
-        continue;
-      }
-      const next = this.frameFor(tuft.placement, elapsedMs, left, top, pushers);
+    // Without sway no wind is sampled and no frame chosen: each tuft is put back at
+    // rest once, on the frame the sway went off, and stays there.
+    const sways = this.effects.on("sway");
+    if (sways) {
+      this.blow(elapsedMs, wind);
+    }
+    for (const tuft of sways || this.swayed ? this.tufts : []) {
+      const rest = tuftFrame(tuft.placement.shape, bendFrame(0));
+      const next = !sways ? rest : tuft.bare ? tuft.frame : this.frameFor(tuft.placement, elapsedMs, left, top, pushers);
       if (next !== tuft.frame) {
         tuft.frame = next;
         tuft.bob.setFrame(FRAME_NAMES[next] ?? "0");
       }
     }
+    this.swayed = sways;
     this.lastFrameMs = performance.now() - started;
   }
 
@@ -319,7 +337,7 @@ export class VegetationLayer {
    * that crosses into it - which then only re-seats bobs.
    */
   prefetch(pose: PlanetPose): void {
-    if (this.ahead?.pose === pose || this.sampled === pose) {
+    if (!this.shown || this.ahead?.pose === pose || this.sampled === pose) {
       return;
     }
     this.ahead = this.placementsFor(pose, prefetchGroundSample(pose, this.bounds));

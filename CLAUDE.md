@@ -80,10 +80,41 @@ only its own small puddles (`puddlesNear`) and has not adopted the field yet.
 Not yet in the low-poly skin: lightning, the campfire, wildfire and decals (their
 simulation still lives inside pixel layers), and the `?bench=1` route.
 
+### The look is undecided, so every effect is a switch
+
+**The visual design is experimental.** Neither skin, and no effect in either, is the
+settled look; the owner has not decided what the game should look like. So build
+everything visual so it can be judged *without* it: **every visual effect is a switch**
+in the Options panel's Effects section (`src/game/effects.ts`'s `EFFECTS`, read through
+`SceneOptions.effects`). A switch takes effect **at once, without a reload**: the panel
+flips the page's one `EffectSwitches` in place and only rewrites the address
+(`?off=rain,shake`) so a reload or a shared link opens the same way. So a layer asks
+`effects.on("<id>")` **every frame**, never once when it is made, and an effect switched
+off mid-run clears what it already had on screen.
+
+The contract is that **what is on screen is what the frame costs**. An effect that is
+off does no work: its layer is not stepped, its particles are not emitted, its surface
+is not painted or uploaded, its pass is not run, and an effect that lives in a shader is
+left out of the shader's source (`ShaderFeatures` in the low-poly skin, which swaps in
+another build of the shaders when the switch flips), not zeroed by a uniform. Hiding a finished picture is not switching it off. So a capture or a
+`?bench=1` run with effects off measures the game without them.
+
+- **A new effect is a row in `EFFECTS`** (the skins that draw it, a label, a line on
+  what it is) and an `effects.on("<id>")` at the one place its work starts.
+  `effects.test.ts` fails a row no skin reads, and a switch read under a skin the row
+  does not list.
+- **An effect is presentation only.** Switching one off never changes what happens:
+  rain still soaks the ground, a slime still takes the blow. Anything that changes the
+  simulation (hit stop stops the world's clock) is not an effect and gets no switch.
+- **The world is not an effect.** Ground, landforms, trees, the water's body, the hero,
+  slimes, spells, the sky's gradient and the hour's light stay on: without them there is
+  no game to look at.
+
 ## Visual and Asset Architecture
 
 These are product constraints **of the pixel skin**, not suggestions tied to the proof
-of concept.
+of concept. They say how the pixel skin is built, not that its look is final: the
+section above holds here too.
 
 ### The bet: the procedural graphics *are* the art style
 

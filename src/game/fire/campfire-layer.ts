@@ -17,7 +17,9 @@
 import type { Scene } from "../../engine";
 
 import { groundRow } from "../camera";
+import { ALL_EFFECTS, type EffectSwitches } from "../effects";
 import type { FrameContext } from "../frame-context";
+import { clearPool } from "../fx/particles";
 import type { PixelCloud } from "../ink";
 import { PixelSurface } from "../pixel-surface";
 import { toLocal, type PlanetPoint } from "../planet";
@@ -56,6 +58,15 @@ export class CampfireLayer {
   private footNow: ScreenPoint = { x: -99, y: -99 };
   private shown = false;
 
+  /** Whether the embers and smoke were on last frame. */
+  private sparking = true;
+
+  /**
+   * `particles` is read every frame: off, no ember or puff of smoke is emitted
+   * or stepped, and those in the air when it went off are dropped.
+   */
+  constructor(private readonly effects: EffectSwitches = ALL_EFFECTS) {}
+
   create(scene: Scene, at: PlanetPoint, seed: number): void {
     this.at = at;
     this.state = createCampfire(seed);
@@ -66,7 +77,13 @@ export class CampfireLayer {
 
   update(ctx: FrameContext): void {
     const wind = windAt(ctx.elapsedMs, this.footNow.x, this.footNow.y, ctx.wind);
-    stepCampfire(this.state, ctx.deltaMs, { wind, rain: ctx.rain });
+    const particles = this.effects.on("particles");
+    if (!particles && this.sparking) {
+      clearPool(this.state.embers);
+      clearPool(this.state.smoke);
+    }
+    this.sparking = particles;
+    stepCampfire(this.state, ctx.deltaMs, { wind, rain: ctx.rain, particles });
 
     const local = toLocal(ctx.pose, this.at);
     this.footNow = groundFoot(ctx.frame, local);

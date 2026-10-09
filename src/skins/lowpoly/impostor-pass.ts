@@ -11,15 +11,20 @@
  * | volumes (`?volume=1`): smoke and clouds | tested, not written | premultiplied alpha, far to near |
  */
 
+import { ALL_FEATURES, type ShaderFeatures } from "./backend";
 import { program, Uniforms } from "./gl-util";
-import { IMPOSTOR_FRAGMENT, IMPOSTOR_VERTEX } from "./impostor-glsl";
+import { IMPOSTOR_FRAGMENT, impostorVertex } from "./impostor-glsl";
 import { IMPOSTOR_BYTES } from "./impostor";
 
 export class ImpostorProgram {
   readonly uniforms: Uniforms;
 
-  constructor(private readonly gl: WebGL2RenderingContext) {
-    this.uniforms = new Uniforms(gl, program(gl, IMPOSTOR_VERTEX, IMPOSTOR_FRAGMENT));
+  /** `features` decides whether the crowns sway (`impostorVertex`), as the world's do. */
+  constructor(
+    private readonly gl: WebGL2RenderingContext,
+    features: ShaderFeatures = ALL_FEATURES,
+  ) {
+    this.uniforms = new Uniforms(gl, program(gl, impostorVertex(features), IMPOSTOR_FRAGMENT));
   }
 
   /** Point the bound vertex array at an impostor buffer's fields (`impostor.ts`); the buffer must be bound. */

@@ -9,18 +9,25 @@
  */
 
 import { ROLL_ROWS } from "../../../game/horizon";
+import { ALL_FEATURES, type ShaderFeatures } from "../backend";
 import { QUAD_REACH, SCREEN_RISE, SCREEN_UP } from "../impostor";
 import { CLOUD_DEPTH } from "../impostor-glsl";
 import { Kind } from "../mesh";
 import { LOWPOLY } from "../palette";
 import { TOWARD_VIEWER } from "../placement";
-import { PLACE_WGSL, WORLD_BINDINGS } from "./wgsl-world";
+import { PLACE_WGSL, swayWgsl, WORLD_BINDINGS } from "./wgsl-world";
 
 const f = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
 const vec3 = (v: readonly number[]): string => `vec3f(${v.map(f).join(", ")})`;
 
-export const IMPOSTOR_WGSL = `${WORLD_BINDINGS}
+/** The impostors, with or without the sway (`ShaderFeatures`), as the world is. */
+export function impostorWgsl(features: ShaderFeatures): string {
+  return IMPOSTOR_SOURCE.replace("/*SWAY*/", () => swayWgsl(features));
+}
+
+const IMPOSTOR_SOURCE = `${WORLD_BINDINGS}
 ${PLACE_WGSL}
+/*SWAY*/
 const REACH = ${f(QUAD_REACH)};
 const RISE = ${f(SCREEN_RISE)};
 const SCREEN_RIGHT = vec3f(1.0, 0.0, 0.0);
@@ -258,3 +265,6 @@ fn ballFragment(input: BallOut) -> BallFragment {
   return result;
 }
 `;
+
+/** The impostors with everything in them. */
+export const IMPOSTOR_WGSL = impostorWgsl(ALL_FEATURES);

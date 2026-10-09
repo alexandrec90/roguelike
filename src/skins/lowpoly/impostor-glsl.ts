@@ -24,11 +24,12 @@
  */
 
 import { ROLL_ROWS } from "../../game/horizon";
+import { ALL_FEATURES, type ShaderFeatures } from "./backend";
 import { QUAD_REACH, SCREEN_RISE, SCREEN_UP } from "./impostor";
 import { Kind } from "./mesh";
 import { LOWPOLY } from "./palette";
 import { TOWARD_VIEWER } from "./placement";
-import { PLACE_GLSL } from "./shaders";
+import { PLACE_GLSL, swayGlsl } from "./shaders";
 
 const float = (value: number): string => (Number.isInteger(value) ? `${value}.0` : `${value}`);
 const vec3 = (v: readonly number[]): string => `vec3(${v.map(float).join(", ")})`;
@@ -36,7 +37,12 @@ const vec3 = (v: readonly number[]): string => `vec3(${v.map(float).join(", ")})
 /** A cloud sits this far back in the depth buffer: behind everything drawn, in front of the cleared sky. */
 export const CLOUD_DEPTH = 0.9999;
 
-export const IMPOSTOR_VERTEX = `#version 300 es
+/** The impostors' vertex shader, with or without the sway (`ShaderFeatures`), as the world's is. */
+export function impostorVertex(features: ShaderFeatures): string {
+  return IMPOSTOR_VERTEX_SOURCE.replace("/*SWAY*/", () => swayGlsl(features));
+}
+
+const IMPOSTOR_VERTEX_SOURCE = `#version 300 es
 precision highp float;
 
 layout(location = 0) in vec3 a_centre;
@@ -45,6 +51,7 @@ layout(location = 2) in float a_radius;
 layout(location = 3) in vec4 a_colour;
 layout(location = 4) in vec4 a_info;   // kind, seed, age, corner: bytes, not normalised
 ${PLACE_GLSL}
+/*SWAY*/
 out vec4 v_colour;
 out vec2 v_corner;
 out float v_rows;
@@ -90,6 +97,9 @@ void main() {
   gl_Position = vec4(at.x / u_view.x * 2.0 - 1.0, 1.0 - at.y / u_view.y * 2.0, clipDepth(v_depth), 1.0);
 }
 `;
+
+/** The vertex shader with everything in it. */
+export const IMPOSTOR_VERTEX = impostorVertex(ALL_FEATURES);
 
 export const IMPOSTOR_FRAGMENT = `#version 300 es
 precision highp float;

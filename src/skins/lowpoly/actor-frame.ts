@@ -41,6 +41,8 @@ export interface ActorInput {
   /** The world's turn this frame - what the actors' meshes are drawn rotated by. */
   readonly turn: number;
   readonly encounter: EncounterSim;
+  /** Cast shadows and the swing's trail, each left unbuilt when off (`?off=`); both when absent. */
+  readonly shows?: { readonly shadows: boolean; readonly trail: boolean };
 }
 
 export type ActorMeshKey = "heroSolid" | "heroSheer" | "actorSolid" | "actorSheer";
@@ -67,12 +69,15 @@ export class ActorMeshes {
       b[key].reset();
     }
     const { player, live, encounter } = input;
+    const shows = input.shows ?? { shadows: true, trail: true };
     const ground = standingHeight(live, this.look);
     const tracks = tracksOf(player, input.elapsedMs);
     const stance = { enchanted: player.enchanted, sunk: wadeDepth(live) * WADE_SINK, ground };
     heroMesh(b.heroSolid, looseSkeleton(layeredPose(tracks), tracks), { yaw: input.yaw, ...stance });
-    shadowUnder(b.heroSheer, [0, 0, ground], HERO_SHADOW);
-    if (player.attackMs !== undefined) {
+    if (shows.shadows) {
+      shadowUnder(b.heroSheer, [0, 0, ground], HERO_SHADOW);
+    }
+    if (player.attackMs !== undefined && shows.trail) {
       const sweep = bladeSweep(player.attackMs, layeredPose({ ...tracks, swingMs: undefined }), { yaw: input.yaw });
       swingTrailMesh(b.heroSheer, sweep, stance);
     }
@@ -84,7 +89,13 @@ export class ActorMeshes {
       const gaze = easeYaw(this.gazes.get(slime.id) ?? target, target, deltaMs, GAZE_EASE_MS);
       this.gazes.set(slime.id, gaze);
       seen.add(slime.id);
-      slimeMesh(b.actorSolid, b.actorSheer, slime, live, { elapsedMs: input.elapsedMs, turn: input.turn, gaze, paint: this.look });
+      slimeMesh(b.actorSolid, b.actorSheer, slime, live, {
+        elapsedMs: input.elapsedMs,
+        turn: input.turn,
+        gaze,
+        shadow: shows.shadows,
+        paint: this.look,
+      });
     }
     for (const id of this.gazes.keys()) {
       if (!seen.has(id)) {

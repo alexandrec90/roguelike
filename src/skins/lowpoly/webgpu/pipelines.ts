@@ -13,10 +13,11 @@
  * | `ballVolume` | the screen | tested, not written | premultiplied alpha |
  */
 
+import { ALL_FEATURES, type ShaderFeatures } from "../backend";
 import { IMPOSTOR_BYTES } from "../impostor";
 import { VERTEX_BYTES } from "../mesh";
 import { ShaderStage } from "./gpu-flags";
-import { IMPOSTOR_WGSL } from "./wgsl-impostor";
+import { impostorWgsl } from "./wgsl-impostor";
 import { RAIN_WGSL, SKY_WGSL } from "./wgsl-passes";
 import { worldWgsl } from "./wgsl-world";
 
@@ -73,25 +74,48 @@ const ALPHA_BLEND: GPUBlendState = {
   alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
 };
 
-export function createPipelines(device: GPUDevice, screenFormat: GPUTextureFormat, samples: number): Pipelines {
+/** The world's bindings (frame, draws, water mask, mirror, wave surface) and the screen passes' one. */
+export function createLayouts(device: GPUDevice): PipelineLayouts {
   const fragmentAndVertex = ShaderStage.VERTEX | ShaderStage.FRAGMENT;
-  const worldLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: fragmentAndVertex, buffer: { type: "uniform" } },
-      { binding: 1, visibility: ShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
-      { binding: 2, visibility: ShaderStage.FRAGMENT, texture: {} },
-      { binding: 3, visibility: ShaderStage.FRAGMENT, sampler: {} },
-      { binding: 4, visibility: ShaderStage.FRAGMENT, texture: {} },
-      { binding: 5, visibility: ShaderStage.FRAGMENT, sampler: {} },
-      { binding: 6, visibility: ShaderStage.FRAGMENT, texture: {} },
-    ],
-  });
-  const passesLayout = device.createBindGroupLayout({
-    entries: [{ binding: 0, visibility: fragmentAndVertex, buffer: { type: "uniform" } }],
-  });
+  return {
+    worldLayout: device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: fragmentAndVertex, buffer: { type: "uniform" } },
+        { binding: 1, visibility: ShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+        { binding: 2, visibility: ShaderStage.FRAGMENT, texture: {} },
+        { binding: 3, visibility: ShaderStage.FRAGMENT, sampler: {} },
+        { binding: 4, visibility: ShaderStage.FRAGMENT, texture: {} },
+        { binding: 5, visibility: ShaderStage.FRAGMENT, sampler: {} },
+        { binding: 6, visibility: ShaderStage.FRAGMENT, texture: {} },
+      ],
+    }),
+    passesLayout: device.createBindGroupLayout({
+      entries: [{ binding: 0, visibility: fragmentAndVertex, buffer: { type: "uniform" } }],
+    }),
+  };
+}
+
+/** The bind group layouts every build of the pipelines shares, so one set of bind groups serves them all. */
+export interface PipelineLayouts {
+  readonly worldLayout: GPUBindGroupLayout;
+  readonly passesLayout: GPUBindGroupLayout;
+}
+
+/**
+ * Every pipeline, its world and impostor shaders built for `features`. Pass the `layouts`
+ * of an earlier build to make another variant the same bind groups still fit.
+ */
+export function createPipelines(
+  device: GPUDevice,
+  screenFormat: GPUTextureFormat,
+  samples: number,
+  features: ShaderFeatures = ALL_FEATURES,
+  layouts: PipelineLayouts = createLayouts(device),
+): Pipelines {
+  const { worldLayout, passesLayout } = layouts;
   // Two builds of one shader: only what never needs to discard keeps the early depth test.
-  const clipping = device.createShaderModule({ code: worldWgsl(true) });
-  const standing = device.createShaderModule({ code: worldWgsl(false) });
+  const clipping = device.createShaderModule({ code: worldWgsl(true, features) });
+  const standing = device.createShaderModule({ code: worldWgsl(false, features) });
   const worldPipeline = device.createPipelineLayout({ bindGroupLayouts: [worldLayout] });
   const worldWith = (world: GPUShaderModule, format: GPUTextureFormat, samples: number, sheer: boolean): GPURenderPipeline =>
     device.createRenderPipeline({
@@ -114,7 +138,7 @@ export function createPipelines(device: GPUDevice, screenFormat: GPUTextureForma
       multisample: { count: samples },
     });
   };
-  const balls = device.createShaderModule({ code: IMPOSTOR_WGSL });
+  const balls = device.createShaderModule({ code: impostorWgsl(features) });
   const ballWith = (format: GPUTextureFormat, samples: number, volume: boolean): GPURenderPipeline =>
     device.createRenderPipeline({
       layout: worldPipeline,

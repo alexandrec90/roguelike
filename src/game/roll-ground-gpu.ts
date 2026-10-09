@@ -62,7 +62,12 @@ interface Fill {
   readonly tables: Tables;
   readonly liveMaxY: number;
   readonly ctx: FrameContext | undefined;
+  /** False (`?off=grass`) lays no tuft into the table. */
+  readonly grass: boolean;
 }
+
+/** Tuft bounds no texel falls in: the shader reads no tuft at all. */
+const NO_TUFTS = [0, 0, -1, -1];
 
 let waterCount = 0;
 
@@ -126,8 +131,11 @@ export class LipGpu {
       .setDepth(HORIZON_DEPTH);
   }
 
-  /** Draw the lip for this frame from `state`, with `water` on it and `haze` over it. */
-  render(ctx: FrameContext, state: LipState, water: LipWater, liveMaxY: number, haze: Rgb): void {
+  /**
+   * Draw the lip for this frame from `state`, with `water` on it and `haze`
+   * over it. Without `grass` no tuft is laid in or read: its bounds are empty.
+   */
+  render(ctx: FrameContext, state: LipState, water: LipWater, liveMaxY: number, haze: Rgb, grass = true): void {
     this.atlas.tick();
     const shift = scrollOffset(ctx.frame);
     const tables = this.tablesFor(state);
@@ -136,7 +144,7 @@ export class LipGpu {
       tables.cells.dirty = true;
       tables.tufts.markAll();
     }
-    const fill: Fill = { state, water, waterId: this.waterId(water), tables, liveMaxY, ctx };
+    const fill: Fill = { state, water, waterId: this.waterId(water), tables, liveMaxY, ctx, grass };
     visitLipCells(ctx.frame, this.width, { x: [shift.x], y: [shift.y] }, (cellX, cellY, needs) =>
       this.fillCell(fill, cellX, cellY, needs),
     );
@@ -147,7 +155,7 @@ export class LipGpu {
       u_size: [this.width, ctx.frame.rollHeight],
       u_frame: [ctx.frame.footX, shift.x],
       u_cellBounds: [this.lipBounds.minX, this.lipBounds.minY, tables.cells.width, tables.cells.height],
-      u_tuftBounds: [this.grassBounds.minX, this.grassBounds.minY, this.grassBounds.maxX, this.grassBounds.maxY],
+      u_tuftBounds: grass ? [this.grassBounds.minX, this.grassBounds.minY, this.grassBounds.maxX, this.grassBounds.maxY] : NO_TUFTS,
       u_pageColumns: PAGE_COLUMNS,
       u_haze: [haze.r, haze.g, haze.b],
       "u_alphas[0]": this.alphas,
@@ -163,7 +171,7 @@ export class LipGpu {
    * Cut by cost rather than by scanline: the first scanline that point-samples
    * composes a hundred tiles on its own, and a task is never split once begun.
    */
-  warmTasks(state: LipState, water: () => LipWater | undefined, frame: CameraFrame, liveMaxY: number): (() => void)[] {
+  warmTasks(state: LipState, water: () => LipWater | undefined, frame: CameraFrame, liveMaxY: number, grass = true): (() => void)[] {
     const cells: [number, number, number][] = [];
     visitLipCells(frame, this.width, STRIDE_SHIFTS, (cellX, cellY, needs) => cells.push([cellX, cellY, needs]));
     return warmChunks(cells).map((chunk) => () => {
@@ -171,7 +179,7 @@ export class LipGpu {
       if (lip === undefined) {
         return;
       }
-      const fill: Fill = { state, water: lip, waterId: this.waterId(lip), tables: this.tablesFor(state), liveMaxY, ctx: undefined };
+      const fill: Fill = { state, water: lip, waterId: this.waterId(lip), tables: this.tablesFor(state), liveMaxY, ctx: undefined, grass };
       for (const [cellX, cellY, needs] of chunk) {
         this.fillCell(fill, cellX, cellY, needs);
       }
@@ -198,7 +206,7 @@ export class LipGpu {
     const { cells, tufts } = fill.tables;
     // Upright rows are laid in once; the swaying ones every frame there is one.
     const sways = ctx !== undefined && cellY <= liveMaxY;
-    if ((needs & NEEDS_TUFTS) !== 0 && tufts.contains(cellX, cellY) && (sways || !tufts.has(cellX, cellY))) {
+    if (fill.grass && (needs & NEEDS_TUFTS) !== 0 && tufts.contains(cellX, cellY) && (sways || !tufts.has(cellX, cellY))) {
       tufts.set(cellX, cellY, state.tuftEntries(cellX, cellY, liveMaxY, ctx));
     }
     if (cells.index(cellX, cellY) < 0) {
