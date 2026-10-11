@@ -253,7 +253,31 @@ def run_tool(name: str, cmd: list[str], fix_hint: str, cwd: Path = REPO_ROOT) ->
     return f"# {name}\n# fix: {fix_hint}\n{body}\n\n"
 
 
-def main(argv: list[str] | None = None) -> int:
+def rerun_in_tree_venv(module: str, argv: list[str] | None) -> int | None:
+    """This run's exit code under the tree's `.venv`, or None to carry on here.
+
+    Without it, a tree with no `.venv`, or a run started by an interpreter without the
+    linters, lints *clean*: every tool is `-m` under an interpreter that lacks it, so
+    `_missing_module` skips them all. The vendored `scripts/hooks/toolchain.py`
+    provisions the tree and runs this script again inside it; where this interpreter
+    already has `module`, or the vendored copy predates that, nothing changes.
+    """
+    hooks = REPO_ROOT / "scripts" / "hooks"
+    if not (hooks / "toolchain.py").is_file():
+        return None
+    sys.path.insert(0, str(hooks))
+    try:
+        import toolchain
+
+        rerun = toolchain.rerun_in_venv
+    except (ImportError, AttributeError):
+        return None
+    return rerun(
+        REPO_ROOT, module, Path(__file__).resolve(), sys.argv[1:] if argv is None else argv
+    )
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--changed", action="store_true", help="lint only the working-tree diff")
     # `/ship` passes the branch's diff here. It is part of the same contract as
@@ -281,7 +305,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the secrets pass (accepted for Stop-hook compatibility; no-op here)",
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    rerun = rerun_in_tree_venv("ruff", argv)
+    if rerun is not None:
+        return rerun
 
     # `--paths` and `--changed` are the same narrowing, differing only in who names the
     # files; everything downstream treats them identically.
@@ -307,35 +338,40 @@ def main(argv: list[str] | None = None) -> int:
     # `scope` then falls back to `["."]` — which would silently widen a per-turn
     # check into a whole-repo pass. Gate the Python passes on having Python to lint.
     if targets or not scoped:
-        # Auto-fix first, then report. Both ruff passes mutate the same files, so they
-        # must stay sequential relative to each other, and both skip the vendored
-        # harness — see NO_FIX_SCOPE.
-        no_fix = [arg for path in NO_FIX_SCOPE for arg in ("--exclude", path)]
-        subprocess.run(
-            [sys.executable, "-m", "ruff", "check", *scope, "--fix", "--unsafe-fixes", *no_fix],
-            cwd=REPO_ROOT,
-            capture_output=True,
-        )
-        subprocess.run(
-            [sys.executable, "-m", "ruff", "format", *scope, *no_fix],
-            cwd=REPO_ROOT,
-            capture_output=True,
-        )
-
-        sections += run_tool(
-            "ruff",
-            [sys.executable, "-m", "ruff", "check", *scope, "--output-format=full"],
-            "ruff check . --fix --unsafe-fixes",
-        )
-        sections += run_tool(
-            "mypy",
-            [sys.executable, "-m", "mypy", *(targets or MYPY_SCOPE), "--show-error-codes"],
-            f"mypy {' '.join(MYPY_SCOPE)} --show-error-codes",
-        )
+        sections += _python_passes(scope, targets)
 
     sections += _other_passes(workflows, envs)
     sections += frontend_section(tier, scripts, scoped)
     return _finish(sections)
+
+
+def _python_passes(scope: list[str], targets: list[str]) -> str:
+    """Auto-fix, then the ruff and mypy sections.
+
+    Both ruff fix passes mutate the same files, so they must stay sequential relative
+    to each other, and both skip the vendored harness — see NO_FIX_SCOPE.
+    """
+    no_fix = [arg for path in NO_FIX_SCOPE for arg in ("--exclude", path)]
+    subprocess.run(
+        [sys.executable, "-m", "ruff", "check", *scope, "--fix", "--unsafe-fixes", *no_fix],
+        cwd=REPO_ROOT,
+        capture_output=True,
+    )
+    subprocess.run(
+        [sys.executable, "-m", "ruff", "format", *scope, *no_fix],
+        cwd=REPO_ROOT,
+        capture_output=True,
+    )
+    sections = run_tool(
+        "ruff",
+        [sys.executable, "-m", "ruff", "check", *scope, "--output-format=full"],
+        "ruff check . --fix --unsafe-fixes",
+    )
+    return sections + run_tool(
+        "mypy",
+        [sys.executable, "-m", "mypy", *(targets or MYPY_SCOPE), "--show-error-codes"],
+        f"mypy {' '.join(MYPY_SCOPE)} --show-error-codes",
+    )
 
 
 def _other_passes(workflows: list[str], envs: list[str]) -> str:

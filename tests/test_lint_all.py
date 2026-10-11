@@ -156,3 +156,29 @@ def test_every_hooks_module_a_script_imports_is_one_mypy_is_told_about():
     }
     assert imported, "no script imports from scripts/hooks; the override is stale"
     assert imported <= declared, f"add to [[tool.mypy.overrides]]: {sorted(imported - declared)}"
+
+
+def test_the_runner_hands_its_run_to_the_vendored_toolchain(monkeypatch: pytest.MonkeyPatch):
+    """Run by an interpreter without ruff, the runner skipped every linter and said
+    clean. The re-run under the tree's `.venv` is the vendored module's decision: the
+    runner passes itself and its arguments and returns what comes back."""
+    seen: list[tuple[Any, ...]] = []
+
+    def rerun_in_venv(*args: Any) -> int:
+        seen.append(args)
+        return 3
+
+    fake = SimpleNamespace(rerun_in_venv=rerun_in_venv)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setitem(sys.modules, "toolchain", fake)
+
+    assert lint_all.main(["--changed"]) == 3
+    [(where, wanted, path, argv)] = seen
+    assert (where, wanted, argv) == (lint_all.REPO_ROOT, "ruff", ["--changed"])
+    assert path == (REPO_ROOT / "scripts" / "lint-all.py").resolve()
+
+
+def test_a_toolchain_that_predates_the_rerun_leaves_the_run_here(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setitem(sys.modules, "toolchain", SimpleNamespace())
+    assert lint_all.rerun_in_tree_venv("ruff", []) is None
