@@ -116,12 +116,51 @@ describe("the art rules' decision tables", () => {
   });
 });
 
+/**
+ * Rule files this project wrote that `claudeMd` does not name.
+ *
+ * Only this project's: the list is the one CLAUDE.md keeps by hand, and devkit adds
+ * a vendored rule through `sync-devkit.py --pull`, which never edits CLAUDE.md. Held
+ * to that too, this failed every adoption that brought a new rule (#135's
+ * `local-e2e.md`), for something no change in this repository had done.
+ */
+function unnamedRules(claudeMd: string, ruleFiles: string[], vendored: string[]): string[] {
+  return ruleFiles.filter(
+    (file) => !vendored.includes(`.claude/rules/${file}`) && !claudeMd.includes(file),
+  );
+}
+
 describe("CLAUDE.md's cross-reference list", () => {
-  it("mentions every rule file, so none is discoverable only by luck", () => {
+  const ruleFiles = readdirSync(RULES_DIR).filter((name) => name.endsWith(".md"));
+  const vendored = Object.keys(
+    (
+      JSON.parse(readFileSync(resolve(REPO_ROOT, "DEVKIT_FILES.json"), "utf8")) as {
+        files: Record<string, string>;
+      }
+    ).files,
+  );
+
+  it("mentions every rule this project wrote, so none is discoverable only by luck", () => {
     const root = readFileSync(resolve(REPO_ROOT, "CLAUDE.md"), "utf8");
-    for (const file of readdirSync(RULES_DIR).filter((name) => name.endsWith(".md"))) {
-      expect(root, `CLAUDE.md never mentions .claude/rules/${file}`).toContain(file);
-    }
+    expect(unnamedRules(root, ruleFiles, vendored)).toEqual([]);
+  });
+
+  it("asks nothing of a rule devkit vendors: a pull adds those without touching CLAUDE.md", () => {
+    const listed = [".claude/rules/from-devkit.md"];
+    expect(unnamedRules("names ours.md", ["ours.md", "from-devkit.md"], listed)).toEqual([]);
+  });
+
+  it("still catches a project rule CLAUDE.md forgot", () => {
+    const listed = [".claude/rules/from-devkit.md"];
+    expect(unnamedRules("names nothing", ["ours.md", "from-devkit.md"], listed)).toEqual([
+      "ours.md",
+    ]);
+  });
+
+  it("reads a receipt that lists the vendored rules, or the exemption would be empty", () => {
+    // `DEVKIT_FILES.json` is what `sync-devkit.py --pull` writes. A rename there would
+    // quietly make every vendored rule look like this project's own again.
+    expect(vendored).toContain(".claude/rules/engineering.md");
   });
 });
 
