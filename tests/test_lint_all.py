@@ -122,6 +122,67 @@ def test_nothing_to_do_names_the_files_it_had_no_linter_for(
     assert "notes.md" in out and "nothing to do" in out
 
 
+def _declare_the_hook(root: Path, monkeypatch: pytest.MonkeyPatch, verdict: str = "") -> list:
+    """Commit-stage config in `root`, and one file no other pass reads; every tool answers
+    `verdict` and is recorded in the list this returns."""
+    (root / ".pre-commit-config.yaml").write_text("- id: detect-secrets\n", encoding="utf-8")
+    (root / "notes.md").write_text("words\n", encoding="utf-8")
+    monkeypatch.setattr(lint_all, "frontend_tier", lambda: None)
+    calls: list = []
+
+    def record(name: str, cmd: list[str], _hint: str, cwd: Path = root) -> str:
+        calls.append((name, cmd))
+        return verdict
+
+    monkeypatch.setattr(lint_all, "run_tool", record)
+    return calls
+
+
+def test_secrets_targets_are_every_file_only_where_the_hook_is_declared(sandbox: Path):
+    assert lint_all.secrets_targets(["a.md"], skip=False) == [], "no config, nothing to mirror"
+    config = sandbox / ".pre-commit-config.yaml"
+    config.write_text("- id: ruff\n", encoding="utf-8")
+    assert lint_all.secrets_targets(["a.md"], skip=False) == []
+    config.write_text("      - id: detect-secrets\n        exclude: x\n", encoding="utf-8")
+    assert lint_all.secrets_targets(["a.md", "b.py"], skip=False) == ["a.md", "b.py"]
+    assert lint_all.secrets_targets(["a.md"], skip=True) == []
+    assert lint_all.secrets_targets([], skip=False) == []
+
+
+def test_a_narrowed_run_scans_a_file_no_other_pass_reads(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """This runner passed what the commit then refused, a whole dispatch later: the only
+    check before `/ship` that reads a non-Python file is the one that refused it."""
+    calls = _declare_the_hook(sandbox, monkeypatch)
+
+    assert lint_all.main(["--paths", "notes.md"]) == 0
+    assert calls == [
+        (
+            "detect-secrets",
+            [sys.executable, "-m", "pre_commit", "run", "detect-secrets", "--files", "notes.md"],
+        )
+    ]
+
+
+def test_a_refused_scan_fails_the_run(sandbox: Path, monkeypatch: pytest.MonkeyPatch):
+    _declare_the_hook(sandbox, monkeypatch, verdict="# detect-secrets\nfound\n")
+
+    assert lint_all.main(["--paths", "notes.md"]) == 1
+    assert "# detect-secrets" in lint_all.ARTIFACT.read_text(encoding="utf-8")
+
+
+def test_no_secrets_skips_the_scan(sandbox: Path, monkeypatch: pytest.MonkeyPatch):
+    calls = _declare_the_hook(sandbox, monkeypatch)
+
+    assert lint_all.main(["--paths", "notes.md", "--no-secrets"]) == 0
+    assert calls == []
+
+
+def test_secrets_section_has_nothing_to_say_about_no_files():
+    assert lint_all.secrets_section([]) == ""
+
+
 def _hooks_imports(script: Path) -> set[str]:
     """The modules `script` imports that live in `scripts/hooks/`, reached through `sys.path`."""
     hooks = REPO_ROOT / "scripts" / "hooks"
