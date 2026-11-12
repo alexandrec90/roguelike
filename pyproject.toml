@@ -33,8 +33,13 @@ include = ["roguelike*"]
 # `testpaths` is what keeps `scripts/hooks/tests/` out of the application suite —
 # those are the vendored harness's own stdlib-only tests and run separately.
 testpaths = ["tests/"]
-addopts = "-p devkit_temproot"
+# `-m "not local"` deselects the local end-to-end tier from every run but
+# `scripts/e2e.py`'s, whose own `-m local` comes later on the command line and wins.
+addopts = "-p devkit_temproot -m \"not local\""
 pythonpath = ["scripts/pytest-plugins"]
+markers = [
+  "local: needs this workstation (a browser, node_modules); run by scripts/e2e.py, never in CI",
+]
 
 [tool.mypy]
 python_version = "3.12"

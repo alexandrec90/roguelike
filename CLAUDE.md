@@ -423,8 +423,9 @@ Cross-reference this project's own scoped rules here, one line each.
 - **`.claude/rules/skin-lowpoly.md`** (`src/skins/lowpoly/**/*.ts`) — the low-poly skin:
   its projection twin of the pixel skin's, body anchors on the lip, and its budget.
 - **`.claude/rules/local-e2e.md`** (test files, `scripts/e2e.py`) — vendored: the nightly
-  tier for tests only this workstation can run. This project has no `scripts/e2e.py`, so
-  it has no such tier.
+  tier for tests only this workstation can run. Here it is `tests/test_browser_e2e.py`
+  (marker `local`): both skins, the asset lab and the tree lab's GPU parity, loaded in
+  headless Chrome. `python scripts/e2e.py` runs it.
 - **`/art-check`** (`.claude/skills/art-check/`) — the browser capture ritual that turns
   "the tests are green" into "the picture is right". Every art change ends there.
 - **`/preview`** (`.claude/skills/preview/`) — start this worktree's dev server and hand
