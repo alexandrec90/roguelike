@@ -1,7 +1,8 @@
-"""Drive this machine's Chrome headless over the DevTools protocol, stdlib only.
+"""Drive the machine's Chrome headless over the DevTools protocol, stdlib only.
 
-The support half of the `local` tier (`tests/test_browser_e2e.py`, run by
-`scripts/e2e.py`). It exists because the GPU half of a frame is invisible to `tsc` and
+The support half of the `ci_e2e` tier (`tests/test_browser_e2e.py`, run by
+`scripts/e2e.py --ci`). On Windows Chrome is found where its installer puts it; on the
+Linux runner, as `google-chrome` on PATH. It exists because the GPU half of a frame is invisible to `tsc` and
 to Vitest -- a shader that fails to compile type-checks and passes every test, then
 draws a black canvas -- and the only thing that catches it is loading the page.
 

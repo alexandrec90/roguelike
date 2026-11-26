@@ -1,4 +1,5 @@
-"""`scripts/e2e.py`: the local end-to-end tier and the contract the nightly job reads."""
+"""`scripts/e2e.py`: the end-to-end tiers (`local`, and `ci_e2e` under `--ci`) and the
+contract the nightly job and the `E2E` gate job read."""
 
 from __future__ import annotations
 
@@ -41,6 +42,13 @@ JUNIT = """\
   <error message="fixture blew up">e</error>
 </testcase>
 <testcase classname="" name="tests.test_gone" line="1"><error message="collection failure">e</error></testcase>
+</testsuite></testsuites>
+"""
+
+ONE_PASS = """\
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" tests="1">
+<testcase classname="tests.test_browser_e2e" name="test_game_draws[pixel]" file="tests/test_browser_e2e.py"/>
 </testsuite></testsuites>
 """
 
@@ -124,18 +132,54 @@ def test_pytest_argv_selects_the_tier_and_writes_the_report(tmp_path: Path) -> N
     assert "tests/test_browser_e2e.py::test_x" in named
 
 
-def test_the_default_run_deselects_the_tier_and_registers_its_marker() -> None:
+def test_split_args_reads_the_ci_flag_and_keeps_the_named_tests() -> None:
+    assert e2e.split_args([]) == ("local", [])
+    assert e2e.split_args(["tests/t.py::a"]) == ("local", ["tests/t.py::a"])
+    assert e2e.split_args(["--ci"]) == ("ci_e2e", [])
+    assert e2e.split_args(["tests/t.py::a", "--ci"]) == ("ci_e2e", ["tests/t.py::a"])
+
+
+def test_pytest_argv_selects_the_ci_tier_under_its_marker(tmp_path: Path) -> None:
+    argv = e2e.pytest_argv("py", tmp_path / "r.xml", (), e2e.CI_MARKER)
+    assert argv[argv.index("-m", 2) + 1] == "ci_e2e"
+    assert "local" not in argv
+
+
+def test_verdict_names_the_marker_of_an_empty_ci_run() -> None:
+    code, lines = e2e.verdict(0, [], strict=True, marker=e2e.CI_MARKER)
+    assert code == 1
+    assert lines[-1] == "e2e: no ci_e2e test executed, which is not a pass"
+
+
+def test_the_default_run_deselects_both_tiers_and_registers_their_markers() -> None:
     options = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"][
         "pytest"
     ]["ini_options"]
-    assert '-m "not local"' in options["addopts"]
+    assert '-m "not local and not ci_e2e"' in options["addopts"]
     assert any(marker.startswith("local:") for marker in options["markers"])
+    assert any(marker.startswith("ci_e2e:") for marker in options["markers"])
 
 
-def test_the_browser_tests_are_in_the_tier() -> None:
+def test_the_browser_tests_are_in_the_ci_tier() -> None:
     import test_browser_e2e
 
-    assert test_browser_e2e.pytestmark.name == e2e.MARKER
+    assert test_browser_e2e.pytestmark.name == e2e.CI_MARKER
+
+
+def test_no_local_test_left_means_the_project_declares_its_tier_runs_in_ci() -> None:
+    # The nightly job on the PC would otherwise run `-m local`, find nothing and go red.
+    config = tomllib.loads((REPO_ROOT / ".devkit.toml").read_text(encoding="utf-8"))
+    assert config["delivery"]["e2e"] == "ci"
+
+
+def test_the_gate_runs_the_ci_tier_on_the_default_branch_only() -> None:
+    gate = (REPO_ROOT / ".github" / "workflows" / "pr-gate.yml").read_text(encoding="utf-8")
+    job = gate.split("\n  e2e:\n", 1)[1]
+    assert "needs: devkit-drift" in job
+    assert "github.event_name != 'pull_request'" in job
+    assert 'DEVKIT_E2E: "1"' in job
+    assert "npm ci" in job
+    assert "python scripts/e2e.py --ci" in job
 
 
 def _fake_run(report: Path, xml: str, code: int, captured: dict[str, Any]) -> Any:
@@ -180,3 +224,18 @@ def test_main_clears_a_stale_report_so_a_dead_run_is_not_read_as_green(
 
     assert e2e.main([], run=died) == 1
     assert "no local test executed" in capsys.readouterr().out
+
+
+def test_main_under_ci_selects_the_ci_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(e2e, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("DEVKIT_E2E", "1")
+    captured: dict[str, Any] = {}
+    code = e2e.main(["--ci"], run=_fake_run(tmp_path / e2e.JUNIT, ONE_PASS, 0, captured))
+    assert code == 0
+    argv = captured["argv"]
+    assert argv[argv.index("-m", 2) + 1] == "ci_e2e"
+    assert "--ci" not in argv
+    assert "tests" in argv
+    capsys.readouterr()
