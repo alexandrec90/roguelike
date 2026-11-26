@@ -1,33 +1,23 @@
 #!/usr/bin/env python3
-"""The end-to-end tiers: every test too slow or too heavy for the ordinary suite.
+"""The local end-to-end tier: every test that needs this workstation rather than a runner.
 
-Two markers, both deselected by `addopts` in `pyproject.toml` from every other run:
+devkit's nightly `devkit-local-e2e` job runs this in the checkout, and
+`.claude/rules/local-e2e.md` is the contract: exit 0 green, anything else red, each failing
+test printed as pytest's `FAILED <id>` line. What it runs is every test marked `local`,
+which `addopts` in `pyproject.toml` deselects from every other run, CI's included.
 
-- `local` (no flag): tests that need this workstation. devkit's nightly `devkit-local-e2e`
-  job runs this in the checkout, and `.claude/rules/local-e2e.md` is the contract. **This
-  project has none today**, so `.devkit.toml` sets `[delivery] e2e = "ci"` and the nightly
-  job records the project as running in CI; a bare run here is red as an empty run.
-- `ci_e2e` (`--ci`): end-to-end tests a hosted runner can run. The `E2E` job in
-  `.github/workflows/pr-gate.yml` runs `python scripts/e2e.py --ci` on the default branch,
-  after `npm ci`, with `DEVKIT_E2E=1`.
-
-Both runs keep the one contract: exit 0 green, anything else red, each failing test
-printed as pytest's `FAILED <id>` line, which is what devkit's fix pass groups by.
-
-**What is in the CI tier, and why it is there.** The GPU half of a frame is invisible to
-`tsc` and to Vitest (`CLAUDE.md`, *Testing*): a shader that fails to compile, a pass
-sampling the wrong texture, a module that throws on load all type-check and pass every
-unit test, then show a black canvas. So `tests/test_browser_e2e.py` builds the site,
-serves it, and loads it in headless Chrome on SwiftShader's software GL, which the runner
-has as well as this PC: both skins must draw a picture with nothing thrown, every asset in
-the lab must render, and the tree lab's GPU volumes must match the CPU's pixel for pixel.
-Its driver is `tests/headless_chrome.py`.
+**What is in the tier, and why it is here.** The GPU half of a frame is invisible to `tsc`
+and to Vitest (`CLAUDE.md`, *Testing*): a shader that fails to compile, a pass sampling
+the wrong texture, a module that throws on load all type-check and pass every unit test,
+then show a black canvas. CI has no browser, so `tests/test_browser_e2e.py` builds the
+site, serves it, and loads it in this machine's Chrome, headless: both skins must draw a
+picture with nothing thrown, every asset in the lab must render, and the tree lab's GPU
+volumes must match the CPU's pixel for pixel. Its driver is `tests/headless_chrome.py`.
 
 **What it needs, and does not install:** Chrome (or Edge; `CHROME` names another) and
 this checkout's `node_modules`. It does not run `npm ci`, because a worktree's
 `node_modules` is a link to the primary checkout's and a reinstall would rebuild that one
-under whoever is using it; the CI job runs `npm ci` itself. A missing one fails the test
-that needs it, by name.
+under whoever is using it. A missing one fails the test that needs it, by name.
 
 **A skip is a failure when the scheduler runs it** (`DEVKIT_E2E` set): the checkout is the
 one the tests were written for, so nothing has a reason left to skip, and each skip is
@@ -39,7 +29,7 @@ reported as a pass.
 
 **Test ids on the command line run those alone, still inside the tier**, which is how a
 fixer reproduces one `FAILED` line:
-`python scripts/e2e.py --ci "tests/test_browser_e2e.py::test_game_draws[pixel]"`
+`python scripts/e2e.py "tests/test_browser_e2e.py::test_game_draws[pixel]"`
 
 pytest runs under the checkout's `.venv` where it has one, and this script stays
 stdlib-only so the machine's Python can start it. `logs/e2e-junit.xml` is the artifact,
@@ -63,9 +53,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 ENV_FLAG = "DEVKIT_E2E"
 MARKER = "local"
-# `--ci` selects this instead: the end-to-end tests a hosted runner can run.
-CI_FLAG = "--ci"
-CI_MARKER = "ci_e2e"
 JUNIT = Path("logs") / "e2e-junit.xml"
 VENV_INTERPRETERS = (Path(".venv") / "Scripts" / "python.exe", Path(".venv") / "bin" / "python")
 # The nightly job runs with nobody at the keyboard, and a console window opening under
@@ -138,16 +125,7 @@ def first_line(message: str) -> str:
     return message.strip().splitlines()[0] if message.strip() else "no reason"
 
 
-def split_args(argv: Sequence[str]) -> tuple[str, list[str]]:
-    """The marker a run selects (`ci_e2e` under `--ci`, else `local`) and the test ids
-    it names."""
-    marker = CI_MARKER if CI_FLAG in argv else MARKER
-    return marker, [arg for arg in argv if arg != CI_FLAG]
-
-
-def verdict(
-    code: int, found: list[Case], strict: bool, marker: str = MARKER
-) -> tuple[int, list[str]]:
+def verdict(code: int, found: list[Case], strict: bool) -> tuple[int, list[str]]:
     """`(exit code, lines to print)` for pytest's `code` and the cases it reported.
 
     pytest already printed its own `FAILED` lines; these add what it words differently, an
@@ -166,24 +144,21 @@ def verdict(
         for case in skips
     ]
     if not ran:
-        return code or 1, [*lines, f"e2e: no {marker} test executed, which is not a pass"]
+        return code or 1, [*lines, f"e2e: no {MARKER} test executed, which is not a pass"]
     if strict and skips:
         return code or 1, [*lines, f"e2e: {len(skips)} test(s) skipped under the scheduled run"]
     return code, lines
 
 
-def pytest_argv(
-    python: str, report: Path, named: Sequence[str] = (), marker: str = MARKER
-) -> list[str]:
-    # `-m` given here replaces the `-m "not local and not ci_e2e"` in `addopts`: the last
-    # one wins.
+def pytest_argv(python: str, report: Path, named: Sequence[str] = ()) -> list[str]:
+    # `-m` given here replaces the `-m "not local"` in `addopts`: the last one wins.
     return [
         python,
         "-m",
         "pytest",
         *(named or ["tests"]),
         "-m",
-        marker,
+        MARKER,
         "-rfE",
         "-p",
         "no:cacheprovider",
@@ -192,7 +167,7 @@ def pytest_argv(
 
 
 def main(argv: list[str] | None = None, run: Runner = subprocess.run) -> int:
-    marker, named = split_args(sys.argv[1:] if argv is None else argv)
+    named = sys.argv[1:] if argv is None else argv
     report = REPO_ROOT / JUNIT
     report.parent.mkdir(parents=True, exist_ok=True)
     report.unlink(missing_ok=True)
@@ -201,7 +176,7 @@ def main(argv: list[str] | None = None, run: Runner = subprocess.run) -> int:
     # hidden console it was given, not to the pipe the pass reads. Passed on as bytes, so
     # no character pytest printed can raise on the way through a narrower stdout encoding.
     done = run(
-        pytest_argv(python, report, named, marker),
+        pytest_argv(python, report, named),
         cwd=REPO_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -211,7 +186,7 @@ def main(argv: list[str] | None = None, run: Runner = subprocess.run) -> int:
     sys.stdout.flush()
     sys.stdout.buffer.write(done.stdout or b"")
     sys.stdout.buffer.flush()
-    code, lines = verdict(done.returncode, cases(report), scheduled(), marker)
+    code, lines = verdict(done.returncode, cases(report), scheduled())
     for line in lines:
         print(line, flush=True)
     print(f"e2e: exit {code}, report in {JUNIT.as_posix()}", flush=True)

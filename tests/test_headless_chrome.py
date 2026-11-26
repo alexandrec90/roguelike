@@ -1,7 +1,7 @@
 """`tests/headless_chrome.py`: the parts of the browser driver that need no browser.
 
-These run everywhere, the ordinary suite included; the driver's use against a real Chrome
-is `tests/test_browser_e2e.py`, in the `ci_e2e` tier.
+These run everywhere, CI included; the driver's use against a real Chrome is
+`tests/test_browser_e2e.py`, in the `local` tier.
 """
 
 from __future__ import annotations
