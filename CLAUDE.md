@@ -402,6 +402,14 @@ garbage, plus the cost of every layer (`src/game/bench.ts`, `bench-runner.ts`). 
 foregrounded tab with nothing else open; a background tab is throttled and its numbers are
 meaningless. A change that claims a saving shows the before and after.
 
+**The local e2e tier is that page load, automated.** `python scripts/e2e.py` runs
+`e2e/*.e2e.ts` in this machine's Chrome on its real GPU, against a Vite dev server, because
+CI has neither. devkit's nightly `devkit-local-e2e` job runs it; `.claude/rules/local-e2e.md`
+is the contract. The tier is Vitest under `e2e/vitest.config.ts` rather than a pytest
+marker, and `*.e2e.ts` is a name the default run does not include, so `npm run check` and CI
+never reach it. It needs Chrome installed and nothing else: `playwright-core` drives that
+Chrome and downloads no browser.
+
 ## Guardrails
 
 Baseline guardrails — including the instruction-file feedback loop (**never silently

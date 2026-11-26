@@ -16,6 +16,7 @@
 #
 # Regenerate only when adopting the gate: python scripts/hooks/structure_check.py --seed
 dependency::package.json::@types/node = 1
+dependency::package.json::playwright-core = 1
 dependency::package.json::std-env = 1
 dependency::package.json::typescript = 1
 dependency::package.json::vite = 1
