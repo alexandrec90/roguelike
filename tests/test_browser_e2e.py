@@ -1,16 +1,12 @@
 """The game, the asset lab and the tree lab, loaded in a real browser.
 
-The `ci_e2e` tier (`scripts/e2e.py --ci`, the `E2E` job in `pr-gate.yml`): deselected
-from every other run, because it needs a browser and a built site. `CLAUDE.md` says why it
-has to exist -- *the GPU half of a frame is invisible to `tsc` and to Vitest*: a shader
-that does not compile, a pass that samples the wrong texture, a chunk that throws on
-import all pass every unit test and show a black canvas.
-
-Nothing here needs this workstation: the runner's Chrome and `npm ci`'s `node_modules`
-are all it reads, and SwiftShader draws the same pixels on either.
+The `local` tier (`scripts/e2e.py`): deselected from every other run, because CI has no
+browser. `CLAUDE.md` says why it has to exist -- *the GPU half of a frame is invisible to
+`tsc` and to Vitest*: a shader that does not compile, a pass that samples the wrong
+texture, a chunk that throws on import all pass every unit test and show a black canvas.
 
 The site is built with this checkout's Vite into a temporary directory, served from a
-loopback port, and opened in the machine's Chrome, headless, on software GL
+loopback port, and opened in this machine's Chrome, headless, on software GL
 (`headless_chrome.CHROME_FLAGS`), so the verdict is about the code rather than today's
 GPU driver. Software GL is slow -- the pixel skin's first frame takes some seconds --
 so a picture is waited for against a deadline rather than after a fixed frame count.
@@ -33,7 +29,7 @@ from pathlib import Path
 import headless_chrome
 import pytest
 
-pytestmark = pytest.mark.ci_e2e
+pytestmark = pytest.mark.local
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VITE = REPO_ROOT / "node_modules" / "vite" / "bin" / "vite.js"

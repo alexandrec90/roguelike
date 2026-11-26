@@ -152,5 +152,3 @@ typecheck_cmd = ["run", "typecheck"]
 # no hook gates its commit or push, and every check runs after the merge.
 [delivery]
 flow = "direct"
-# No `local` test is left: the browser tier runs as `ci_e2e` in PR Gate's E2E job.
-e2e = "ci"
